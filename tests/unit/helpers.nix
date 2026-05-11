@@ -9,6 +9,18 @@
   reinventing them.
 */
 { pkgs }:
+let
+  evalType =
+    type: config:
+    (pkgs.lib.evalModules {
+      modules = [
+        {
+          options.value = pkgs.lib.mkOption { inherit type; };
+        }
+        { config.value = config; }
+      ];
+    }).config.value;
+in
 {
   /*
     True iff `expr` raises during evaluation. Standard wrapper over
@@ -38,4 +50,34 @@
       r = module.tryMake user;
     in
     if r.success then null else r.error;
+
+  /*
+    Evaluate a NixOS option type against a config value. Returns
+    the evaluated result (post-defaults, post-coercion). Throws
+    when the type rejects the input; pair with `evalTypeFails` for
+    negative cases.
+
+    Usage:
+      evalType types.identifier "primary"  # → "primary"
+      evalType types.probe { targets = [ "1.1.1.1" ]; }
+  */
+  inherit evalType;
+
+  /*
+    True iff evaluating `type` against `config` throws — the
+    type-rejection assertion for `evalType`.
+
+    `builtins.tryEval` only forces one level; without `deepSeq`,
+    lazy thunks (e.g. element-level checks inside `listOf`) slip
+    past and the test runner later overflows trying to format the
+    unforced result. Matches nftzones' `evalFails` pattern.
+  */
+  evalTypeFails =
+    type: config:
+    !(builtins.tryEval (
+      let
+        r = evalType type config;
+      in
+      builtins.deepSeq r r
+    )).success;
 }

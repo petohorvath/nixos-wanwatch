@@ -41,12 +41,17 @@ in
     expected = true;
   };
 
-  testTypesEmptyInPass1 = {
-    # Pass 1 boundary: `types` is the empty merge of three empty
-    # per-file stubs. Pass 5 fills them — this test fails then,
-    # cueing the assertion to extend with the new type names.
-    expr = wanwatch.types;
-    expected = { };
+  testTypesNamespaceHasMembers = {
+    # `types` is the flattened merge of per-concept type files.
+    # This test asserts that the primitives slot is populated and
+    # reachable — per-type tests in `tests/unit/types/*.nix` cover
+    # the contents.
+    expr = builtins.all (k: wanwatch.types ? ${k}) [
+      "identifier"
+      "positiveInt"
+      "pctInt"
+    ];
+    expected = true;
   };
 
   testProbeAndWanReachable = {

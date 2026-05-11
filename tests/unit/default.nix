@@ -20,6 +20,7 @@ runner.runTests (
   // import ./internal/allocator.nix args
   // import ./internal/marks.nix args
   // import ./internal/tables.nix args
+  // import ./types/primitives.nix args
   // import ./composition.nix args
   // import ./skeleton.nix args
 )
