@@ -60,11 +60,17 @@
               {
                 src = ./daemon;
                 nativeBuildInputs = [ pkgs.go ];
-                # No external Go deps in Pass 1; disable network paths so the
-                # build remains hermetic even if a stray import sneaks in.
-                GOFLAGS = "-mod=mod";
+                # External deps are vendored under `daemon/vendor/` so the
+                # build stays hermetic — Go's proxy/sumdb fetches are
+                # disabled to make any accidental network access fail
+                # loudly instead of silently downloading.
+                GOFLAGS = "-mod=vendor";
                 GOPROXY = "off";
                 GOSUMDB = "off";
+                # vishvananda/netlink pulls in netns, which uses cgo at
+                # build time even though wanwatch never touches netns.
+                # Pure-Go is sufficient for everything we need.
+                CGO_ENABLED = "0";
               }
               ''
                 # Go 1.24+ refuses to honour go.mod that sits directly in a

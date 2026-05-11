@@ -22,5 +22,9 @@ _: {
     "result"
     "result-*"
     ".direnv/**"
+    # Vendored Go deps are upstream-formatted; reformatting them
+    # creates noise on every `nix fmt` run and would block updates
+    # via `go mod vendor`.
+    "daemon/vendor/**"
   ];
 }

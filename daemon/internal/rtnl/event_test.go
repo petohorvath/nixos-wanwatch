@@ -81,7 +81,7 @@ func TestDiffEmitsForNewInterfaces(t *testing.T) {
 func TestDiffSuppressesUnchanged(t *testing.T) {
 	t.Parallel()
 	state := map[string]LinkState{
-		"eth0": {Name: "eth0", Carrier: CarrierUp, Operstate: OperstateUp},
+		"eth0":  {Name: "eth0", Carrier: CarrierUp, Operstate: OperstateUp},
 		"wwan0": {Name: "wwan0", Carrier: CarrierDown, Operstate: OperstateDown},
 	}
 	got := Diff(state, state)
