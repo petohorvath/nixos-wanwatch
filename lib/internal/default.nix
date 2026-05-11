@@ -18,6 +18,10 @@
                       cross-checks against probe.families).
     5. `group`      — depends on primitives and member. Group value
                       type — composes Members under a Strategy.
+    6. `selector`   — depends on member. Pure decision logic; mirror
+                      of `daemon/internal/selector`.
+    7. `allocator`  — leaf. Hash+probe int allocator.
+    8. `marks` / `tables` — depend on allocator. Thin wrappers.
 */
 { lib, libnet }:
 let
@@ -43,6 +47,11 @@ let
     internal = { inherit primitives member; };
   };
 
+  selector = import ./selector.nix {
+    inherit lib libnet;
+    internal = { inherit member; };
+  };
+
   allocator = import ./allocator.nix {
     inherit lib libnet;
     internal = { inherit primitives; };
@@ -65,6 +74,7 @@ in
     member
     wan
     group
+    selector
     allocator
     marks
     tables
