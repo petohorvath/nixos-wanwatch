@@ -31,13 +31,14 @@
 
       checks = forAllSystems (pkgs: {
         format = (treefmtFor pkgs).config.build.check self;
+        unit = import ./tests/unit { inherit pkgs; };
       });
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShellNoCC {
           packages = [
             (treefmtFor pkgs).config.build.wrapper
-            pkgs.nixfmt-rfc-style
+            pkgs.nixfmt
             pkgs.go
             pkgs.gopls
             pkgs.gotools
