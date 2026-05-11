@@ -11,4 +11,4 @@ let
   runner = import ./runner.nix { inherit pkgs; };
   args = { inherit pkgs; };
 in
-runner.runTests (import ./internal/types.nix args)
+runner.runTests (import ./internal/types.nix args // import ./composition.nix args)

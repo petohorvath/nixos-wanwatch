@@ -27,6 +27,8 @@
       treefmtFor = pkgs: treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
     in
     {
+      lib = import ./lib;
+
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
       checks = forAllSystems (pkgs: {
