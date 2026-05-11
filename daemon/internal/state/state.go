@@ -18,14 +18,15 @@ import (
 	"time"
 )
 
-// Version is the state-file schema version. Bumped on incompatible
-// shape changes.
-const Version = 1
+// SchemaVersion is the state-file schema version. Bumped on
+// incompatible shape changes. Pairs with the `schema` key in the
+// rendered JSON and with the Nix-side `config.schemaVersion`.
+const SchemaVersion = 1
 
 // State is the daemon's externalized snapshot, written atomically
 // on every Decision.
 type State struct {
-	Version   int              `json:"version"`
+	Schema    int              `json:"schema"`
 	UpdatedAt time.Time        `json:"updatedAt"`
 	Wans      map[string]Wan   `json:"wans"`
 	Groups    map[string]Group `json:"groups"`
@@ -76,7 +77,7 @@ type Writer struct {
 // time — caller-provided values are ignored.
 func (w *Writer) Write(s State) error {
 	s.UpdatedAt = time.Now().UTC()
-	s.Version = Version
+	s.Schema = SchemaVersion
 
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -90,24 +91,29 @@ func (w *Writer) Write(s State) error {
 	}
 	tmpName := tmp.Name()
 
+	// Tmpfile cleanup is hoisted out of every error path; the
+	// `renamed` flag tells us when the file has been promoted to
+	// its final name and no longer needs cleanup.
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
+
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
 		return fmt.Errorf("state: write %s: %w", tmpName, err)
 	}
 	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
 		return fmt.Errorf("state: chmod %s: %w", tmpName, err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
 		return fmt.Errorf("state: close %s: %w", tmpName, err)
 	}
-
 	if err := os.Rename(tmpName, w.Path); err != nil {
-		os.Remove(tmpName)
 		return fmt.Errorf("state: rename %s → %s: %w", tmpName, w.Path, err)
 	}
+	renamed = true
 	return nil
 }

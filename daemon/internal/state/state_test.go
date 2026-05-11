@@ -60,12 +60,12 @@ func TestWriteIsAtomic(t *testing.T) {
 	}
 }
 
-func TestWriteSetsVersionAndUpdatedAt(t *testing.T) {
+func TestWriteSetsSchemaAndUpdatedAt(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
 
-	if err := w.Write(State{Version: 99}); err != nil {
+	if err := w.Write(State{Schema: 99}); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -77,8 +77,8 @@ func TestWriteSetsVersionAndUpdatedAt(t *testing.T) {
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if out.Version != Version {
-		t.Errorf("Version = %d, want %d (caller-supplied 99 must be overwritten)", out.Version, Version)
+	if out.Schema != SchemaVersion {
+		t.Errorf("Schema = %d, want %d (caller-supplied 99 must be overwritten)", out.Schema, SchemaVersion)
 	}
 	if out.UpdatedAt.IsZero() {
 		t.Errorf("UpdatedAt is zero — Write must stamp it")
@@ -103,13 +103,11 @@ func TestWritePermissionMode(t *testing.T) {
 	}
 }
 
-func TestWriteCleansTmpfileOnRenameFailure(t *testing.T) {
+func TestWriteErrorsOnMissingParentDir(t *testing.T) {
 	t.Parallel()
-	// Force os.Rename to fail by pointing Writer.Path at a file in
-	// a non-existent directory. The tmpfile is created in the
-	// parent dir of `Path`, which also doesn't exist, so
-	// CreateTemp itself fails first — we get an error from
-	// CreateTemp, not from rename. Verifies the error path.
+	// CreateTemp creates the tmpfile in the parent of `Path`. If
+	// that directory doesn't exist, CreateTemp itself fails — the
+	// error must propagate, not be swallowed.
 	bogus := filepath.Join(t.TempDir(), "no-such-dir", "state.json")
 	w := Writer{Path: bogus}
 
@@ -192,12 +190,13 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	}
 }
 
-func TestVersionConstantStable(t *testing.T) {
+func TestSchemaVersionConstantStable(t *testing.T) {
 	t.Parallel()
-	// The Version constant pairs with the schema bump procedure
-	// in PLAN §12 OQ #1. A change here is a load-bearing decision.
-	if Version != 1 {
-		t.Errorf("Version = %d, want 1 (Pass 4 boundary)", Version)
+	// The SchemaVersion constant pairs with the schema bump
+	// procedure in PLAN §12 OQ #1. A change here is a load-bearing
+	// decision.
+	if SchemaVersion != 1 {
+		t.Errorf("SchemaVersion = %d, want 1 (Pass 4 boundary)", SchemaVersion)
 	}
 }
 
