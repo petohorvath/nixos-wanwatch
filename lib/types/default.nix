@@ -31,6 +31,14 @@ let
       internal
       ;
   };
+  member = import ./member.nix {
+    inherit
+      lib
+      libnet
+      primitives
+      internal
+      ;
+  };
   wan = import ./wan.nix {
     inherit
       lib
@@ -43,5 +51,6 @@ in
 lib.mergeAttrsList [
   primitives
   probe
+  member
   wan
 ]

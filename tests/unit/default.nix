@@ -22,6 +22,7 @@ runner.runTests (
   // import ./internal/tables.nix args
   // import ./types/primitives.nix args
   // import ./types/probe.nix args
+  // import ./types/member.nix args
   // import ./composition.nix args
   // import ./skeleton.nix args
 )
