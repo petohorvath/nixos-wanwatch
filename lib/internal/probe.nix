@@ -122,6 +122,11 @@ let
 
   isPct = x: builtins.isInt x && x >= 0 && x <= 100;
 
+  # Closed-set enums. Exposed in the module return so `types/probe.nix`
+  # can derive its enum types from the same lists — single source of
+  # truth on the Nix side. Drift between internal and types would
+  # otherwise let the type system accept a value the validator
+  # rejects, or vice versa.
   validMethods = [ "icmp" ];
   validFamilyHealthPolicies = [
     "all"
@@ -353,4 +358,8 @@ in
     ;
   # Exposed for tests / introspection / module-option defaults.
   inherit defaults;
+  # Single-source enums: `types/probe.nix` derives `probeMethod` and
+  # `probeFamilyHealthPolicy` from these so the option type and the
+  # validator agree by construction.
+  inherit validMethods validFamilyHealthPolicies;
 }

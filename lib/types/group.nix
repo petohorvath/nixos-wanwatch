@@ -34,7 +34,10 @@ let
 
   groupName = primitives.identifier;
 
-  groupStrategy = types.enum [ "primary-backup" ];
+  # Single source of truth: the enum derives from
+  # `internal.group.validStrategies` so the option type and the
+  # validator stay aligned.
+  groupStrategy = types.enum internal.group.validStrategies;
 
   groupTable = types.nullOr primitives.positiveInt;
   groupMark = types.nullOr primitives.positiveInt;

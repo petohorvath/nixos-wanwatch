@@ -271,4 +271,7 @@ in
     max
     ;
   inherit defaults;
+  # Exposed so `types/group.nix` can derive its `groupStrategy`
+  # enum from the same list — single source of truth on the Nix side.
+  inherit validStrategies;
 }

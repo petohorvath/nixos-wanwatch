@@ -32,14 +32,14 @@
 let
   inherit (lib) types mkOption;
 
-  probeMethod = types.enum [ "icmp" ];
+  # Single source of truth: enums come from `internal.probe`'s
+  # registries so the option type and the validator agree by
+  # construction. Without this, adding a method (or family-health
+  # policy) would have to touch two files in lockstep.
+  probeMethod = types.enum internal.probe.validMethods;
+  probeFamilyHealthPolicy = types.enum internal.probe.validFamilyHealthPolicies;
 
   probeTarget = libnet.types.ip;
-
-  probeFamilyHealthPolicy = types.enum [
-    "all"
-    "any"
-  ];
 
   probeThresholds = types.submodule {
     options = {
