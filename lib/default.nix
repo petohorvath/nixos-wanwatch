@@ -27,10 +27,14 @@
 */
 { libnet }:
 let
+  internal = {
+    types = import ./internal/types.nix;
+  };
+
+  probe = import ./probe.nix { inherit libnet internal; };
+
   core = {
-    internal = {
-      types = import ./internal/types.nix;
-    };
+    inherit internal probe;
     version = "0.1.0-dev";
   };
 in
