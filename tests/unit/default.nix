@@ -24,6 +24,7 @@ runner.runTests (
   // import ./types/probe.nix args
   // import ./types/member.nix args
   // import ./types/wan.nix args
+  // import ./types/group.nix args
   // import ./composition.nix args
   // import ./skeleton.nix args
 )
