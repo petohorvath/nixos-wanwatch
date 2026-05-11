@@ -16,16 +16,9 @@ let
   wanwatch = import ../../lib { inherit libnet; };
   inherit (wanwatch) wan;
 
-  evalThrows = expr: !(builtins.tryEval expr).success;
-
-  tryError =
-    user:
-    let
-      r = wan.tryMake user;
-    in
-    if r.success then null else r.error;
-
-  errorMatches = kind: msg: pkgs.lib.hasInfix "[${kind}]" msg;
+  helpers = import ./helpers.nix { inherit pkgs; };
+  inherit (helpers) evalThrows errorMatches;
+  tryError = helpers.tryError wan;
 
   # Valid baselines for each topology.
 

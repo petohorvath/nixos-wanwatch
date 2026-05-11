@@ -63,13 +63,11 @@ in
   # ===== Pure-Nix core invariant =====
 
   testCoreEvaluatesWithoutNixpkgsLib = {
-    # The core library must be importable without `nixpkgs.lib`.
-    # The import takes `{ libnet }` (libnet's own pure-Nix core,
-    # which itself requires no nixpkgs.lib). If wanwatch's core
-    # accidentally reaches for `pkgs.lib` at file scope, this
-    # import alone would fail. Existence of the version attr
-    # proves the eval reached the end of `lib/default.nix`.
-    expr = builtins.isString (import ../../lib { inherit libnet; }).version;
+    # The core library must be importable taking only libnet's own
+    # pure-Nix core — no `nixpkgs.lib`. The let-binding above already
+    # imported it that way; existence of `version` proves the eval
+    # reached the end of `lib/default.nix` without an early throw.
+    expr = builtins.isString wanwatch.version;
     expected = true;
   };
 }

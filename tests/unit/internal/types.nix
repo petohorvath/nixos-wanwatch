@@ -11,6 +11,7 @@
 { pkgs, ... }:
 let
   types = import ../../../lib/internal/types.nix;
+  inherit (import ../helpers.nix { inherit pkgs; }) evalThrows;
 
   # An attrset matching a real wan tag — used in positive cases.
   wanValue = {
@@ -23,8 +24,6 @@ let
     _type = "probe";
     targets = [ "1.1.1.1" ];
   };
-
-  evalThrows = expr: !(builtins.tryEval expr).success;
 in
 {
   # ===== tags — canonical set =====

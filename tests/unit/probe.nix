@@ -12,20 +12,9 @@ let
   wanwatch = import ../../lib { inherit libnet; };
   inherit (wanwatch) probe;
 
-  evalThrows = expr: !(builtins.tryEval expr).success;
-
-  # tryMake helper: returns the error string when it fails, otherwise null.
-  tryError =
-    user:
-    let
-      r = probe.tryMake user;
-    in
-    if r.success then null else r.error;
-
-  # Substring match on the bracketed error-kind tag. The error string
-  # is built as "...[<kind>] <message>; [<kind2>] ...", so a literal
-  # `[kind]` substring is sufficient to assert presence.
-  errorMatches = kind: msg: pkgs.lib.hasInfix "[${kind}]" msg;
+  helpers = import ./helpers.nix { inherit pkgs; };
+  inherit (helpers) evalThrows errorMatches;
+  tryError = helpers.tryError probe;
 
   minimalInput = {
     targets = [ "1.1.1.1" ];
