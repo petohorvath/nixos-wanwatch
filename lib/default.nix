@@ -32,9 +32,10 @@ let
   };
 
   probe = import ./probe.nix { inherit libnet internal; };
+  wan = import ./wan.nix { inherit libnet internal probe; };
 
   core = {
-    inherit internal probe;
+    inherit internal probe wan;
     version = "0.1.0-dev";
   };
 in

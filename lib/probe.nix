@@ -398,6 +398,10 @@ let
 
   toJSON = p: builtins.toJSON (toJSONValue p);
 
+  # Exposed for callers that need the JSON-shape attrset before
+  # serialization — e.g. `wan.toJSON` embeds the probe as a nested
+  # object rather than a nested JSON string.
+
   # ===== Equality and ordering =====
 
   eq = a: b: a == b;
@@ -430,6 +434,7 @@ in
     tryMake
     isProbe
     toJSON
+    toJSONValue
     ;
   inherit
     method
