@@ -35,6 +35,7 @@ in
     member
     wan
     group
+    marks
     ;
   version = "0.1.0-dev";
 }

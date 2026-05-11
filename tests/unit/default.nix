@@ -18,6 +18,7 @@ runner.runTests (
   // import ./internal/wan.nix args
   // import ./internal/group.nix args
   // import ./internal/allocator.nix args
+  // import ./internal/marks.nix args
   // import ./composition.nix args
   // import ./skeleton.nix args
 )
