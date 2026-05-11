@@ -16,6 +16,8 @@
                       (labelled WAN reference within a group).
     4. `wan`        — depends on primitives and probe (family-coupling
                       cross-checks against probe.families).
+    5. `group`      — depends on primitives and member. Group value
+                      type — composes Members under a Strategy.
 */
 { lib, libnet }:
 let
@@ -35,6 +37,11 @@ let
     inherit lib libnet;
     internal = { inherit primitives probe; };
   };
+
+  group = import ./group.nix {
+    inherit lib libnet;
+    internal = { inherit primitives member; };
+  };
 in
 {
   inherit
@@ -42,5 +49,6 @@ in
     probe
     member
     wan
+    group
     ;
 }

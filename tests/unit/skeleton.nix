@@ -59,6 +59,10 @@ let
       module = wanwatch.wan;
       predicate = "isWan";
     };
+    group = {
+      module = wanwatch.group;
+      predicate = "isGroup";
+    };
   };
 
   # ===== Test generation =====

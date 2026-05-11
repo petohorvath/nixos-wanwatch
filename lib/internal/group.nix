@@ -1,0 +1,278 @@
+/*
+  wanwatch.group — Group value type.
+
+  A Group is an ordered collection of Members under a Strategy,
+  plus the fwmark + routing-table id used to dispatch its
+  traffic. The Strategy decides which Member carries the group's
+  traffic at any given moment.
+
+  Fields (required unless marked optional):
+
+    name     — wanwatch identifier
+    members  — non-empty list of Members. Each Member input is an
+               attrset passed to `member.make`; the group module
+               owns the construction.
+    strategy — enum, v1: "primary-backup" only. v2 will add
+               "load-balance" once multi-active lands.
+    table    — optional int. Routing-table id. Null means
+               auto-allocated by `internal.tables.allocate`.
+    mark     — optional int. fwmark. Null means auto-allocated
+               by `internal.marks.allocate`.
+
+  ===== make =====
+
+  Input:  attrset of fields (any subset of optionals; required
+          fields must be present)
+  Output: tagged group value `{ _type = "group"; ... }` with each
+          member parsed into a member value
+  Throws: aggregated error string if validation fails.
+
+  ===== tryMake =====
+
+  Same as `make` but returns the `tryResult` shape. Aggregates
+  errors across name, members (and each member's own validation),
+  strategy, table, mark, and the duplicate-member cross-check.
+
+  Error kinds:
+
+    groupInvalidName       — name ∉ valid identifier
+    groupNoMembers         — empty members list
+    groupInvalidMember     — embedded member.make rejected (forwarded)
+    groupDuplicateMember   — same WAN referenced by multiple members
+    groupInvalidStrategy   — strategy ∉ {"primary-backup"}
+    groupInvalidTable      — table set but not a positive integer
+    groupInvalidMark       — mark set but not a positive integer
+
+  ===== Accessors =====
+
+  `name`, `members` (list of member values), `strategy`, `table`,
+  `mark`, `wans` (derived: list of WAN-name strings referenced by
+  the group's members).
+
+  ===== Equality and ordering =====
+
+  `eq` is structural attrset equality. `compare` derives from the
+  canonical JSON form. `lt`/`le`/`gt`/`ge`/`min`/`max` derive from
+  `compare`.
+
+  ===== toJSON =====
+
+  Returns a JSON string. Members are embedded as nested objects via
+  `member.toJSONValue` rather than as nested JSON strings.
+*/
+{
+  lib,
+  libnet,
+  internal,
+}:
+let
+  inherit (internal.primitives)
+    hasTag
+    tryOk
+    tryErr
+    check
+    isValidName
+    orderingByString
+    ;
+  formatErrors = internal.primitives.formatErrors "group.make";
+  inherit (internal) member;
+
+  tag = "group";
+  isGroup = hasTag tag;
+
+  # ===== Defaults =====
+
+  defaults = {
+    strategy = "primary-backup";
+    table = null;
+    mark = null;
+  };
+
+  validStrategies = [ "primary-backup" ];
+
+  # ===== Validation helpers =====
+
+  isPositiveInt = x: builtins.isInt x && x > 0;
+
+  # Parse every member input in one pass. Returns the partitioned
+  # results — member.tryMake speaks the standard tryResult shape.
+  parseMembers =
+    members:
+    let
+      p = lib.partition (r: r.success) (builtins.map member.tryMake members);
+    in
+    {
+      parsed = builtins.map (r: r.value) p.right;
+      errors = builtins.map (r: r.error) p.wrong;
+    };
+
+  # ===== Field-level validators =====
+
+  validateName =
+    name:
+    check "groupInvalidName" (isValidName name)
+      "name must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON name}";
+
+  validateMembers =
+    members:
+    if !(builtins.isList members) then
+      check "groupInvalidMember" false "members must be a list"
+    else if members == [ ] then
+      check "groupNoMembers" false "members must be non-empty"
+    else
+      builtins.map (e: lib.nameValuePair "groupInvalidMember" e) (parseMembers members).errors;
+
+  validateStrategy =
+    strategy:
+    check "groupInvalidStrategy" (builtins.elem strategy validStrategies)
+      "strategy must be one of ${builtins.toJSON validStrategies}; got ${builtins.toJSON strategy}";
+
+  validateTable =
+    table:
+    if table == null then
+      [ ]
+    else
+      check "groupInvalidTable" (isPositiveInt table)
+        "table must be a positive integer; got ${builtins.toJSON table}";
+
+  validateMark =
+    mark:
+    if mark == null then
+      [ ]
+    else
+      check "groupInvalidMark" (isPositiveInt mark)
+        "mark must be a positive integer; got ${builtins.toJSON mark}";
+
+  # Cross-check across already-parsed members. Run only when every
+  # member parsed cleanly — otherwise the wan list contains nulls.
+  detectDuplicateMembers =
+    parsedMembers:
+    let
+      wans = builtins.map member.wan parsedMembers;
+      counts = lib.foldl' (acc: w: acc // { ${w} = (acc.${w} or 0) + 1; }) { } wans;
+      dups = lib.filterAttrs (_: c: c > 1) counts;
+    in
+    lib.mapAttrsToList (
+      name: _:
+      lib.nameValuePair "groupDuplicateMember" "wan '${name}' is referenced by more than one member"
+    ) dups;
+
+  # ===== Aggregated validation + construction =====
+
+  mergeWithDefaults = user: {
+    name = user.name or null;
+    members = user.members or [ ];
+    strategy = user.strategy or defaults.strategy;
+    table = user.table or null;
+    mark = user.mark or null;
+  };
+
+  collectErrors =
+    cfg: membersResult:
+    let
+      membersList = builtins.isList cfg.members;
+      membersClean = membersList && cfg.members != [ ] && membersResult.errors == [ ];
+
+      structuralErrs =
+        validateName cfg.name
+        ++ validateMembers cfg.members
+        ++ validateStrategy cfg.strategy
+        ++ validateTable cfg.table
+        ++ validateMark cfg.mark;
+
+      duplicateErrs = if membersClean then detectDuplicateMembers membersResult.parsed else [ ];
+    in
+    structuralErrs ++ duplicateErrs;
+
+  buildValue = cfg: parsedMembers: {
+    _type = tag;
+    inherit (cfg)
+      name
+      strategy
+      table
+      mark
+      ;
+    members = parsedMembers;
+  };
+
+  tryMake =
+    user:
+    let
+      cfg = mergeWithDefaults user;
+      membersResult = parseMembers (if builtins.isList cfg.members then cfg.members else [ ]);
+      errors = collectErrors cfg membersResult;
+    in
+    if errors == [ ] then tryOk (buildValue cfg membersResult.parsed) else tryErr (formatErrors errors);
+
+  make =
+    user:
+    let
+      r = tryMake user;
+    in
+    if r.success then r.value else builtins.throw r.error;
+
+  # ===== Accessors =====
+
+  name = g: g.name;
+  members = g: g.members;
+  strategy = g: g.strategy;
+  table = g: g.table;
+  mark = g: g.mark;
+  wans = g: builtins.map member.wan g.members;
+
+  # ===== Serialization =====
+
+  toJSONValue = g: {
+    _type = tag;
+    inherit (g)
+      name
+      strategy
+      table
+      mark
+      ;
+    members = builtins.map member.toJSONValue g.members;
+  };
+
+  toJSON = g: builtins.toJSON (toJSONValue g);
+
+  # ===== Equality and ordering =====
+
+  eq = a: b: a == b;
+  inherit (orderingByString toJSON)
+    compare
+    lt
+    le
+    gt
+    ge
+    min
+    max
+    ;
+in
+{
+  inherit
+    make
+    tryMake
+    isGroup
+    toJSON
+    toJSONValue
+    ;
+  inherit
+    name
+    members
+    strategy
+    table
+    mark
+    wans
+    ;
+  inherit
+    eq
+    compare
+    lt
+    le
+    gt
+    ge
+    min
+    max
+    ;
+  inherit defaults;
+}

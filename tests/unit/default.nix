@@ -16,6 +16,7 @@ runner.runTests (
   // import ./internal/probe.nix args
   // import ./internal/member.nix args
   // import ./internal/wan.nix args
+  // import ./internal/group.nix args
   // import ./composition.nix args
   // import ./skeleton.nix args
 )
