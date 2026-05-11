@@ -1,0 +1,22 @@
+# nix build output symlinks
+result
+result-*
+
+# direnv
+.direnv/
+
+# go build output
+/daemon/wanwatchd
+/daemon/dist/
+
+# go test artifacts
+*.test
+*.out
+coverage.txt
+
+# editor autosave / backup files
+*~
+\#*\#
+.\#*
+.idea/
+.vscode/
