@@ -16,7 +16,15 @@
 // and can't appear as a package identifier.
 package selector
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrUnknownStrategy is returned by Apply when g.Strategy doesn't
+// match any registered strategy. Sentinel so callers can match with
+// `errors.Is`.
+var ErrUnknownStrategy = errors.New("selector: unknown strategy")
 
 // Group is the daemon-side view of a Group value. It mirrors the
 // JSON shape produced by `wanwatch.group.toJSON` so the daemon can
@@ -72,7 +80,7 @@ var strategies = map[string]Strategy{
 func Apply(g Group, members []MemberHealth) (Selection, error) {
 	s, ok := strategies[g.Strategy]
 	if !ok {
-		return Selection{}, fmt.Errorf("selector: unknown strategy %q for group %q", g.Strategy, g.Name)
+		return Selection{}, fmt.Errorf("%w %q for group %q", ErrUnknownStrategy, g.Strategy, g.Name)
 	}
 	return s(g, members), nil
 }

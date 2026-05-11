@@ -45,12 +45,10 @@ func TestApplyRejectsUnknownStrategy(t *testing.T) {
 	}
 }
 
-func TestApplyErrorWrapsForErrorsIs(t *testing.T) {
+func TestApplyUnknownStrategyMatchesSentinel(t *testing.T) {
 	t.Parallel()
-	// Even though we don't expose a sentinel, the error must satisfy
-	// the basic `errors` interface contract (non-nil error path).
 	_, err := Apply(Group{Strategy: "bad"}, nil)
-	if errors.Is(err, nil) {
-		t.Errorf("errors.Is(err, nil) = true, want false")
+	if !errors.Is(err, ErrUnknownStrategy) {
+		t.Errorf("errors.Is(err, ErrUnknownStrategy) = false, want true (err = %v)", err)
 	}
 }
