@@ -68,6 +68,7 @@
   produces a daemon-consumable string.
 */
 {
+  lib,
   libnet,
   internal,
   probe,
@@ -76,7 +77,6 @@ let
   inherit (internal.types)
     tryOk
     tryErr
-    nameValuePair
     check
     parseOptional
     isValidName

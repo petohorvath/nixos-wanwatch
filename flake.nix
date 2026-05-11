@@ -38,7 +38,10 @@
       treefmtFor = pkgs: treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
     in
     {
-      lib = import ./lib { libnet = libnet.lib; };
+      lib = import ./lib {
+        inherit (nixpkgs) lib;
+        libnet = libnet.lib.withLib nixpkgs.lib;
+      };
 
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
@@ -48,7 +51,7 @@
           format = (treefmtFor pkgs).config.build.check self;
           unit = import ./tests/unit {
             inherit pkgs;
-            libnet = libnet.lib;
+            libnet = libnet.lib.withLib pkgs.lib;
           };
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

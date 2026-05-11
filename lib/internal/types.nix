@@ -1,17 +1,21 @@
 /*
-  internal/types — pure-Nix primitives shared across the wanwatch
-  library. Exposed under `wanwatch.internal.types`.
+  internal/types — shared primitives for the wanwatch library.
+  Exposed under `wanwatch.internal.types`.
 
   Sections:
     - Tagging       — `tags`, `hasTag`, `is<Type>`, `ensureTag`
     - tryResult     — `tryOk`, `tryErr`
-    - Error records — `nameValuePair`, `formatErrors`
-    - Validation    — `check`, `parseOptional`, `isValidName`
+    - Validation    — `check`, `parseOptional`, `isValidName`,
+                      `formatErrors`
     - Ordering      — `mkOrdering`, `compareByString`,
                       `orderingByString`
 
-  Pure-Nix — no `nixpkgs.lib`, no `builtins.path`, no I/O. Safe to
-  import from any layer of the lib without bringing in pkgs.
+  Uses `nixpkgs.lib` freely (`lib.nameValuePair`,
+  `lib.concatMapStringsSep`, `lib.partition`, …). The library
+  treats lib as a standard dependency rather than chasing the
+  libnet-style "pure-Nix core" pattern — wanwatch's NixOS module
+  consumes `lib.evalModules` and `lib.types.*` regardless, so
+  there's nothing to be gained by ducking lib at lower layers.
 
   ===== tags =====
 
@@ -22,14 +26,9 @@
 
   ===== hasTag =====
 
-  Inputs:
-    tag — the tag string to test against (e.g. `tags.wan`)
-    v   — any value
-
-  Output: true iff `v` is an attrset, has a `_type` attr, and
-  `_type == tag`. Returns false for non-attrs (strings, ints, null,
-  lists), for attrs without `_type`, and for attrs whose `_type`
-  is a different string.
+  `hasTag tag v`: true iff `v` is an attrset with `_type == tag`.
+  Returns false for non-attrs, attrs without `_type`, and attrs
+  with a different `_type`.
 
   ===== is<Type> =====
 
@@ -39,101 +38,77 @@
 
   ===== tryOk / tryErr =====
 
-  The two constructors of the `tryResult` shape used by every
-  `tryMake` function in the lib:
+  Constructors of the `tryResult` shape used by every `tryMake`:
 
     tryOk  value : { success = true;  value;        error = null;  }
     tryErr error : { success = false; value = null; inherit error; }
 
-  Callers of `tryMake` dispatch on `.success`; on failure they
-  surface `.error` to the user. The `make` variant of each type
-  throws on the same conditions; both paths go through identical
-  validation and share the same error strings.
+  Same shape as libnet's `tryParse` result — interoperable.
 
   ===== ensureTag =====
 
-  Inputs:  tag, ctx, v  — see the section banner below for details.
-  Output:  `v` unchanged if it matches; otherwise throws with a
-           message that mentions both the expected and observed
-           shape. Used by internal helpers that consume a tagged
-           value to fail loudly rather than silently propagating
-           a wrong-typed input.
-
-  ===== nameValuePair =====
-
-  Constructor for the `{ name; value; }` records used as error
-  entries by every `tryMake` validator. Aggregated into a list and
-  rendered by `formatErrors`.
-
-  ===== formatErrors =====
-
-  Inputs:
-    ctx    — caller's name (e.g. `"probe.make"`)
-    errors — list of `nameValuePair` records
-
-  Output: a single string of the shape
-    `<ctx>: [<kind>] <msg>; [<kind2>] <msg2>; ...`
-  Used by every `tryMake` to render the aggregated error list.
+  `ensureTag tag ctx v`: returns `v` if it matches `tag`; otherwise
+  throws with a message mentioning both the expected and the
+  observed shape, prefixed with `ctx` so users can locate the
+  call site without a stack trace.
 
   ===== check =====
 
-  Inputs:
-    kind — error-kind tag (e.g. `"probeInvalidMethod"`)
-    cond — bool; true ⇒ valid
-    msg  — error message string
-
-  Output: `[]` when `cond` is true, otherwise a one-element list
-  with the matching `nameValuePair`. Designed for chaining with `++`
-  in validator helpers: each rule collapses to a single line, and
-  the full validator becomes a `++` cascade of `check ...` calls.
+  `check kind cond msg`: returns `[]` when `cond` is true,
+  otherwise a one-element list with a `{name = kind; value = msg;}`
+  error record. Designed for chaining with `++` so each validation
+  rule collapses to a single line and the full validator becomes
+  a `++` cascade.
 
   ===== parseOptional =====
 
-  Inputs:
-    parser — a function returning a `tryResult` (libnet's tryParse
-             variants fit)
-    input  — the value to parse, may be null
-
-  Output: `tryOk null` when input is null, otherwise `parser input`.
-  Null-passthrough adapter for optional fields (e.g. v4/v6 gateway
-  slots where either may be absent).
+  `parseOptional parser input`: null-passthrough adapter. When
+  `input` is null, returns `tryOk null`. Otherwise delegates to
+  `parser input`. Designed for optional fields like
+  `gateways.{v4,v6}` where either may be absent.
 
   ===== isValidName =====
 
   True iff the input is a non-empty string matching the wanwatch
   identifier shape `[a-zA-Z][a-zA-Z0-9-]*` — used by `wan.name`,
-  `group.name`, and `member.<key>` validators. Matches nftzones'
-  `primitives.identifier` regex.
+  `group.name`, and similar entity-key validators. Stricter than
+  libnet's interface-name check on purpose: identifiers must be
+  unquoted-attr-key-clean, and the regex matches nftzones'
+  `primitives.identifier`.
+
+  ===== formatErrors =====
+
+  `formatErrors ctx errors`: renders a list of `{name; value;}`
+  error records into the canonical aggregated string
+    `<ctx>: [<kind>] <msg>; [<kind2>] <msg2>; …`
+  used by every `tryMake` failure path.
 
   ===== mkOrdering =====
 
-  Inputs:
-    compare — function `T → T → -1 | 0 | 1`
-
-  Output: `{ compare; lt; le; gt; ge; min; max; }` with the
-  remaining six predicates derived in the usual way. Eliminates
-  the per-type ordering-boilerplate block.
+  `mkOrdering compare`: derives `{lt; le; gt; ge; min; max;}` from
+  a `compare : T → T → -1|0|1` function. Returns the input
+  `compare` alongside the derived predicates. Eliminates the
+  per-type ordering-boilerplate block.
 
   Note: `eq` is intentionally not derived — it's structural
-  equality (`==`), not order-based equivalence. The two happen to
-  agree for value types whose `toJSON` is canonical, but conflating
-  them blurs intent.
+  equality (`==`), not order-based equivalence. The two agree for
+  value types with canonical `toJSON`, but conflating them blurs
+  intent.
 
   ===== compareByString =====
 
-  Inputs:
-    toString — function `T → string` (e.g. `toJSON`)
-
-  Output: a `compare` function. Useful for value types without a
-  natural ordering — JSON canonical form gives a stable total
-  order.
+  `compareByString toString a b`: lex-compare via the supplied
+  stringifier. Useful for value types without a natural ordering —
+  JSON canonical form gives a stable, deterministic, round-trippable
+  total order.
 
   ===== orderingByString =====
 
-  Convenience: `orderingByString toString = mkOrdering
-  (compareByString toString)` — the single call value-types use
-  to get their ordering machinery.
+  Convenience composition: `orderingByString toString = mkOrdering
+  (compareByString toString)` — what every value-type module calls
+  to get its ordering machinery in one line.
 */
+{ lib }:
 let
   tags = {
     wan = "wan";
@@ -170,15 +145,12 @@ let
         if builtins.isAttrs v && v ? _type then "${v._type} value" else builtins.typeOf v
       }";
 
-  nameValuePair = name: value: { inherit name value; };
-
   formatErrors =
-    ctx: errors:
-    "${ctx}: " + builtins.concatStringsSep "; " (builtins.map (e: "[${e.name}] ${e.value}") errors);
+    ctx: errors: "${ctx}: " + lib.concatMapStringsSep "; " (e: "[${e.name}] ${e.value}") errors;
 
   check =
     kind: cond: msg:
-    if cond then [ ] else [ (nameValuePair kind msg) ];
+    if cond then [ ] else [ (lib.nameValuePair kind msg) ];
 
   parseOptional = parser: input: if input == null then tryOk null else parser input;
 
@@ -219,7 +191,6 @@ in
     ;
   inherit tryOk tryErr ensureTag;
   inherit
-    nameValuePair
     formatErrors
     check
     parseOptional

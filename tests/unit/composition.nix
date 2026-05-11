@@ -10,8 +10,10 @@
 */
 { pkgs, libnet, ... }:
 let
-  wanwatch = import ../../lib { inherit libnet; };
-  withLibbed = wanwatch.withLib pkgs.lib;
+  wanwatch = import ../../lib {
+    inherit (pkgs) lib;
+    inherit libnet;
+  };
 in
 {
   # ===== lib/default.nix — top-level composition =====
@@ -28,46 +30,28 @@ in
     expected = "wan";
   };
 
-  testWithLibIsFunction = {
-    expr = builtins.isFunction wanwatch.withLib;
+  # ===== types namespace =====
+
+  testTypesNamespaceReachable = {
+    expr = wanwatch ? types;
     expected = true;
   };
 
-  # ===== with-lib — injection contract =====
-
-  testWithLibAddsTypesNamespace = {
-    expr = withLibbed ? types;
-    expected = true;
-  };
-
-  testWithLibPreservesInternal = {
-    # The core's `internal` namespace must be intact after withLib —
-    # injection is additive, not replacement.
-    expr = withLibbed.internal == wanwatch.internal;
-    expected = true;
-  };
-
-  testWithLibPreservesVersion = {
-    expr = withLibbed.version;
-    expected = "0.1.0-dev";
-  };
-
-  testWithLibTypesEmptyInPass1 = {
+  testTypesEmptyInPass1 = {
     # Pass 1 boundary: `types` is empty. This test gets updated when
     # `lib/types.nix` gains members in Pass 5 — its failure will be
     # the cue to extend the assertion with the new type names.
-    expr = withLibbed.types;
-    expected = { };
+    expr = wanwatch.types;
+    expected = {
+      types = { };
+    };
   };
 
-  # ===== Pure-Nix core invariant =====
-
-  testCoreEvaluatesWithoutNixpkgsLib = {
-    # The core library must be importable taking only libnet's own
-    # pure-Nix core — no `nixpkgs.lib`. The let-binding above already
-    # imported it that way; existence of `version` proves the eval
-    # reached the end of `lib/default.nix` without an early throw.
-    expr = builtins.isString wanwatch.version;
+  testProbeAndWanReachable = {
+    expr = builtins.all (k: wanwatch ? ${k}) [
+      "probe"
+      "wan"
+    ];
     expected = true;
   };
 }

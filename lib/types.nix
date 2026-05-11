@@ -1,17 +1,15 @@
 /*
-  wanwatch.types
+  wanwatch.types — NixOS option types for module consumers.
 
-  NixOS option-type integration. Produces module-option types
-  (wan-name, gateway, target, ...) plus `.mk` coercers that validate
-  and return the original value. Requires `nixpkgs.lib` and
-  libnet's full version (core + types); reach this module only
-  through `wanwatch.withLib pkgs.lib` — which delegates
-  `libnet.withLib lib` invocation to `lib/with-lib.nix`.
+  Module-option types (`lib.types.*`) for each wanwatch concept —
+  `wanName`, `gateway`, `target`, etc. — plus `.mk` coercers that
+  validate and return the original value. Imported directly by
+  `lib/default.nix`; available unconditionally at
+  `wanwatch.types.*`.
 
-  Pass 1 boundary: empty stub so the `withLib` contract is fixed
-  from day one. Real types land in Pass 5 (PLAN.md §10), at which
-  point this file grows to flatten per-module type exports under
-  a single `types` namespace — same pattern as
+  Pass 1 boundary: empty stub. Real types land in Pass 5 (PLAN.md
+  §10), at which point this file grows to flatten per-module type
+  exports under a single `types` namespace — same pattern as
   `nix-nftzones/lib/default.nix`.
 */
 { lib, libnet }:

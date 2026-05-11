@@ -74,12 +74,15 @@
   text form. Keys are sorted alphabetically by `builtins.toJSON`,
   which makes the output content-addressable.
 */
-{ libnet, internal }:
+{
+  lib,
+  libnet,
+  internal,
+}:
 let
   inherit (internal.types)
     tryOk
     tryErr
-    nameValuePair
     check
     orderingByString
     ;
@@ -122,12 +125,11 @@ let
   parseTargets =
     targets:
     let
-      results = builtins.map libnet.ip.tryParse targets;
-      parsed = builtins.map (r: r.value) (builtins.filter (r: r.success) results);
-      errors = builtins.map (r: r.error) (builtins.filter (r: !r.success) results);
+      p = lib.partition (r: r.success) (builtins.map libnet.ip.tryParse targets);
     in
     {
-      inherit parsed errors;
+      parsed = builtins.map (r: r.value) p.right;
+      errors = builtins.map (r: r.error) p.wrong;
     };
 
   # ===== Field-level validators =====
@@ -144,7 +146,7 @@ let
     else if targets == [ ] then
       check "probeNoTargets" false "targets must be non-empty"
     else
-      builtins.map (e: nameValuePair "probeInvalidTarget" e) (parseTargets targets).errors;
+      builtins.map (e: lib.nameValuePair "probeInvalidTarget" e) (parseTargets targets).errors;
 
   validateInterval =
     interval:

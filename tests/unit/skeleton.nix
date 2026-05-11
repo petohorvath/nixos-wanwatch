@@ -20,7 +20,10 @@
 */
 { pkgs, libnet, ... }:
 let
-  wanwatch = import ../../lib { inherit libnet; };
+  wanwatch = import ../../lib {
+    inherit (pkgs) lib;
+    inherit libnet;
+  };
 
   # ===== The required skeleton =====
 

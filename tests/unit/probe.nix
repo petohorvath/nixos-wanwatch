@@ -9,7 +9,10 @@
 */
 { pkgs, libnet, ... }:
 let
-  wanwatch = import ../../lib { inherit libnet; };
+  wanwatch = import ../../lib {
+    inherit (pkgs) lib;
+    inherit libnet;
+  };
   inherit (wanwatch) probe;
 
   helpers = import ./helpers.nix { inherit pkgs; };

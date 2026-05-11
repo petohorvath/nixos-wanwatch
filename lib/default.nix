@@ -1,42 +1,48 @@
 /*
-  wanwatch — pure-Nix library composition.
+  wanwatch — top-level library composition.
 
-  Top-level entry point. Assembles the core (pure-Nix; no
-  `nixpkgs.lib` dependency at this layer) and exposes `withLib` as
-  the opt-in extension point that injects `nixpkgs.lib` to unlock
-  NixOS option types.
-
-  Input contract:
-    libnet — nix-libnet's pure-Nix core (the value at
-             `inputs.libnet.lib`). Used by value-type modules
-             (wan / probe / …) for IP, CIDR, and interface-name
-             validation. Required even when consumers don't call
-             `withLib`, because the core types reference libnet
-             constructors at parse time.
+  Required inputs:
+    lib    — `nixpkgs.lib`. Used throughout (`lib.types.*`,
+             `lib.nameValuePair`, `lib.partition`, …). Treated as
+             a standard dep, not an opt-in extension.
+    libnet — `libnet.lib.withLib lib` — the libnet core plus
+             libnet's option types. Used by validators in
+             `lib/wan.nix` and `lib/types.nix`.
 
   Public surface:
-    wanwatch.internal     — internal helpers (tag primitives, …)
+    wanwatch.internal     — internal helpers (tag primitives,
+                            validators, ordering, …)
+    wanwatch.probe        — Probe value type
+    wanwatch.wan          — WAN value type
+    wanwatch.types        — NixOS option types (`lib.types.*`)
     wanwatch.version      — current library version string
-    wanwatch.withLib lib  — extends core with `types` (option types)
 
-  See PLAN.md §5.1 for the full target API; modules are added
-  bottom-up per PLAN.md §10 build order. Pass 1 covered
-  `internal/types` only — value-type modules (wan, probe, group,
-  member) and pure-function modules (selector, marks, tables,
-  config, snippets) land in later passes.
+  See PLAN.md §5.1 for the full target API; modules land
+  bottom-up per PLAN.md §10.
 */
-{ libnet }:
+{ lib, libnet }:
 let
   internal = {
-    types = import ./internal/types.nix;
+    types = import ./internal/types.nix { inherit lib; };
   };
 
-  probe = import ./probe.nix { inherit libnet internal; };
-  wan = import ./wan.nix { inherit libnet internal probe; };
-
-  core = {
-    inherit internal probe wan;
-    version = "0.1.0-dev";
+  probe = import ./probe.nix { inherit lib libnet internal; };
+  wan = import ./wan.nix {
+    inherit
+      lib
+      libnet
+      internal
+      probe
+      ;
   };
+  types = import ./types.nix { inherit lib libnet; };
 in
-core // { withLib = import ./with-lib.nix core libnet; }
+{
+  inherit
+    internal
+    probe
+    wan
+    types
+    ;
+  version = "0.1.0-dev";
+}

@@ -10,7 +10,7 @@
 */
 { pkgs, ... }:
 let
-  types = import ../../../lib/internal/types.nix;
+  types = import ../../../lib/internal/types.nix { inherit (pkgs) lib; };
   inherit (import ../helpers.nix { inherit pkgs; }) evalThrows;
 
   # An attrset matching a real wan tag — used in positive cases.
@@ -273,27 +273,20 @@ in
     expected = false;
   };
 
-  # ===== nameValuePair =====
-
-  testNameValuePairStructure = {
-    expr = types.nameValuePair "foo" "bar";
-    expected = {
-      name = "foo";
-      value = "bar";
-    };
-  };
-
   # ===== formatErrors =====
+  #
+  # Uses lib.nameValuePair to build error records — same shape as
+  # nixpkgs convention.
 
   testFormatErrorsSingleEntry = {
-    expr = types.formatErrors "probe.make" [ (types.nameValuePair "probeNoTargets" "no targets") ];
+    expr = types.formatErrors "probe.make" [ (pkgs.lib.nameValuePair "probeNoTargets" "no targets") ];
     expected = "probe.make: [probeNoTargets] no targets";
   };
 
   testFormatErrorsMultipleEntries = {
     expr = types.formatErrors "wan.make" [
-      (types.nameValuePair "wanInvalidName" "name is empty")
-      (types.nameValuePair "wanNoGateways" "no gateway set")
+      (pkgs.lib.nameValuePair "wanInvalidName" "name is empty")
+      (pkgs.lib.nameValuePair "wanNoGateways" "no gateway set")
     ];
     expected = "wan.make: [wanInvalidName] name is empty; [wanNoGateways] no gateway set";
   };
