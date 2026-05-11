@@ -42,6 +42,11 @@ let
     inherit lib libnet;
     internal = { inherit primitives member; };
   };
+
+  allocator = import ./allocator.nix {
+    inherit lib libnet;
+    internal = { inherit primitives; };
+  };
 in
 {
   inherit
@@ -50,5 +55,6 @@ in
     member
     wan
     group
+    allocator
     ;
 }
