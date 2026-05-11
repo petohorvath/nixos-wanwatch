@@ -46,6 +46,7 @@ let
       primitives
       internal
       ;
+    probeTypes = probe;
   };
 in
 lib.mergeAttrsList [
