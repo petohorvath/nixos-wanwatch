@@ -128,7 +128,7 @@ This table lives in `docs/glossary.md` and is referenced from
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  modules/wanwatch.nix                                              │
-│    - validates via lib/types.nix                                   │
+│    - validates via lib/types                                       │
 │    - calls lib/marks.allocate, lib/tables.allocate                 │
 │    - renders lib/config.toJSON → /etc/wanwatch/config.json         │
 │    - emits systemd unit: ExecStart = wanwatchd --config=…          │
@@ -209,19 +209,30 @@ different, explicitly-documented skeleton (`compute` / `allocate` /
 
 Module-level layout:
 
+Layout mirrors `nix-nftzones`: per-concept files split between
+`lib/internal/<name>.nix` (operational code — `make`, `tryMake`,
+predicates, accessors, `toJSON`) and `lib/types/<name>.nix`
+(NixOS option types). `lib/default.nix` composes both halves
+and exposes convenience aliases (`wanwatch.probe`, `wanwatch.wan`)
+that resolve to the operational modules.
+
 | File | Exports |
 |---|---|
-| `lib/default.nix` | top-level entry; assembles all modules; takes `{ lib, libnet }` |
-| `lib/wan.nix` | `wan` type + skeleton; accessors `name`, `interface`, `gatewayV4`, `gatewayV6`, `families` (returns the set of families with declared gateways), `targets` |
-| `lib/probe.nix` | `probe` type + skeleton; nested `thresholds`, `hysteresis`; `familyHealthPolicy` |
-| `lib/group.nix` | `group` type + skeleton; `member` type + skeleton; accessors `members`, `strategy`, `table`, `mark` |
-| `lib/selector.nix` | pure `compute : group → memberHealth → selection` + closed-set strategy registry (v1: `primary-backup` only) |
-| `lib/marks.nix` | `allocate : groupNames → { <group> = <mark>; … }` deterministic, hash + linear-probe (per Open Question 2) |
-| `lib/tables.nix` | `allocate : groupNames → { <group> = <tableId>; … }` deterministic, same scheme as marks |
-| `lib/config.nix` | `toDaemonJson : evaluatedConfig → string` (canonical, sorted keys) |
-| `lib/snippets.nix` | nftzones-integration helpers (mark refs, mangle statements) |
-| `lib/types.nix` | flattened NixOS option types (`lib.types.*`) for module consumption |
-| `lib/internal/types.nix` | `_type` tagging helpers, `tryOk`, `tryErr`, shared validators, ordering primitives |
+| `lib/default.nix` | top-level entry; composes `internal` + `types`; exposes `probe` / `wan` aliases |
+| `lib/internal/default.nix` | three-tier composition (primitives → probe → wan) |
+| `lib/internal/primitives.nix` | generic helpers: `hasTag`, `ensureTag`, `tryOk`/`tryErr`, `check`, `parseOptional`, `formatErrors`, `isValidName`, `mkOrdering`, `compareByString`, `orderingByString` |
+| `lib/internal/probe.nix` | `probe` value type — `make`, `tryMake`, `isProbe`, accessors, `families`, full skeleton; owns `_type = "probe"` |
+| `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `isWan`, accessors, family-coupling, full skeleton; owns `_type = "wan"` |
+| `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
+| `lib/internal/selector.nix` *(Pass 4)* | pure `compute` + closed-set strategy registry (v1: `primary-backup`) |
+| `lib/internal/marks.nix` *(Pass 3)* | `allocate : groupNames → { <group> = <mark>; … }` deterministic |
+| `lib/internal/tables.nix` *(Pass 3)* | `allocate : groupNames → { <group> = <tableId>; … }` deterministic |
+| `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string` |
+| `lib/internal/snippets.nix` *(Pass 5)* | nftzones-integration helpers |
+| `lib/types/default.nix` | aggregates per-type option-type files via `lib.mergeAttrsList` |
+| `lib/types/primitives.nix` | shared option-type primitives (Pass 5) |
+| `lib/types/probe.nix` | probe-related NixOS option types (Pass 5) |
+| `lib/types/wan.nix` | wan-related NixOS option types (Pass 5) |
 
 ### 5.2 NixOS module
 
@@ -831,9 +842,12 @@ at HEAD.
 
 - `flake.nix` skeleton (inputs: nixpkgs, libnet, treefmt-nix;
   outputs: lib, formatter, empty checks)
-- `lib/internal/types.nix` — `_type` tagging, `tryOk`, `tryErr`
-- `lib/types.nix` — stub for NixOS option types (real types in
-  Pass 5)
+- `lib/internal/primitives.nix` — generic helpers (`hasTag`,
+  `tryOk`, `tryErr`, `check`, `parseOptional`, `formatErrors`,
+  `isValidName`, `mkOrdering`, `compareByString`, `orderingByString`)
+- `lib/internal/default.nix` — three-tier composition
+- `lib/types/{default,primitives,probe,wan}.nix` — stubs for NixOS
+  option types (real types in Pass 5)
 - `tests/unit/runner.nix` — `lib.runTests` derivation wrapper
 - `daemon/go.mod` skeleton + `daemon/internal/probe/stats.go`
   (pure sliding-window math) + tests
@@ -845,13 +859,14 @@ non-trivial tests, but the infrastructure works).
 
 ### Pass 2 — leaf value types
 
-- `lib/wan.nix` + tests — `gateways = { v4; v6; }` shape; at least
-  one of v4/v6 required (validation in `make`/`tryMake`); accessors
-  `gatewayV4`, `gatewayV6`, `families` (returns the set of families
-  the WAN has gateways for).
-- `lib/probe.nix` + nested `thresholds`, `hysteresis`,
+- `lib/internal/wan.nix` + tests — `gateways = { v4; v6; }` shape;
+  at least one of v4/v6 required (validation in `make`/`tryMake`);
+  accessors `gatewayV4`, `gatewayV6`, `families` (returns the set of
+  families the WAN has gateways for); owns `isWan` predicate.
+- `lib/internal/probe.nix` + nested `thresholds`, `hysteresis`,
   `familyHealthPolicy` + tests — `targets` validated as list of
-  IPs; family of each target detected via `libnet.ip.family`.
+  IPs; family of each target detected via `libnet.ip.family`; owns
+  `isProbe` predicate.
 - `daemon/internal/probe/icmp.go` + tests (`golang.org/x/net/icmp`)
   — handles both ICMP (v4) and ICMPv6 from the start, dispatched by
   target family.
@@ -898,7 +913,7 @@ correctly. End-to-end on a single host without the Nix module.
 ### Pass 5 — surfaces
 
 - `lib/snippets.nix` — nftzones integration helpers
-- `lib/types.nix` — flattened option types
+- `lib/types/*.nix` — flattened option types (per-concept files)
 - `modules/wanwatch.nix` — the NixOS module (creates user/group,
   systemd unit with capabilities per §8, state dir, hooks dir)
 - `daemon/internal/metrics/` — Prometheus + Unix socket listener
@@ -954,8 +969,8 @@ updated tests), not as a slipped-in change.
 Each commit:
 
 - One logical change.
-- Tests live with code (adding `lib/wan.nix` and `tests/unit/wan.nix`
-  is one commit).
+- Tests live with code (adding `lib/internal/wan.nix` and
+  `tests/unit/internal/wan.nix` is one commit).
 - `nix flake check` + `go test ./...` pass at HEAD after the commit.
 
 Subject format (imperative, ≤72 chars):

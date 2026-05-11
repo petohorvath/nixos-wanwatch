@@ -102,8 +102,8 @@ Three tiers, all reachable via `nix flake check`:
 - **integration** — Nix module-evaluation scenarios + rejections.
 - **vm** — `pkgs.testers.nixosTest` end-to-end (Linux + KVM only).
 
-Tests live with code: adding `lib/wan.nix` and `tests/unit/wan.nix`
-is **one commit**. Per public function, required coverage: happy
+Tests live with code: adding `lib/internal/wan.nix` and
+`tests/unit/internal/wan.nix` is **one commit**. Per public function, required coverage: happy
 path; every `throws` branch; every predicate (positive AND negative);
 every boundary; round-trips; total-order properties for `compare`;
 determinism for allocators.
@@ -191,12 +191,20 @@ Cadence in `PLAN.md` §11.10. Two that bear repeating:
 ```
 flake.nix                          # canonical entrypoint
 lib/
-  default.nix
-  wan.nix · probe.nix · group.nix · selector.nix
-  marks.nix · tables.nix · config.nix · snippets.nix
-  types.nix
-  internal/
-    types.nix                      # _type tagging, tryOk/tryErr
+  default.nix                      # composes internal + types
+  internal/                        # operational code per concept
+    default.nix                    # three-tier composition
+    primitives.nix                 # generic helpers (hasTag, tryOk/tryErr, …)
+    probe.nix · wan.nix
+    group.nix · member.nix         # Pass 3
+    selector.nix                   # Pass 4
+    marks.nix · tables.nix         # Pass 3
+    config.nix · snippets.nix      # Pass 4–5
+  types/                           # NixOS option types per concept
+    default.nix                    # flattens per-type files
+    primitives.nix
+    probe.nix · wan.nix
+    # group.nix · member.nix       # Pass 3
 modules/
   wanwatch.nix · telegraf.nix
 daemon/
