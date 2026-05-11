@@ -71,6 +71,8 @@ let
     tryOk
     tryErr
     check
+    tagError
+    partitionTry
     isValidName
     isPositiveInt
     orderingByString
@@ -93,17 +95,9 @@ let
 
   # ===== Validation helpers =====
 
-  # Parse every member input in one pass. Returns the partitioned
-  # results — member.tryMake speaks the standard tryResult shape.
-  parseMembers =
-    members:
-    let
-      p = lib.partition (r: r.success) (builtins.map member.tryMake members);
-    in
-    {
-      parsed = builtins.map (r: r.value) p.right;
-      errors = builtins.map (r: r.error) p.wrong;
-    };
+  # member.tryMake speaks the standard tryResult shape; the
+  # generic partitionTry handles the partition.
+  parseMembers = partitionTry member.tryMake;
 
   # ===== Field-level validators =====
 
@@ -123,7 +117,7 @@ let
     else if members == [ ] then
       check "groupNoMembers" false "members must be non-empty"
     else
-      builtins.map (e: lib.nameValuePair "groupInvalidMember" e) membersResult.errors;
+      builtins.map (tagError "groupInvalidMember") membersResult.errors;
 
   validateStrategy =
     strategy:
@@ -156,8 +150,7 @@ let
       dups = lib.filterAttrs (_: c: c > 1) counts;
     in
     lib.mapAttrsToList (
-      name: _:
-      lib.nameValuePair "groupDuplicateMember" "wan '${name}' is referenced by more than one member"
+      name: _: tagError "groupDuplicateMember" "wan '${name}' is referenced by more than one member"
     ) dups;
 
   # ===== Aggregated validation + construction =====

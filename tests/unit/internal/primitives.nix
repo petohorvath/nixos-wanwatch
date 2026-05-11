@@ -208,6 +208,100 @@ in
     ];
   };
 
+  # ===== tagError =====
+
+  testTagErrorStructure = {
+    expr = primitives.tagError "someKind" "some message";
+    expected = {
+      name = "someKind";
+      value = "some message";
+    };
+  };
+
+  testTagErrorCurriable = {
+    # The typical usage: `map (tagError "kind") errors` tags a list
+    # of error strings with the same kind.
+    expr = builtins.map (primitives.tagError "k") [
+      "msg1"
+      "msg2"
+    ];
+    expected = [
+      {
+        name = "k";
+        value = "msg1";
+      }
+      {
+        name = "k";
+        value = "msg2";
+      }
+    ];
+  };
+
+  # ===== partitionTry =====
+
+  testPartitionTryAllOk = {
+    expr = primitives.partitionTry primitives.tryOk [
+      1
+      2
+      3
+    ];
+    expected = {
+      parsed = [
+        1
+        2
+        3
+      ];
+      errors = [ ];
+    };
+  };
+
+  testPartitionTryAllErr = {
+    expr = primitives.partitionTry (s: primitives.tryErr "bad:${s}") [
+      "a"
+      "b"
+    ];
+    expected = {
+      parsed = [ ];
+      errors = [
+        "bad:a"
+        "bad:b"
+      ];
+    };
+  };
+
+  testPartitionTryMixed = {
+    expr =
+      let
+        parser = x: if x > 0 then primitives.tryOk x else primitives.tryErr "non-positive";
+      in
+      primitives.partitionTry parser [
+        1
+        (-1)
+        2
+        0
+        3
+      ];
+    expected = {
+      parsed = [
+        1
+        2
+        3
+      ];
+      errors = [
+        "non-positive"
+        "non-positive"
+      ];
+    };
+  };
+
+  testPartitionTryEmpty = {
+    expr = primitives.partitionTry primitives.tryOk [ ];
+    expected = {
+      parsed = [ ];
+      errors = [ ];
+    };
+  };
+
   testCheckChainable = {
     # The typical usage: ++ a series of `check` calls into a flat
     # list of errors, with passing checks contributing nothing.

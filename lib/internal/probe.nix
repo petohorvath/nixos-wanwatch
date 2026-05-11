@@ -85,6 +85,8 @@ let
     tryOk
     tryErr
     check
+    tagError
+    partitionTry
     isPositiveInt
     orderingByString
     ;
@@ -126,18 +128,9 @@ let
     "any"
   ];
 
-  # Parse every target string in one pass. Returns the partitioned
-  # results — libnet.ip.tryParse already speaks the standard
-  # `tryResult` shape, so no wrapper is needed.
-  parseTargets =
-    targets:
-    let
-      p = lib.partition (r: r.success) (builtins.map libnet.ip.tryParse targets);
-    in
-    {
-      parsed = builtins.map (r: r.value) p.right;
-      errors = builtins.map (r: r.error) p.wrong;
-    };
+  # libnet.ip.tryParse speaks the standard tryResult shape; the
+  # generic partitionTry handles the partition.
+  parseTargets = partitionTry libnet.ip.tryParse;
 
   # ===== Field-level validators =====
 
@@ -153,7 +146,7 @@ let
     else if targets == [ ] then
       check "probeNoTargets" false "targets must be non-empty"
     else
-      builtins.map (e: lib.nameValuePair "probeInvalidTarget" e) (parseTargets targets).errors;
+      builtins.map (tagError "probeInvalidTarget") (parseTargets targets).errors;
 
   validateInterval =
     interval:

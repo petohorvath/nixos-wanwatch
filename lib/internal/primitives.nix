@@ -49,6 +49,23 @@
   rule collapses to a single line and the full validator becomes
   a `++` cascade.
 
+  ===== tagError =====
+
+  `tagError kind msg`: returns a single `{name = kind; value = msg;}`
+  error record. Equivalent shape to `check kind false msg`'s
+  single-element list, but for the case where the caller already
+  has a sequence of error strings (e.g. from `partitionTry`) and
+  wants to tag each with the same `kind`. Curry-friendly:
+  `builtins.map (tagError "kind") errStrings`.
+
+  ===== partitionTry =====
+
+  `partitionTry parser items`: applies a `tryResult`-returning
+  parser to every item, partitions, returns
+  `{ parsed = [<success values>]; errors = [<error strings>]; }`.
+  Used by `probe.parseTargets` and `group.parseMembers` —
+  callers that need both halves of the partition.
+
   ===== parseOptional =====
 
   `parseOptional parser input`: null-passthrough adapter. When
@@ -132,11 +149,23 @@ let
   formatErrors =
     ctx: errors: "${ctx}: " + lib.concatMapStringsSep "; " (e: "[${e.name}] ${e.value}") errors;
 
+  tagError = lib.nameValuePair;
+
   check =
     kind: cond: msg:
-    if cond then [ ] else [ (lib.nameValuePair kind msg) ];
+    if cond then [ ] else [ (tagError kind msg) ];
 
   parseOptional = parser: input: if input == null then tryOk null else parser input;
+
+  partitionTry =
+    parser: items:
+    let
+      p = lib.partition (r: r.success) (builtins.map parser items);
+    in
+    {
+      parsed = builtins.map (r: r.value) p.right;
+      errors = builtins.map (r: r.error) p.wrong;
+    };
 
   isValidName = s: builtins.isString s && builtins.match "[a-zA-Z][a-zA-Z0-9-]*" s != null;
 
@@ -175,7 +204,9 @@ in
     tryErr
     formatErrors
     check
+    tagError
     parseOptional
+    partitionTry
     isValidName
     isPositiveInt
     mkOrdering
