@@ -11,10 +11,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// mkUpdate builds a LinkUpdate that handleUpdate can consume. The
-// netlink integration is exercised by the VM tier (PLAN §9.4); here
-// we just need a struct shaped like the real one so the change-
-// detection and filter logic can be tested without a netlink socket.
+// mkUpdate builds a LinkUpdate shaped like what netlink emits, so
+// handleUpdate can be exercised without a real netlink socket.
 func mkUpdate(name string, flags uint32, oper netlink.LinkOperState) netlink.LinkUpdate {
 	return netlink.LinkUpdate{
 		IfInfomsg: nl.IfInfomsg{
@@ -39,9 +37,8 @@ func TestCarrierFromFlagsUp(t *testing.T) {
 
 func TestCarrierFromFlagsDown(t *testing.T) {
 	t.Parallel()
-	// IFF_UP set but no IFF_LOWER_UP — admin-up, link-down (cable
-	// unplugged). The daemon needs to treat this as "down" so it
-	// can fast-track the WAN out of the active set.
+	// IFF_UP without IFF_LOWER_UP is admin-up with cable unplugged
+	// — must read as down so the daemon can fast-track failover.
 	got := carrierFromFlags(unix.IFF_UP)
 	if got != CarrierDown {
 		t.Errorf("carrierFromFlags(IFF_UP only) = %v, want CarrierDown", got)
@@ -103,15 +100,12 @@ func TestHandleUpdateFiltersByInterfaceSet(t *testing.T) {
 	s := &Subscriber{Interfaces: map[string]struct{}{"eth0": {}}}
 	state := map[string]LinkState{}
 
-	// wwan0 is not in the watched set — must be filtered out.
 	if _, ok := s.handleUpdate(state, mkUpdate("wwan0", unix.IFF_LOWER_UP, netlink.OperUp)); ok {
 		t.Error("wwan0 emitted despite not being in watched set")
 	}
 	if _, recorded := state["wwan0"]; recorded {
 		t.Error("wwan0 leaked into state map despite filter")
 	}
-
-	// eth0 is in the watched set — must be emitted.
 	if _, ok := s.handleUpdate(state, mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)); !ok {
 		t.Error("eth0 not emitted despite being in watched set")
 	}
@@ -119,9 +113,6 @@ func TestHandleUpdateFiltersByInterfaceSet(t *testing.T) {
 
 func TestHandleUpdateNilInterfaceSetMatchesAll(t *testing.T) {
 	t.Parallel()
-	// Nil Interfaces map → behave as "watch everything". Used in
-	// tests + as a "no filter" sentinel; the daemon always sets a
-	// concrete set.
 	s := &Subscriber{}
 	state := map[string]LinkState{}
 
@@ -132,9 +123,6 @@ func TestHandleUpdateNilInterfaceSetMatchesAll(t *testing.T) {
 
 func TestRunLoopForwardsEvent(t *testing.T) {
 	t.Parallel()
-	// Feed a single update on the fake `updates` channel, then
-	// cancel. runLoop must push the event to `out` and return the
-	// cancellation error.
 	updates := make(chan netlink.LinkUpdate, 1)
 	out := make(chan LinkEvent, 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -162,7 +150,7 @@ func TestRunLoopForwardsEvent(t *testing.T) {
 
 func TestRunLoopReturnsOnUpdatesClosed(t *testing.T) {
 	t.Parallel()
-	// Closing the subscription channel must surface as a non-nil
+	// A closed subscription channel must surface as a non-nil
 	// error so the caller can decide whether to retry.
 	updates := make(chan netlink.LinkUpdate)
 	out := make(chan LinkEvent, 1)
@@ -176,8 +164,6 @@ func TestRunLoopReturnsOnUpdatesClosed(t *testing.T) {
 
 func TestRunLoopCancelsBetweenUpdates(t *testing.T) {
 	t.Parallel()
-	// Empty updates channel, immediate cancellation — runLoop must
-	// honor the ctx without waiting on the channel.
 	updates := make(chan netlink.LinkUpdate)
 	out := make(chan LinkEvent, 1)
 	ctx, cancel := context.WithCancel(context.Background())
