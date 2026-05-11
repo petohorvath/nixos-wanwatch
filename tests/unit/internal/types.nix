@@ -273,4 +273,267 @@ in
       r.success;
     expected = false;
   };
+
+  # ===== nameValuePair =====
+
+  testNameValuePairStructure = {
+    expr = types.nameValuePair "foo" "bar";
+    expected = {
+      name = "foo";
+      value = "bar";
+    };
+  };
+
+  # ===== formatErrors =====
+
+  testFormatErrorsSingleEntry = {
+    expr = types.formatErrors "probe.make" [ (types.nameValuePair "probeNoTargets" "no targets") ];
+    expected = "probe.make: [probeNoTargets] no targets";
+  };
+
+  testFormatErrorsMultipleEntries = {
+    expr = types.formatErrors "wan.make" [
+      (types.nameValuePair "wanInvalidName" "name is empty")
+      (types.nameValuePair "wanNoGateways" "no gateway set")
+    ];
+    expected = "wan.make: [wanInvalidName] name is empty; [wanNoGateways] no gateway set";
+  };
+
+  testFormatErrorsEmpty = {
+    expr = types.formatErrors "ctx" [ ];
+    expected = "ctx: ";
+  };
+
+  # ===== check =====
+
+  testCheckPassReturnsEmpty = {
+    expr = types.check "kind" true "msg";
+    expected = [ ];
+  };
+
+  testCheckFailReturnsRecord = {
+    expr = types.check "kind" false "msg";
+    expected = [
+      {
+        name = "kind";
+        value = "msg";
+      }
+    ];
+  };
+
+  testCheckChainable = {
+    # The typical usage: ++ a series of `check` calls into a flat
+    # list of errors, with passing checks contributing nothing.
+    expr =
+      types.check "k1" true "m1"
+      ++ types.check "k2" false "m2"
+      ++ types.check "k3" true "m3"
+      ++ types.check "k4" false "m4";
+    expected = [
+      {
+        name = "k2";
+        value = "m2";
+      }
+      {
+        name = "k4";
+        value = "m4";
+      }
+    ];
+  };
+
+  # ===== parseOptional =====
+
+  testParseOptionalNullInput = {
+    # Null input short-circuits to tryOk null without calling parser.
+    expr =
+      let
+        parser = _: throw "must not be called";
+      in
+      types.parseOptional parser null;
+    expected = {
+      success = true;
+      value = null;
+      error = null;
+    };
+  };
+
+  testParseOptionalDelegatesNonNull = {
+    expr =
+      let
+        parser = s: types.tryOk "parsed:${s}";
+      in
+      types.parseOptional parser "input";
+    expected = {
+      success = true;
+      value = "parsed:input";
+      error = null;
+    };
+  };
+
+  testParseOptionalPropagatesError = {
+    expr =
+      let
+        parser = _: types.tryErr "bad";
+      in
+      types.parseOptional parser "input";
+    expected = {
+      success = false;
+      value = null;
+      error = "bad";
+    };
+  };
+
+  # ===== isValidName =====
+
+  testIsValidNameAcceptsAlpha = {
+    expr = types.isValidName "primary";
+    expected = true;
+  };
+
+  testIsValidNameAcceptsHyphen = {
+    expr = types.isValidName "home-uplink";
+    expected = true;
+  };
+
+  testIsValidNameAcceptsAlphanumeric = {
+    expr = types.isValidName "wan42";
+    expected = true;
+  };
+
+  testIsValidNameRejectsEmpty = {
+    expr = types.isValidName "";
+    expected = false;
+  };
+
+  testIsValidNameRejectsLeadingDigit = {
+    expr = types.isValidName "1primary";
+    expected = false;
+  };
+
+  testIsValidNameRejectsSpace = {
+    expr = types.isValidName "primary wan";
+    expected = false;
+  };
+
+  testIsValidNameRejectsNonString = {
+    expr = types.isValidName 42;
+    expected = false;
+  };
+
+  # ===== mkOrdering =====
+
+  testMkOrderingExposesAllPrimitives = {
+    expr =
+      let
+        o = types.mkOrdering (
+          a: b:
+          if a < b then
+            -1
+          else if a > b then
+            1
+          else
+            0
+        );
+      in
+      builtins.attrNames o;
+    expected = [
+      "compare"
+      "ge"
+      "gt"
+      "le"
+      "lt"
+      "max"
+      "min"
+    ];
+  };
+
+  testMkOrderingLtDerived = {
+    expr =
+      let
+        o = types.mkOrdering (
+          a: b:
+          if a < b then
+            -1
+          else if a > b then
+            1
+          else
+            0
+        );
+      in
+      o.lt 1 2;
+    expected = true;
+  };
+
+  testMkOrderingMinReturnsLesser = {
+    expr =
+      let
+        o = types.mkOrdering (
+          a: b:
+          if a < b then
+            -1
+          else if a > b then
+            1
+          else
+            0
+        );
+      in
+      o.min 5 3;
+    expected = 3;
+  };
+
+  testMkOrderingMaxReturnsGreater = {
+    expr =
+      let
+        o = types.mkOrdering (
+          a: b:
+          if a < b then
+            -1
+          else if a > b then
+            1
+          else
+            0
+        );
+      in
+      o.max 5 3;
+    expected = 5;
+  };
+
+  # ===== compareByString =====
+
+  testCompareByStringEqual = {
+    expr = types.compareByString builtins.toJSON 42 42;
+    expected = 0;
+  };
+
+  testCompareByStringLess = {
+    # JSON of "a" < JSON of "b" lexicographically.
+    expr = types.compareByString builtins.toJSON "a" "b";
+    expected = -1;
+  };
+
+  testCompareByStringGreater = {
+    expr = types.compareByString builtins.toJSON "b" "a";
+    expected = 1;
+  };
+
+  # ===== orderingByString =====
+
+  testOrderingByStringConvenience = {
+    # orderingByString = mkOrdering ∘ compareByString. Smoke-test
+    # that it actually produces a working ordering attrset.
+    expr =
+      let
+        o = types.orderingByString builtins.toJSON;
+      in
+      [
+        (o.compare 1 1)
+        (o.lt 1 2)
+        (o.min "b" "a")
+      ];
+    expected = [
+      0
+      true
+      "a"
+    ];
+  };
 }
