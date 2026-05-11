@@ -12,9 +12,9 @@ let
   args = { inherit pkgs libnet; };
 in
 runner.runTests (
-  import ./internal/types.nix args
+  import ./internal/primitives.nix args
+  // import ./internal/probe.nix args
+  // import ./internal/wan.nix args
   // import ./composition.nix args
-  // import ./probe.nix args
-  // import ./wan.nix args
   // import ./skeleton.nix args
 )

@@ -71,10 +71,10 @@
   lib,
   libnet,
   internal,
-  probe,
 }:
 let
-  inherit (internal.types)
+  inherit (internal.primitives)
+    hasTag
     tryOk
     tryErr
     check
@@ -82,7 +82,14 @@ let
     isValidName
     orderingByString
     ;
-  formatErrors = internal.types.formatErrors "wan.make";
+  formatErrors = internal.primitives.formatErrors "wan.make";
+  probe = internal.probe;
+
+  # The wan module owns its own `_type` tag string and corresponding
+  # predicate. Other modules reach the predicate via
+  # `internal.wan.isWan`; no centralized type registry.
+  tag = "wan";
+  isWan = hasTag tag;
 
   parseV4 = parseOptional libnet.ipv4.tryParse;
   parseV6 = parseOptional libnet.ipv6.tryParse;
@@ -188,7 +195,7 @@ let
     structuralErrs ++ noGwErrs ++ familyErrs;
 
   buildValue = cfg: v4Result: v6Result: probeResult: {
-    _type = "wan";
+    _type = tag;
     name = cfg.name;
     interface = cfg.interface;
     gateways = {
@@ -219,10 +226,6 @@ let
     in
     if r.success then r.value else builtins.throw r.error;
 
-  # ===== Predicates =====
-
-  isWan = internal.types.isWan;
-
   # ===== Accessors =====
 
   name = w: w.name;
@@ -243,7 +246,7 @@ let
   # ===== Serialization =====
 
   toJSONValue = w: {
-    _type = "wan";
+    _type = tag;
     inherit (w) name interface;
     gateways = {
       v4 = if w.gateways.v4 == null then null else libnet.ipv4.toString w.gateways.v4;

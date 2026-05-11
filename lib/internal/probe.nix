@@ -80,13 +80,20 @@
   internal,
 }:
 let
-  inherit (internal.types)
+  inherit (internal.primitives)
+    hasTag
     tryOk
     tryErr
     check
     orderingByString
     ;
-  formatErrors = internal.types.formatErrors "probe.make";
+  formatErrors = internal.primitives.formatErrors "probe.make";
+
+  # The probe module owns its own `_type` tag string and its
+  # corresponding predicate. Other modules reach the predicate via
+  # `internal.probe.isProbe`; no centralized type registry.
+  tag = "probe";
+  isProbe = hasTag tag;
 
   # ===== Defaults =====
 
@@ -240,7 +247,7 @@ let
     ++ validateFamilyHealthPolicy cfg.familyHealthPolicy;
 
   buildValue = cfg: parsedTargets: {
-    _type = "probe";
+    _type = tag;
     method = cfg.method;
     targets = parsedTargets;
     intervalMs = cfg.intervalMs;
@@ -268,10 +275,6 @@ let
       r = tryMake user;
     in
     if r.success then r.value else builtins.throw r.error;
-
-  # ===== Predicates =====
-
-  isProbe = internal.types.isProbe;
 
   # ===== Accessors =====
 

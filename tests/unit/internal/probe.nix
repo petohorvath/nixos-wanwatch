@@ -1,5 +1,5 @@
 /*
-  Unit tests for `lib/probe.nix` (exposed as `wanwatch.probe`).
+  Unit tests for `lib/internal/probe.nix` (exposed as `wanwatch.probe`).
 
   Coverage discipline per PLAN.md §9.1: every public function
   exercised on positive and negative inputs; every error kind
@@ -9,13 +9,13 @@
 */
 { pkgs, libnet, ... }:
 let
-  wanwatch = import ../../lib {
+  wanwatch = import ../../../lib {
     inherit (pkgs) lib;
     inherit libnet;
   };
   inherit (wanwatch) probe;
 
-  helpers = import ./helpers.nix { inherit pkgs; };
+  helpers = import ../helpers.nix { inherit pkgs; };
   inherit (helpers) evalThrows errorMatches;
   tryError = helpers.tryError probe;
 

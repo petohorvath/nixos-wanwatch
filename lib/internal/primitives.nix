@@ -1,40 +1,36 @@
 /*
-  internal/types — shared primitives for the wanwatch library.
-  Exposed under `wanwatch.internal.types`.
+  internal/primitives — generic helpers shared across the wanwatch
+  library. Exposed under `wanwatch.internal.primitives`.
 
   Sections:
-    - Tagging       — `tags`, `hasTag`, `is<Type>`, `ensureTag`
+    - Tagging       — `hasTag`, `ensureTag`
     - tryResult     — `tryOk`, `tryErr`
     - Validation    — `check`, `parseOptional`, `isValidName`,
                       `formatErrors`
     - Ordering      — `mkOrdering`, `compareByString`,
                       `orderingByString`
 
+  This module owns nothing type-specific. Each value type
+  (probe, wan, …) owns its own `is<Type>` predicate and its
+  own `_type` tag string; this file provides only the
+  type-agnostic infrastructure those modules build on.
+
   Uses `nixpkgs.lib` freely (`lib.nameValuePair`,
-  `lib.concatMapStringsSep`, `lib.partition`, …). The library
-  treats lib as a standard dependency rather than chasing the
-  libnet-style "pure-Nix core" pattern — wanwatch's NixOS module
-  consumes `lib.evalModules` and `lib.types.*` regardless, so
-  there's nothing to be gained by ducking lib at lower layers.
-
-  ===== tags =====
-
-  Canonical tag strings. Exported as a named attrset so callers can
-  reach `tags.wan` rather than open-coding the string `"wan"` —
-  catches typos at evaluation time and lets the test suite assert
-  the full set in one place.
+  `lib.concatMapStringsSep`, etc.).
 
   ===== hasTag =====
 
   `hasTag tag v`: true iff `v` is an attrset with `_type == tag`.
   Returns false for non-attrs, attrs without `_type`, and attrs
-  with a different `_type`.
+  with a different `_type`. Generic — each value type binds it
+  to its own tag string via `is<Type> = primitives.hasTag "<type>"`.
 
-  ===== is<Type> =====
+  ===== ensureTag =====
 
-  Convenience curries of `hasTag` over the canonical tag set:
-    isWan / isProbe / isGroup / isMember. Each is curried so it
-  can be used as a list predicate (`builtins.filter isWan xs`).
+  `ensureTag tag ctx v`: returns `v` if it matches `tag`; otherwise
+  throws with a message mentioning both the expected and the
+  observed shape, prefixed with `ctx` so users can locate the
+  call site without a stack trace.
 
   ===== tryOk / tryErr =====
 
@@ -44,13 +40,6 @@
     tryErr error : { success = false; value = null; inherit error; }
 
   Same shape as libnet's `tryParse` result — interoperable.
-
-  ===== ensureTag =====
-
-  `ensureTag tag ctx v`: returns `v` if it matches `tag`; otherwise
-  throws with a message mentioning both the expected and the
-  observed shape, prefixed with `ctx` so users can locate the
-  call site without a stack trace.
 
   ===== check =====
 
@@ -110,19 +99,16 @@
 */
 { lib }:
 let
-  tags = {
-    wan = "wan";
-    probe = "probe";
-    group = "group";
-    member = "member";
-  };
-
   hasTag = tag: v: builtins.isAttrs v && v ? _type && v._type == tag;
 
-  isWan = hasTag tags.wan;
-  isProbe = hasTag tags.probe;
-  isGroup = hasTag tags.group;
-  isMember = hasTag tags.member;
+  ensureTag =
+    tag: ctx: v:
+    if hasTag tag v then
+      v
+    else
+      builtins.throw "wanwatch: ${ctx}: expected ${tag} value, got ${
+        if builtins.isAttrs v && v ? _type then "${v._type} value" else builtins.typeOf v
+      }";
 
   tryOk = value: {
     success = true;
@@ -135,15 +121,6 @@ let
     value = null;
     inherit error;
   };
-
-  ensureTag =
-    tag: ctx: v:
-    if hasTag tag v then
-      v
-    else
-      builtins.throw "wanwatch: ${ctx}: expected ${tag} value, got ${
-        if builtins.isAttrs v && v ? _type then "${v._type} value" else builtins.typeOf v
-      }";
 
   formatErrors =
     ctx: errors: "${ctx}: " + lib.concatMapStringsSep "; " (e: "[${e.name}] ${e.value}") errors;
@@ -182,15 +159,11 @@ let
   orderingByString = toString: mkOrdering (compareByString toString);
 in
 {
-  inherit tags hasTag;
   inherit
-    isWan
-    isProbe
-    isGroup
-    isMember
-    ;
-  inherit tryOk tryErr ensureTag;
-  inherit
+    hasTag
+    ensureTag
+    tryOk
+    tryErr
     formatErrors
     check
     parseOptional

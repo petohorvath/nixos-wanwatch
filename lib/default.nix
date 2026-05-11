@@ -7,42 +7,29 @@
              a standard dep, not an opt-in extension.
     libnet — `libnet.lib.withLib lib` — the libnet core plus
              libnet's option types. Used by validators in
-             `lib/wan.nix` and `lib/types.nix`.
+             `lib/internal/wan.nix` and (in Pass 5)
+             `lib/types/wan.nix`.
+
+  Layout mirrors nftzones:
+    lib/internal/<name>.nix — operational code (make, tryMake,
+                              accessors, predicates, …)
+    lib/types/<name>.nix    — NixOS option types
 
   Public surface:
-    wanwatch.internal     — internal helpers (tag primitives,
-                            validators, ordering, …)
-    wanwatch.probe        — Probe value type
-    wanwatch.wan          — WAN value type
-    wanwatch.types        — NixOS option types (`lib.types.*`)
-    wanwatch.version      — current library version string
-
-  See PLAN.md §5.1 for the full target API; modules land
-  bottom-up per PLAN.md §10.
+    wanwatch.internal.<name> — operational modules namespaced
+    wanwatch.types           — flattened option types (per-file
+                               merged via `lib/types/default.nix`)
+    wanwatch.probe / .wan    — convenience aliases to the
+                               operational modules
+    wanwatch.version         — current library version string
 */
 { lib, libnet }:
 let
-  internal = {
-    types = import ./internal/types.nix { inherit lib; };
-  };
-
-  probe = import ./probe.nix { inherit lib libnet internal; };
-  wan = import ./wan.nix {
-    inherit
-      lib
-      libnet
-      internal
-      probe
-      ;
-  };
-  types = import ./types.nix { inherit lib libnet; };
+  internal = import ./internal { inherit lib libnet; };
+  types = import ./types { inherit lib libnet internal; };
 in
 {
-  inherit
-    internal
-    probe
-    wan
-    types
-    ;
+  inherit internal types;
+  inherit (internal) probe wan;
   version = "0.1.0-dev";
 }

@@ -23,11 +23,15 @@ in
     expected = "0.1.0-dev";
   };
 
-  testInternalTypesReachable = {
-    # Smoke-test that lib/internal/types is wired through; the module
-    # itself has its own thorough test file.
-    expr = wanwatch.internal.types.tags.wan;
-    expected = "wan";
+  testInternalNamespacesReachable = {
+    # Smoke-test that every operational module is wired through;
+    # each one has its own thorough test file.
+    expr = builtins.all (k: wanwatch.internal ? ${k}) [
+      "primitives"
+      "probe"
+      "wan"
+    ];
+    expected = true;
   };
 
   # ===== types namespace =====
@@ -38,13 +42,11 @@ in
   };
 
   testTypesEmptyInPass1 = {
-    # Pass 1 boundary: `types` is empty. This test gets updated when
-    # `lib/types.nix` gains members in Pass 5 — its failure will be
-    # the cue to extend the assertion with the new type names.
+    # Pass 1 boundary: `types` is the empty merge of three empty
+    # per-file stubs. Pass 5 fills them — this test fails then,
+    # cueing the assertion to extend with the new type names.
     expr = wanwatch.types;
-    expected = {
-      types = { };
-    };
+    expected = { };
   };
 
   testProbeAndWanReachable = {
