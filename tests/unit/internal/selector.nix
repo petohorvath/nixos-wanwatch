@@ -241,6 +241,20 @@ in
     expected = [ "primary-backup" ];
   };
 
+  testStrategiesMatchGroupValidStrategies = {
+    # Drift catcher: every strategy `group.make` accepts must be
+    # implemented by `selector.compute`, and vice versa. Adding a
+    # strategy to one side and forgetting the other would let groups
+    # be constructed and then throw at first selector call —
+    # surface that mismatch at eval time instead.
+    expr =
+      let
+        sortStr = pkgs.lib.sort (a: b: a < b);
+      in
+      sortStr (builtins.attrNames selector.strategies) == sortStr group.validStrategies;
+    expected = true;
+  };
+
   # ===== compute — determinism =====
 
   testComputeDeterministic = {
