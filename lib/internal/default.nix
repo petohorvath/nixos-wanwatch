@@ -52,6 +52,11 @@ let
     inherit lib libnet;
     internal = { inherit allocator; };
   };
+
+  tables = import ./tables.nix {
+    inherit lib libnet;
+    internal = { inherit allocator; };
+  };
 in
 {
   inherit
@@ -62,5 +67,6 @@ in
     group
     allocator
     marks
+    tables
     ;
 }
