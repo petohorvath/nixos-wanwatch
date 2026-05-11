@@ -65,6 +65,13 @@
   unquoted-attr-key-clean, and the regex matches nftzones'
   `primitives.identifier`.
 
+  ===== isPositiveInt =====
+
+  True iff the input is an integer strictly greater than zero.
+  Used by every value-type's positive-int field validators
+  (`weight`, `priority`, `intervalMs`, `windowSize`, `table`,
+  `mark`, …).
+
   ===== formatErrors =====
 
   `formatErrors ctx errors`: renders a list of `{name; value;}`
@@ -133,6 +140,8 @@ let
 
   isValidName = s: builtins.isString s && builtins.match "[a-zA-Z][a-zA-Z0-9-]*" s != null;
 
+  isPositiveInt = x: builtins.isInt x && x > 0;
+
   mkOrdering = compare: {
     inherit compare;
     lt = a: b: compare a b == -1;
@@ -168,6 +177,7 @@ in
     check
     parseOptional
     isValidName
+    isPositiveInt
     mkOrdering
     compareByString
     orderingByString

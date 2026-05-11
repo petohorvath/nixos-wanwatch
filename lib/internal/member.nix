@@ -64,6 +64,7 @@ let
     tryErr
     check
     isValidName
+    isPositiveInt
     orderingByString
     ;
   formatErrors = internal.primitives.formatErrors "member.make";
@@ -77,10 +78,6 @@ let
     weight = 100;
     priority = 1;
   };
-
-  # ===== Validation helpers =====
-
-  isPositiveInt = x: builtins.isInt x && x > 0;
 
   # ===== Field-level validators =====
 

@@ -85,6 +85,7 @@ let
     tryOk
     tryErr
     check
+    isPositiveInt
     orderingByString
     ;
   formatErrors = internal.primitives.formatErrors "probe.make";
@@ -117,7 +118,6 @@ let
 
   # ===== Validation helpers =====
 
-  isPositiveInt = x: builtins.isInt x && x > 0;
   isPct = x: builtins.isInt x && x >= 0 && x <= 100;
 
   validMethods = [ "icmp" ];

@@ -278,6 +278,7 @@ in
     tryMake
     isWan
     toJSON
+    toJSONValue
     ;
   inherit
     name

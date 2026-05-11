@@ -72,6 +72,7 @@ let
     tryErr
     check
     isValidName
+    isPositiveInt
     orderingByString
     ;
   formatErrors = internal.primitives.formatErrors "group.make";
@@ -92,8 +93,6 @@ let
 
   # ===== Validation helpers =====
 
-  isPositiveInt = x: builtins.isInt x && x > 0;
-
   # Parse every member input in one pass. Returns the partitioned
   # results — member.tryMake speaks the standard tryResult shape.
   parseMembers =
@@ -113,14 +112,18 @@ let
     check "groupInvalidName" (isValidName name)
       "name must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON name}";
 
+  # Takes the already-parsed members result from `tryMake`'s top-level
+  # let so the partition isn't redone here. Without this threading,
+  # `parseMembers` ran twice on every happy-path `tryMake` invocation —
+  # once at the top, once inside this validator.
   validateMembers =
-    members:
+    members: membersResult:
     if !(builtins.isList members) then
       check "groupInvalidMember" false "members must be a list"
     else if members == [ ] then
       check "groupNoMembers" false "members must be non-empty"
     else
-      builtins.map (e: lib.nameValuePair "groupInvalidMember" e) (parseMembers members).errors;
+      builtins.map (e: lib.nameValuePair "groupInvalidMember" e) membersResult.errors;
 
   validateStrategy =
     strategy:
@@ -175,7 +178,7 @@ let
 
       structuralErrs =
         validateName cfg.name
-        ++ validateMembers cfg.members
+        ++ validateMembers cfg.members membersResult
         ++ validateStrategy cfg.strategy
         ++ validateTable cfg.table
         ++ validateMark cfg.mark;
