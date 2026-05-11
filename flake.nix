@@ -4,6 +4,16 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+    # nix-libnet provides IP/CIDR/interface validation primitives used
+    # throughout `lib/`. Local-development checkout pinned via an
+    # absolute path: input — relative `path:../nix-libnet` doesn't
+    # resolve cleanly in pure evaluation because the working copy is
+    # staged to `/nix/store/...` before `..` is resolved. Override at
+    # eval time with `--override-input libnet path:../nix-libnet` or
+    # flip the default to a github: URL once libnet has a tagged
+    # release.
+    libnet.url = "git+file:///home/dev/projects/nix-libnet";
+
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -12,6 +22,7 @@
     {
       self,
       nixpkgs,
+      libnet,
       treefmt-nix,
     }:
     let
@@ -27,7 +38,7 @@
       treefmtFor = pkgs: treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
     in
     {
-      lib = import ./lib;
+      lib = import ./lib { libnet = libnet.lib; };
 
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
@@ -35,7 +46,10 @@
         pkgs:
         {
           format = (treefmtFor pkgs).config.build.check self;
-          unit = import ./tests/unit { inherit pkgs; };
+          unit = import ./tests/unit {
+            inherit pkgs;
+            libnet = libnet.lib;
+          };
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           daemon =

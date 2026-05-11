@@ -8,9 +8,9 @@
   introduces `lib/wan.nix`, a test here asserts `wanwatch.wan` is
   reachable.
 */
-{ pkgs, ... }:
+{ pkgs, libnet, ... }:
 let
-  wanwatch = import ../../lib;
+  wanwatch = import ../../lib { inherit libnet; };
   withLibbed = wanwatch.withLib pkgs.lib;
 in
 {
@@ -64,11 +64,12 @@ in
 
   testCoreEvaluatesWithoutNixpkgsLib = {
     # The core library must be importable without `nixpkgs.lib`.
-    # `import ../../lib` itself does the eval; if it accidentally
-    # reaches for `pkgs.lib` (or `inputs.lib`, etc.) at file scope,
-    # this import alone would fail. Existence of the version attr
+    # The import takes `{ libnet }` (libnet's own pure-Nix core,
+    # which itself requires no nixpkgs.lib). If wanwatch's core
+    # accidentally reaches for `pkgs.lib` at file scope, this
+    # import alone would fail. Existence of the version attr
     # proves the eval reached the end of `lib/default.nix`.
-    expr = builtins.isString (import ../../lib).version;
+    expr = builtins.isString (import ../../lib { inherit libnet; }).version;
     expected = true;
   };
 }

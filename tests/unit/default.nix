@@ -6,9 +6,9 @@
   (mirroring `lib/`'s layout) are merged in here as the library
   grows — see PLAN.md §10 build order.
 */
-{ pkgs }:
+{ pkgs, libnet }:
 let
   runner = import ./runner.nix { inherit pkgs; };
-  args = { inherit pkgs; };
+  args = { inherit pkgs libnet; };
 in
 runner.runTests (import ./internal/types.nix args // import ./composition.nix args)
