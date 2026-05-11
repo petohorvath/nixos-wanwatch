@@ -8,16 +8,6 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func TestToInetFamilyAliasesAFConstants(t *testing.T) {
-	t.Parallel()
-	if got := toInetFamily(FamilyV4); netlink.InetFamily(FamilyV4) != got {
-		t.Errorf("toInetFamily(v4) = %d, want %d", got, FamilyV4)
-	}
-	if got := toInetFamily(FamilyV6); netlink.InetFamily(FamilyV6) != got {
-		t.Errorf("toInetFamily(v6) = %d, want %d", got, FamilyV6)
-	}
-}
-
 func TestBuildSourceFilterAccepts(t *testing.T) {
 	t.Parallel()
 	f, err := buildSourceFilter(netlink.ConntrackOrigSrcIP, net.ParseIP("192.0.2.1"))

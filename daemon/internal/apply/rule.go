@@ -22,10 +22,17 @@ type FwmarkRule struct {
 // idempotent regardless of whether a previous daemon run left the
 // rule behind.
 func EnsureRule(r FwmarkRule) error {
+	return ensureRuleVia(netlink.RuleAdd, r)
+}
+
+// ensureRuleVia is EnsureRule parameterized on the rule-adder so
+// tests can drive the EEXIST-swallow branch without a netlink
+// socket.
+func ensureRuleVia(ruleAdd func(*netlink.Rule) error, r FwmarkRule) error {
 	if err := validateRule(r); err != nil {
 		return err
 	}
-	if err := netlink.RuleAdd(buildRule(r)); err != nil {
+	if err := ruleAdd(buildRule(r)); err != nil {
 		if errors.Is(err, unix.EEXIST) {
 			return nil
 		}
@@ -35,8 +42,6 @@ func EnsureRule(r FwmarkRule) error {
 	return nil
 }
 
-// buildRule converts FwmarkRule into the netlink.Rule the kernel
-// consumes.
 func buildRule(r FwmarkRule) *netlink.Rule {
 	rule := netlink.NewRule()
 	rule.Family = int(r.Family)

@@ -1,8 +1,13 @@
 package apply
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 func validFwmarkRule() FwmarkRule {
@@ -37,6 +42,31 @@ func TestValidateRuleAcceptsHappyPath(t *testing.T) {
 	v6.Family = FamilyV6
 	if err := validateRule(v6); err != nil {
 		t.Errorf("validateRule(v6) = %v, want nil", err)
+	}
+}
+
+func TestEnsureRuleSwallowsEEXIST(t *testing.T) {
+	t.Parallel()
+	// A leftover rule from a previous daemon run must not fail
+	// EnsureRule. Locks the contract against a future vendored-
+	// netlink update that drops the %w wrapping on syscall errors.
+	ruleAdd := func(*netlink.Rule) error { return unix.EEXIST }
+	if err := ensureRuleVia(ruleAdd, validFwmarkRule()); err != nil {
+		t.Errorf("ensureRuleVia(EEXIST) = %v, want nil (idempotent)", err)
+	}
+}
+
+func TestEnsureRuleWrapsOtherErrors(t *testing.T) {
+	t.Parallel()
+	// Non-EEXIST errors must propagate, wrapped — callers
+	// distinguish via errors.Is on the underlying syscall errno.
+	ruleAdd := func(*netlink.Rule) error { return fmt.Errorf("kernel: %w", unix.EPERM) }
+	err := ensureRuleVia(ruleAdd, validFwmarkRule())
+	if err == nil {
+		t.Fatal("ensureRuleVia(EPERM) = nil, want wrapped error")
+	}
+	if !errors.Is(err, unix.EPERM) {
+		t.Errorf("errors.Is(err, EPERM) = false; want true so callers can match")
 	}
 }
 

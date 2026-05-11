@@ -31,7 +31,7 @@ func FlushBySource(family Family, ip net.IP) (uint, error) {
 	}
 	n, err := netlink.ConntrackDeleteFilters(
 		netlink.ConntrackTable,
-		toInetFamily(family),
+		netlink.InetFamily(family),
 		origFilter,
 		replyFilter,
 	)
@@ -41,10 +41,12 @@ func FlushBySource(family Family, ip net.IP) (uint, error) {
 	return n, nil
 }
 
-// buildSourceFilter constructs a ConntrackFilter that matches a
-// single IP at the given tuple position. The "any of"-semantics of
-// ConntrackDeleteFilters means each filter is OR-combined at the
-// kernel level.
+// buildSourceFilter constructs a ConntrackFilter matching a single
+// IP at the given tuple position. ConntrackDeleteFilters takes a
+// variadic and OR-combines them in userspace iteration (the kernel
+// has no filter attribute), so passing orig + reply as separate
+// filters is the correct shape — a single filter with both fields
+// set would AND them.
 func buildSourceFilter(tp netlink.ConntrackFilterType, ip net.IP) (*netlink.ConntrackFilter, error) {
 	f := &netlink.ConntrackFilter{}
 	if err := f.AddIP(tp, ip); err != nil {
@@ -53,26 +55,6 @@ func buildSourceFilter(tp netlink.ConntrackFilterType, ip net.IP) (*netlink.Conn
 	return f, nil
 }
 
-// toInetFamily maps the apply Family enum (AF_INET / AF_INET6) to
-// netlink.InetFamily (uint8). Defined locally so the apply API
-// stays free of vishvananda's type names.
-func toInetFamily(f Family) netlink.InetFamily {
-	return netlink.InetFamily(f)
-}
-
 func validateFlush(family Family, ip net.IP) error {
-	if family != FamilyV4 && family != FamilyV6 {
-		return fmt.Errorf("apply: invalid family %d", int(family))
-	}
-	if ip == nil {
-		return fmt.Errorf("apply: ip is nil")
-	}
-	isV4 := ip.To4() != nil
-	if family == FamilyV4 && !isV4 {
-		return fmt.Errorf("apply: ip %s is not v4 but family=v4", ip)
-	}
-	if family == FamilyV6 && isV4 {
-		return fmt.Errorf("apply: ip %s is v4 but family=v6", ip)
-	}
-	return nil
+	return validateFamilyIP(family, ip, "ip")
 }
