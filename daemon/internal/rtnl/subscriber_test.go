@@ -15,14 +15,20 @@ import (
 // handleUpdate can be exercised without a real netlink socket.
 func mkUpdate(name string, flags uint32, oper netlink.LinkOperState) netlink.LinkUpdate {
 	return netlink.LinkUpdate{
-		IfInfomsg: nl.IfInfomsg{
-			IfInfomsg: unix.IfInfomsg{Flags: flags},
-		},
+		Header:    unix.NlMsghdr{Type: unix.RTM_NEWLINK},
+		IfInfomsg: nl.IfInfomsg{IfInfomsg: unix.IfInfomsg{Flags: flags}},
 		Link: &netlink.Device{
-			LinkAttrs: netlink.LinkAttrs{
-				Name:      name,
-				OperState: oper,
-			},
+			LinkAttrs: netlink.LinkAttrs{Name: name, OperState: oper},
+		},
+	}
+}
+
+// mkDelete builds a RTM_DELLINK update for `name`.
+func mkDelete(name string) netlink.LinkUpdate {
+	return netlink.LinkUpdate{
+		Header: unix.NlMsghdr{Type: unix.RTM_DELLINK},
+		Link: &netlink.Device{
+			LinkAttrs: netlink.LinkAttrs{Name: name},
 		},
 	}
 }
@@ -108,6 +114,43 @@ func TestHandleUpdateFiltersByInterfaceSet(t *testing.T) {
 	}
 	if _, ok := s.handleUpdate(state, mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)); !ok {
 		t.Error("eth0 not emitted despite being in watched set")
+	}
+}
+
+func TestHandleUpdateDeleteEmitsDownNotpresent(t *testing.T) {
+	t.Parallel()
+	// A previously up interface that gets RTM_DELLINK must surface
+	// as carrier=down/operstate=notpresent so the selector drops it.
+	s := &Subscriber{}
+	state := map[string]LinkState{}
+	s.handleUpdate(state, mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp))
+
+	ev, ok := s.handleUpdate(state, mkDelete("eth0"))
+	if !ok {
+		t.Fatal("RTM_DELLINK on up iface did not emit")
+	}
+	if ev.Carrier != CarrierDown || ev.Operstate != OperstateNotPresent {
+		t.Errorf("event = %+v, want carrier=down/operstate=notpresent", ev)
+	}
+	if _, still := state["eth0"]; still {
+		t.Error("state map still contains eth0 after RTM_DELLINK")
+	}
+}
+
+func TestHandleUpdateDeleteBoundsStateOnNoChange(t *testing.T) {
+	t.Parallel()
+	// If the prior state already matches down/notpresent (unusual
+	// but possible), RTM_DELLINK still has to evict the map entry
+	// so transient veth/dummy churn doesn't grow the map.
+	s := &Subscriber{}
+	state := map[string]LinkState{
+		"veth0": {Name: "veth0", Carrier: CarrierDown, Operstate: OperstateNotPresent},
+	}
+	if _, ok := s.handleUpdate(state, mkDelete("veth0")); ok {
+		t.Error("RTM_DELLINK on already-down iface emitted; want suppressed")
+	}
+	if _, still := state["veth0"]; still {
+		t.Error("state map still contains veth0 — map is unbounded")
 	}
 }
 

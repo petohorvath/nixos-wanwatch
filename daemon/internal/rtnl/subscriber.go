@@ -17,9 +17,11 @@ type Subscriber struct {
 	Interfaces map[string]struct{}
 }
 
-// updateChanBuffer is the netlink-update channel capacity —
-// sized to absorb a flap burst without back-pressuring the kernel.
-const updateChanBuffer = 64
+// updateChanBuffer is the netlink-update channel capacity. Sized
+// to absorb both the ListExisting startup dump (one update per
+// existing link — bridges, vlans, dockers can push this past 64
+// on a busy host) and subsequent flap bursts.
+const updateChanBuffer = 256
 
 // Run subscribes to RTNLGRP_LINK and pushes one LinkEvent onto
 // `out` for every real carrier/operstate change on a watched
@@ -34,7 +36,11 @@ func (s *Subscriber) Run(ctx context.Context, out chan<- LinkEvent) error {
 	done := make(chan struct{})
 	defer close(done)
 
-	if err := netlink.LinkSubscribe(updates, done); err != nil {
+	// ListExisting dumps every current link as an RTM_NEWLINK so
+	// the daemon learns carrier/operstate at boot without waiting
+	// for the first transition.
+	opts := netlink.LinkSubscribeOptions{ListExisting: true}
+	if err := netlink.LinkSubscribeWithOptions(updates, done, opts); err != nil {
 		return fmt.Errorf("rtnl: LinkSubscribe: %w", err)
 	}
 	return s.runLoop(ctx, updates, out)
@@ -69,18 +75,37 @@ func (s *Subscriber) runLoop(ctx context.Context, updates <-chan netlink.LinkUpd
 
 // handleUpdate folds one netlink update into `state` and returns
 // the LinkEvent to emit, if any.
+//
+// RTM_DELLINK is reported as carrier=down / operstate=notpresent
+// rather than dropped silently — a vanished WAN must drive the
+// selector out of that member, not leave a stale snapshot. The
+// state entry is removed either way so the map stays bounded as
+// transient interfaces (veth, dummy, …) come and go.
 func (s *Subscriber) handleUpdate(state map[string]LinkState, upd netlink.LinkUpdate) (LinkEvent, bool) {
 	attrs := upd.Link.Attrs()
 	name := attrs.Name
 	if _, watch := s.Interfaces[name]; s.Interfaces != nil && !watch {
 		return LinkEvent{}, false
 	}
-	carrier := carrierFromFlags(upd.IfInfomsg.Flags)
-	operstate := Operstate(attrs.OperState)
-	if prev, seen := state[name]; seen && prev.Carrier == carrier && prev.Operstate == operstate {
+
+	deleted := upd.Header.Type == unix.RTM_DELLINK
+	carrier := CarrierDown
+	operstate := OperstateNotPresent
+	if !deleted {
+		carrier = carrierFromFlags(upd.IfInfomsg.Flags)
+		operstate = Operstate(attrs.OperState)
+	}
+
+	prev, seen := state[name]
+	unchanged := seen && prev.Carrier == carrier && prev.Operstate == operstate
+	if deleted {
+		delete(state, name)
+	} else if !unchanged {
+		state[name] = LinkState{Name: name, Carrier: carrier, Operstate: operstate}
+	}
+	if unchanged {
 		return LinkEvent{}, false
 	}
-	state[name] = LinkState{Name: name, Carrier: carrier, Operstate: operstate}
 	return LinkEvent{
 		Name:      name,
 		Carrier:   carrier,
