@@ -16,4 +16,5 @@ runner.runTests (
   // import ./composition.nix args
   // import ./probe.nix args
   // import ./wan.nix args
+  // import ./skeleton.nix args
 )
