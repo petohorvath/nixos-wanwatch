@@ -54,7 +54,7 @@ NixOS config → lib (validation, allocators) → module (renders JSON, emits un
                                                    wanwatchd
                                                    ├── probe   (icmp + v6, sliding window)
                                                    ├── rtnl    (link / carrier events)
-                                                   ├── select  (pure: Health → Selection)
+                                                   ├── selector (pure: Health → Selection)
                                                    ├── apply   (netlink: route, rule, conntrack)
                                                    ├── state   (atomic JSON + hooks)
                                                    └── metrics (Prometheus over Unix socket)
@@ -211,7 +211,7 @@ daemon/
   go.mod · go.sum
   cmd/wanwatchd/main.go
   internal/
-    config/ · probe/ · rtnl/ · select/ · apply/ · state/ · metrics/
+    config/ · probe/ · rtnl/ · selector/ · apply/ · state/ · metrics/
 pkgs/
   wanwatchd.nix
 tests/

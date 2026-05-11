@@ -142,7 +142,7 @@ This table lives in `docs/glossary.md` and is referenced from
 │   ┌──────────┐                                                     │
 │   │ probe    │──┐                                                  │
 │   │ (icmp+v6)│  │   ┌────────┐   ┌───────┐   ┌────────┐           │
-│   └──────────┘  ├──▶│ select │──▶│ apply │──▶│ kernel │           │
+│   └──────────┘  ├──▶│selector│──▶│ apply │──▶│ kernel │           │
 │   ┌──────────┐  │   │ (pure) │   │(nlnk) │   │        │           │
 │   │ rtnl     │──┘   └────┬───┘   └───────┘   └────────┘           │
 │   │ events   │           │                                          │
@@ -171,7 +171,7 @@ This table lives in `docs/glossary.md` and is referenced from
   companion that pre-configures Telegraf's `inputs.prometheus`
   scrape target.
 - **`daemon/`** — self-contained Go module. Seven internal packages
-  (`config`, `probe`, `rtnl`, `select`, `apply`, `state`, `metrics`)
+  (`config`, `probe`, `rtnl`, `selector`, `apply`, `state`, `metrics`)
   plus `cmd/wanwatchd` (entrypoint). Single binary, no IPC, no
   subprocess management.
 - **`docs/`** — audience-targeted, matching nftzones discipline.
@@ -619,7 +619,7 @@ rtnetlink subscription via `vishvananda/netlink`. Emits LinkEvent on
 operstate / carrier changes. Carrier-down events fast-track a WAN to
 unhealthy without waiting for the probe Window to fill.
 
-### `internal/select`
+### `internal/selector`
 
 Pure decision logic. Given per-WAN Health + Group config, produces a
 Selection per Group. Hysteresis state lives here (per-WAN consecutive
@@ -772,7 +772,7 @@ Per-package `_test.go` files. Table-driven tests using `t.Run` and
 
 - `internal/probe/stats_test.go` — exhaustive sliding-window cases
   (empty, partial, full, after-drop, monotonic RTT, oscillating RTT).
-- `internal/select/*_test.go` — every Strategy under every Health
+- `internal/selector/*_test.go` — every Strategy under every Health
   permutation + hysteresis state.
 - `internal/apply/*_test.go` — table-driven netlink message construction;
   separate netns-based integration test (gated by `-tags=netns`,
@@ -783,7 +783,7 @@ Per-package `_test.go` files. Table-driven tests using `t.Run` and
 Coverage gate (measured by `go test -cover` on the package, line
 coverage, excluding `_test.go` files and `cmd/`):
 
-- `internal/select/` — ≥95% (pure logic; no excuse)
+- `internal/selector/` — ≥95% (pure logic; no excuse)
 - `internal/probe/stats.go` — ≥95% (pure math)
 - `internal/probe/` overall — ≥90%
 - `internal/config/` — ≥90% (JSON parsing edge cases)
@@ -881,7 +881,7 @@ and timed in a netns test.
 - `lib/group.nix` (incl. `member` type) + tests
 - `lib/marks.nix` (deterministic allocator) + tests
 - `lib/tables.nix` (deterministic allocator) + tests
-- `daemon/internal/select/` — all strategies + hysteresis + tests
+- `daemon/internal/selector/` — all strategies + hysteresis + tests
 
 **Exit criteria**: given a config, the lib produces deterministic
 marks/tables; the daemon's selector reproduces the same active
