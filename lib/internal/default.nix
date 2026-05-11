@@ -12,7 +12,9 @@
                       check, parseOptional, formatErrors,
                       isValidName, ordering). Takes only `lib`.
     2. `probe`      — depends on primitives. Probe value type.
-    3. `wan`        — depends on primitives and probe (family-coupling
+    3. `member`     — depends on primitives. Member value type
+                      (labelled WAN reference within a group).
+    4. `wan`        — depends on primitives and probe (family-coupling
                       cross-checks against probe.families).
 */
 { lib, libnet }:
@@ -24,11 +26,21 @@ let
     internal = { inherit primitives; };
   };
 
+  member = import ./member.nix {
+    inherit lib libnet;
+    internal = { inherit primitives; };
+  };
+
   wan = import ./wan.nix {
     inherit lib libnet;
     internal = { inherit primitives probe; };
   };
 in
 {
-  inherit primitives probe wan;
+  inherit
+    primitives
+    probe
+    member
+    wan
+    ;
 }

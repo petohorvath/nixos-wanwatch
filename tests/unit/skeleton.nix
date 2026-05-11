@@ -51,6 +51,10 @@ let
       module = wanwatch.probe;
       predicate = "isProbe";
     };
+    member = {
+      module = wanwatch.member;
+      predicate = "isMember";
+    };
     wan = {
       module = wanwatch.wan;
       predicate = "isWan";

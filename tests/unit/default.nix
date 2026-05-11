@@ -14,6 +14,7 @@ in
 runner.runTests (
   import ./internal/primitives.nix args
   // import ./internal/probe.nix args
+  // import ./internal/member.nix args
   // import ./internal/wan.nix args
   // import ./composition.nix args
   // import ./skeleton.nix args

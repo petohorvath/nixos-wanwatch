@@ -30,6 +30,10 @@ let
 in
 {
   inherit internal types;
-  inherit (internal) probe wan;
+  inherit (internal)
+    probe
+    member
+    wan
+    ;
   version = "0.1.0-dev";
 }
