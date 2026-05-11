@@ -56,15 +56,16 @@
 
   `name`, `interface`, `gatewayV4` (libnet ipv4 value or null),
   `gatewayV6` (libnet ipv6 value or null), `families` (set of
-  family strings with non-null gateways, e.g.
+  family flags with non-null gateways, e.g.
   `{ v4 = true; v6 = false; }`), `probe` (the embedded probe
-  value), `targets` (forwarded from the probe).
+  value), `targets` (forwarded through the probe's accessor).
 
   ===== Equality, ordering, toJSON =====
 
   Same skeleton as probe: `eq` is structural; `compare` derives
-  from canonical JSON; `lt`/`le`/`gt`/`ge`/`min`/`max` derive from
-  `compare`; `toJSON` produces a daemon-consumable string.
+  from canonical JSON via `internal.types.orderingByString`;
+  `lt`/`le`/`gt`/`ge`/`min`/`max` derive from `compare`; `toJSON`
+  produces a daemon-consumable string.
 */
 {
   libnet,
@@ -72,24 +73,27 @@
   probe,
 }:
 let
-  inherit (internal.types) tryOk tryErr;
+  inherit (internal.types)
+    tryOk
+    tryErr
+    nameValuePair
+    check
+    parseOptional
+    isValidName
+    orderingByString
+    ;
+  formatErrors = internal.types.formatErrors "wan.make";
 
-  # ===== Validation helpers =====
+  parseV4 = parseOptional libnet.ipv4.tryParse;
+  parseV6 = parseOptional libnet.ipv6.tryParse;
 
-  nameValuePair = name: value: { inherit name value; };
-
-  isValidName = s: builtins.isString s && builtins.match "[a-zA-Z][a-zA-Z0-9-]*" s != null;
+  # ===== Field-level validators =====
 
   validateName =
     name:
-    if isValidName name then
-      [ ]
-    else
-      [
-        (nameValuePair "wanInvalidName" "name must match [a-zA-Z][a-zA-Z0-9-]*; got ${builtins.toJSON name}")
-      ];
+    check "wanInvalidName" (isValidName name)
+      "name must match [a-zA-Z][a-zA-Z0-9-]*; got ${builtins.toJSON name}";
 
-  # Interface name validation delegates to libnet — kernel parity.
   validateInterface =
     interface:
     let
@@ -102,107 +106,49 @@ let
             error = "interface must be a string; got ${builtins.typeOf interface}";
           };
     in
-    if r.success then [ ] else [ (nameValuePair "wanInvalidInterface" r.error) ];
+    check "wanInvalidInterface" r.success (if r.success then "" else r.error);
 
-  parseGatewayV4 =
-    addr:
-    if addr == null then
-      {
-        ok = true;
-        value = null;
-      }
-    else
-      let
-        r = libnet.ipv4.tryParse addr;
-      in
-      if r.success then
-        {
-          ok = true;
-          value = r.value;
-        }
-      else
-        {
-          ok = false;
-          error = r.error;
-        };
-
-  parseGatewayV6 =
-    addr:
-    if addr == null then
-      {
-        ok = true;
-        value = null;
-      }
-    else
-      let
-        r = libnet.ipv6.tryParse addr;
-      in
-      if r.success then
-        {
-          ok = true;
-          value = r.value;
-        }
-      else
-        {
-          ok = false;
-          error = r.error;
-        };
-
-  validateGatewayParseErrors =
+  validateGatewayResults =
     v4Result: v6Result:
-    (if v4Result.ok then [ ] else [ (nameValuePair "wanInvalidGatewayV4" v4Result.error) ])
-    ++ (if v6Result.ok then [ ] else [ (nameValuePair "wanInvalidGatewayV6" v6Result.error) ]);
+    check "wanInvalidGatewayV4" v4Result.success (if v4Result.success then "" else v4Result.error)
+    ++ check "wanInvalidGatewayV6" v6Result.success (if v6Result.success then "" else v6Result.error);
+
+  validateProbeResult =
+    probeResult:
+    check "wanInvalidProbe" probeResult.success (if probeResult.success then "" else probeResult.error);
 
   validateNoGateways =
     gwV4: gwV6:
-    if gwV4 == null && gwV6 == null then
-      [ (nameValuePair "wanNoGateways" "at least one of gateways.v4 / gateways.v6 must be set") ]
-    else
-      [ ];
+    check "wanNoGateways" (
+      gwV4 != null || gwV6 != null
+    ) "at least one of gateways.v4 / gateways.v6 must be set";
 
   # Family-coupling: cross-check gateways vs probe.targets. Called
-  # only when both gateways and probe parsed cleanly.
+  # only when gateways AND probe parsed cleanly — otherwise the
+  # rules would report spurious follow-on errors over already-known-bad input.
   validateFamilyCoupling =
     gwV4: gwV6: probeValue:
     let
       fams = probe.families probeValue;
-      hasV4Target = fams.v4;
-      hasV6Target = fams.v6;
     in
-    (
-      if gwV4 != null && !hasV4Target then
-        [
-          (nameValuePair "wanV4GatewayNoTargets" "gateways.v4 is set but probe.targets contains no IPv4 target")
-        ]
-      else
-        [ ]
-    )
-    ++ (
-      if gwV6 != null && !hasV6Target then
-        [
-          (nameValuePair "wanV6GatewayNoTargets" "gateways.v6 is set but probe.targets contains no IPv6 target")
-        ]
-      else
-        [ ]
-    )
-    ++ (
-      if hasV4Target && gwV4 == null then
-        [
-          (nameValuePair "wanV4TargetNoGateway" "probe.targets contains an IPv4 target but gateways.v4 is null")
-        ]
-      else
-        [ ]
-    )
-    ++ (
-      if hasV6Target && gwV6 == null then
-        [
-          (nameValuePair "wanV6TargetNoGateway" "probe.targets contains an IPv6 target but gateways.v6 is null")
-        ]
-      else
-        [ ]
-    );
+    check "wanV4GatewayNoTargets" (
+      gwV4 == null || fams.v4
+    ) "gateways.v4 is set but probe.targets contains no IPv4 target"
+    ++ check "wanV6GatewayNoTargets" (
+      gwV6 == null || fams.v6
+    ) "gateways.v6 is set but probe.targets contains no IPv6 target"
+    ++ check "wanV4TargetNoGateway" (
+      !fams.v4 || gwV4 != null
+    ) "probe.targets contains an IPv4 target but gateways.v4 is null"
+    ++ check "wanV6TargetNoGateway" (
+      !fams.v6 || gwV6 != null
+    ) "probe.targets contains an IPv6 target but gateways.v6 is null";
 
   # ===== Aggregated validation + construction =====
+  #
+  # Parses gateways and probe once, threads the results through both
+  # error collection and value construction. The previous shape
+  # parsed them twice — once in collectErrors, once in buildValue.
 
   prepareInput =
     user:
@@ -218,65 +164,53 @@ let
     };
 
   collectErrors =
-    cfg:
+    cfg: v4Result: v6Result: probeResult:
     let
-      v4Result = parseGatewayV4 cfg.gwInputV4;
-      v6Result = parseGatewayV6 cfg.gwInputV6;
-      probeResult = probe.tryMake cfg.probeInput;
-      gatewayParseErrs = validateGatewayParseErrors v4Result v6Result;
-      probeErr =
-        if probeResult.success then
-          [ ]
-        else
-          [
-            (nameValuePair "wanInvalidProbe" probeResult.error)
-          ];
+      gwV4 = if v4Result.success then v4Result.value else null;
+      gwV6 = if v6Result.success then v6Result.value else null;
 
       structuralErrs =
-        validateName cfg.name ++ validateInterface cfg.interface ++ gatewayParseErrs ++ probeErr;
-
-      gwV4 = if v4Result.ok then v4Result.value else null;
-      gwV6 = if v6Result.ok then v6Result.value else null;
+        validateName cfg.name
+        ++ validateInterface cfg.interface
+        ++ validateGatewayResults v4Result v6Result
+        ++ validateProbeResult probeResult;
 
       noGwErrs = validateNoGateways gwV4 gwV6;
 
-      # Family-coupling: only meaningful when gateways parsed AND probe parsed.
       familyErrs =
-        if v4Result.ok && v6Result.ok && probeResult.success && (gwV4 != null || gwV6 != null) then
+        if
+          v4Result.success && v6Result.success && probeResult.success && (gwV4 != null || gwV6 != null)
+        then
           validateFamilyCoupling gwV4 gwV6 probeResult.value
         else
           [ ];
     in
     structuralErrs ++ noGwErrs ++ familyErrs;
 
-  formatErrors =
-    errors:
-    "wan.make: " + builtins.concatStringsSep "; " (builtins.map (e: "[${e.name}] ${e.value}") errors);
-
-  buildValue =
-    cfg:
-    let
-      v4 = (parseGatewayV4 cfg.gwInputV4).value;
-      v6 = (parseGatewayV6 cfg.gwInputV6).value;
-      probeValue = (probe.tryMake cfg.probeInput).value;
-    in
-    {
-      _type = "wan";
-      name = cfg.name;
-      interface = cfg.interface;
-      gateways = {
-        inherit v4 v6;
-      };
-      probe = probeValue;
+  buildValue = cfg: v4Result: v6Result: probeResult: {
+    _type = "wan";
+    name = cfg.name;
+    interface = cfg.interface;
+    gateways = {
+      v4 = v4Result.value;
+      v6 = v6Result.value;
     };
+    probe = probeResult.value;
+  };
 
   tryMake =
     user:
     let
       cfg = prepareInput user;
-      errors = collectErrors cfg;
+      v4Result = parseV4 cfg.gwInputV4;
+      v6Result = parseV6 cfg.gwInputV6;
+      probeResult = probe.tryMake cfg.probeInput;
+      errors = collectErrors cfg v4Result v6Result probeResult;
     in
-    if errors == [ ] then tryOk (buildValue cfg) else tryErr (formatErrors errors);
+    if errors == [ ] then
+      tryOk (buildValue cfg v4Result v6Result probeResult)
+    else
+      tryErr (formatErrors errors);
 
   make =
     user:
@@ -296,7 +230,7 @@ let
   gatewayV4 = w: w.gateways.v4;
   gatewayV6 = w: w.gateways.v6;
   probeOf = w: w.probe;
-  targets = w: w.probe.targets;
+  targets = w: probe.targets w.probe;
 
   # `families` reflects which gateway families the WAN has *declared*.
   # Distinct from `probe.families`, which reflects what's *probed*.
@@ -315,9 +249,8 @@ let
       v4 = if w.gateways.v4 == null then null else libnet.ipv4.toString w.gateways.v4;
       v6 = if w.gateways.v6 == null then null else libnet.ipv6.toString w.gateways.v6;
     };
-    # Embed the probe as a nested attrset (not a nested JSON string).
-    # `probe.toJSONValue` exposes the pre-serialization shape exactly
-    # for this case.
+    # Embed the probe as a nested attrset, not a nested JSON string —
+    # `probe.toJSONValue` is exposed for exactly this case.
     probe = probe.toJSONValue w.probe;
   };
 
@@ -326,26 +259,15 @@ let
   # ===== Equality and ordering =====
 
   eq = a: b: a == b;
-
-  compare =
-    a: b:
-    let
-      aj = toJSON a;
-      bj = toJSON b;
-    in
-    if aj < bj then
-      -1
-    else if aj > bj then
-      1
-    else
-      0;
-
-  lt = a: b: compare a b == -1;
-  le = a: b: compare a b <= 0;
-  gt = a: b: compare a b == 1;
-  ge = a: b: compare a b >= 0;
-  min = a: b: if le a b then a else b;
-  max = a: b: if ge a b then a else b;
+  inherit (orderingByString toJSON)
+    compare
+    lt
+    le
+    gt
+    ge
+    min
+    max
+    ;
 in
 {
   inherit
@@ -360,10 +282,11 @@ in
     gatewayV4
     gatewayV6
     families
+    targets
     ;
-  # Renamed to avoid colliding with the `probe` module argument.
+  # `probe` is renamed locally to avoid shadowing the module
+  # argument inside the let-binding; exported under the public name.
   probe = probeOf;
-  inherit targets;
   inherit
     eq
     compare

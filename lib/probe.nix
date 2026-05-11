@@ -56,16 +56,16 @@
 
   `method`, `targets`, `intervalMs`, `timeoutMs`, `windowSize`,
   `thresholds`, `hysteresis`, `familyHealthPolicy`, `families`
-  (derived: set of family strings present in targets, e.g.
+  (derived: set of family flags present in targets, e.g.
   `{ v4 = true; v6 = true; }`).
 
   ===== Equality and ordering =====
 
-  `eq` is structural attrset equality. `compare` is a total order
-  derived from the canonical JSON form — there is no natural
-  ordering on Probes, so we pick one that's stable, deterministic,
-  and round-trippable. `lt`/`le`/`gt`/`ge`/`min`/`max` derive from
-  `compare`.
+  `eq` is structural attrset equality. `compare` (and the derived
+  `lt`/`le`/`gt`/`ge`/`min`/`max`) is built from the canonical
+  JSON form via `internal.types.orderingByString` — there is no
+  natural ordering on Probes, so we pick one that's stable,
+  deterministic, and round-trippable.
 
   ===== toJSON =====
 
@@ -76,7 +76,14 @@
 */
 { libnet, internal }:
 let
-  inherit (internal.types) tryOk tryErr;
+  inherit (internal.types)
+    tryOk
+    tryErr
+    nameValuePair
+    check
+    orderingByString
+    ;
+  formatErrors = internal.types.formatErrors "probe.make";
 
   # ===== Defaults =====
 
@@ -109,35 +116,15 @@ let
     "any"
   ];
 
-  elemOf = list: x: builtins.elem x list;
-
-  nameValuePair = name: value: { inherit name value; };
-
-  # Parse one user-supplied target string into a libnet.ip value.
-  # Returns { ok = true; value; } | { ok = false; error; }.
-  parseTarget =
-    s:
-    let
-      r = libnet.ip.tryParse s;
-    in
-    if r.success then
-      {
-        ok = true;
-        value = r.value;
-      }
-    else
-      {
-        ok = false;
-        error = r.error;
-      };
-
-  # Parse every target string; produces { parsed = [<ip values>]; errors = [string]; }.
+  # Parse every target string in one pass. Returns the partitioned
+  # results — libnet.ip.tryParse already speaks the standard
+  # `tryResult` shape, so no wrapper is needed.
   parseTargets =
     targets:
     let
-      results = builtins.map parseTarget targets;
-      parsed = builtins.map (r: r.value) (builtins.filter (r: r.ok) results);
-      errors = builtins.map (r: r.error) (builtins.filter (r: !r.ok) results);
+      results = builtins.map libnet.ip.tryParse targets;
+      parsed = builtins.map (r: r.value) (builtins.filter (r: r.success) results);
+      errors = builtins.map (r: r.error) (builtins.filter (r: !r.success) results);
     in
     {
       inherit parsed errors;
@@ -147,148 +134,83 @@ let
 
   validateMethod =
     method:
-    if elemOf validMethods method then
-      [ ]
-    else
-      [
-        (nameValuePair "probeInvalidMethod" "method must be one of ${builtins.toJSON validMethods}; got ${builtins.toJSON method}")
-      ];
+    check "probeInvalidMethod" (builtins.elem method validMethods)
+      "method must be one of ${builtins.toJSON validMethods}; got ${builtins.toJSON method}";
 
   validateTargets =
     targets:
     if !(builtins.isList targets) then
-      [ (nameValuePair "probeInvalidTarget" "targets must be a list of IP strings") ]
+      check "probeInvalidTarget" false "targets must be a list of IP strings"
     else if targets == [ ] then
-      [ (nameValuePair "probeNoTargets" "targets must be non-empty") ]
+      check "probeNoTargets" false "targets must be non-empty"
     else
-      let
-        r = parseTargets targets;
-      in
-      builtins.map (e: nameValuePair "probeInvalidTarget" e) r.errors;
+      builtins.map (e: nameValuePair "probeInvalidTarget" e) (parseTargets targets).errors;
 
   validateInterval =
     interval:
-    if isPositiveInt interval then
-      [ ]
-    else
-      [
-        (nameValuePair "probeNonPositiveInterval" "intervalMs must be a positive integer; got ${builtins.toJSON interval}")
-      ];
+    check "probeNonPositiveInterval" (isPositiveInt interval)
+      "intervalMs must be a positive integer; got ${builtins.toJSON interval}";
 
   validateTimeout =
     timeout:
-    if isPositiveInt timeout then
-      [ ]
-    else
-      [
-        (nameValuePair "probeNonPositiveTimeout" "timeoutMs must be a positive integer; got ${builtins.toJSON timeout}")
-      ];
+    check "probeNonPositiveTimeout" (isPositiveInt timeout)
+      "timeoutMs must be a positive integer; got ${builtins.toJSON timeout}";
 
   validateWindowSize =
     n:
-    if isPositiveInt n then
-      [ ]
-    else
-      [
-        (nameValuePair "probeNonPositiveWindow" "windowSize must be a positive integer; got ${builtins.toJSON n}")
-      ];
+    check "probeNonPositiveWindow" (isPositiveInt n)
+      "windowSize must be a positive integer; got ${builtins.toJSON n}";
 
   validateLossThresholds =
     t:
     let
-      downErr =
-        if isPct (t.lossPctDown or null) then
-          [ ]
-        else
-          [
-            (nameValuePair "probeLossPctOutOfRange" "thresholds.lossPctDown must be an int in [0,100]; got ${
-              builtins.toJSON (t.lossPctDown or null)
-            }")
-          ];
-      upErr =
-        if isPct (t.lossPctUp or null) then
-          [ ]
-        else
-          [
-            (nameValuePair "probeLossPctOutOfRange" "thresholds.lossPctUp must be an int in [0,100]; got ${
-              builtins.toJSON (t.lossPctUp or null)
-            }")
-          ];
-      orderErr =
-        if isPct (t.lossPctDown or null) && isPct (t.lossPctUp or null) && t.lossPctUp >= t.lossPctDown then
-          [
-            (nameValuePair "probeLossThresholdsInverted" "thresholds.lossPctUp (${builtins.toJSON t.lossPctUp}) must be strictly less than thresholds.lossPctDown (${builtins.toJSON t.lossPctDown}); recovery threshold must sit below failure threshold to avoid flapping")
-          ]
-        else
-          [ ];
+      down = t.lossPctDown or null;
+      up = t.lossPctUp or null;
+      downValid = isPct down;
+      upValid = isPct up;
     in
-    downErr ++ upErr ++ orderErr;
+    check "probeLossPctOutOfRange" downValid
+      "thresholds.lossPctDown must be an int in [0,100]; got ${builtins.toJSON down}"
+    ++
+      check "probeLossPctOutOfRange" upValid
+        "thresholds.lossPctUp must be an int in [0,100]; got ${builtins.toJSON up}"
+    ++
+      check "probeLossThresholdsInverted" (!(downValid && upValid && up >= down))
+        "thresholds.lossPctUp (${builtins.toJSON up}) must be strictly less than thresholds.lossPctDown (${builtins.toJSON down}); recovery threshold must sit below failure threshold to avoid flapping";
 
   validateRttThresholds =
     t:
     let
-      downErr =
-        if isPositiveInt (t.rttMsDown or null) then
-          [ ]
-        else
-          [
-            (nameValuePair "probeNonPositiveRTT" "thresholds.rttMsDown must be a positive integer; got ${
-              builtins.toJSON (t.rttMsDown or null)
-            }")
-          ];
-      upErr =
-        if isPositiveInt (t.rttMsUp or null) then
-          [ ]
-        else
-          [
-            (nameValuePair "probeNonPositiveRTT" "thresholds.rttMsUp must be a positive integer; got ${
-              builtins.toJSON (t.rttMsUp or null)
-            }")
-          ];
-      orderErr =
-        if
-          isPositiveInt (t.rttMsDown or null) && isPositiveInt (t.rttMsUp or null) && t.rttMsUp >= t.rttMsDown
-        then
-          [
-            (nameValuePair "probeRTTThresholdsInverted" "thresholds.rttMsUp (${builtins.toJSON t.rttMsUp}) must be strictly less than thresholds.rttMsDown (${builtins.toJSON t.rttMsDown}); recovery threshold must sit below failure threshold to avoid flapping")
-          ]
-        else
-          [ ];
+      down = t.rttMsDown or null;
+      up = t.rttMsUp or null;
+      downValid = isPositiveInt down;
+      upValid = isPositiveInt up;
     in
-    downErr ++ upErr ++ orderErr;
+    check "probeNonPositiveRTT" downValid
+      "thresholds.rttMsDown must be a positive integer; got ${builtins.toJSON down}"
+    ++
+      check "probeNonPositiveRTT" upValid
+        "thresholds.rttMsUp must be a positive integer; got ${builtins.toJSON up}"
+    ++
+      check "probeRTTThresholdsInverted" (!(downValid && upValid && up >= down))
+        "thresholds.rttMsUp (${builtins.toJSON up}) must be strictly less than thresholds.rttMsDown (${builtins.toJSON down}); recovery threshold must sit below failure threshold to avoid flapping";
 
   validateHysteresis =
     h:
-    let
-      down =
-        if isPositiveInt (h.consecutiveDown or null) then
-          [ ]
-        else
-          [
-            (nameValuePair "probeNonPositiveHysteresis" "hysteresis.consecutiveDown must be a positive integer; got ${
-              builtins.toJSON (h.consecutiveDown or null)
-            }")
-          ];
-      up =
-        if isPositiveInt (h.consecutiveUp or null) then
-          [ ]
-        else
-          [
-            (nameValuePair "probeNonPositiveHysteresis" "hysteresis.consecutiveUp must be a positive integer; got ${
-              builtins.toJSON (h.consecutiveUp or null)
-            }")
-          ];
-    in
-    down ++ up;
+    check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveDown or null))
+      "hysteresis.consecutiveDown must be a positive integer; got ${
+        builtins.toJSON (h.consecutiveDown or null)
+      }"
+    ++
+      check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveUp or null))
+        "hysteresis.consecutiveUp must be a positive integer; got ${
+          builtins.toJSON (h.consecutiveUp or null)
+        }";
 
   validateFamilyHealthPolicy =
     policy:
-    if elemOf validFamilyHealthPolicies policy then
-      [ ]
-    else
-      [
-        (nameValuePair "probeInvalidFamilyPolicy" "familyHealthPolicy must be one of ${builtins.toJSON validFamilyHealthPolicies}; got ${builtins.toJSON policy}")
-      ];
+    check "probeInvalidFamilyPolicy" (builtins.elem policy validFamilyHealthPolicies)
+      "familyHealthPolicy must be one of ${builtins.toJSON validFamilyHealthPolicies}; got ${builtins.toJSON policy}";
 
   # ===== Aggregated validation + construction =====
 
@@ -315,26 +237,17 @@ let
     ++ validateHysteresis cfg.hysteresis
     ++ validateFamilyHealthPolicy cfg.familyHealthPolicy;
 
-  formatErrors =
-    errors:
-    "probe.make: " + builtins.concatStringsSep "; " (builtins.map (e: "[${e.name}] ${e.value}") errors);
-
-  buildValue =
-    cfg:
-    let
-      parsedTargets = (parseTargets cfg.targets).parsed;
-    in
-    {
-      _type = "probe";
-      method = cfg.method;
-      targets = parsedTargets;
-      intervalMs = cfg.intervalMs;
-      timeoutMs = cfg.timeoutMs;
-      windowSize = cfg.windowSize;
-      thresholds = cfg.thresholds;
-      hysteresis = cfg.hysteresis;
-      familyHealthPolicy = cfg.familyHealthPolicy;
-    };
+  buildValue = cfg: parsedTargets: {
+    _type = "probe";
+    method = cfg.method;
+    targets = parsedTargets;
+    intervalMs = cfg.intervalMs;
+    timeoutMs = cfg.timeoutMs;
+    windowSize = cfg.windowSize;
+    thresholds = cfg.thresholds;
+    hysteresis = cfg.hysteresis;
+    familyHealthPolicy = cfg.familyHealthPolicy;
+  };
 
   tryMake =
     user:
@@ -342,7 +255,10 @@ let
       cfg = mergeWithDefaults user;
       errors = collectErrors cfg;
     in
-    if errors == [ ] then tryOk (buildValue cfg) else tryErr (formatErrors errors);
+    if errors == [ ] then
+      tryOk (buildValue cfg (parseTargets cfg.targets).parsed)
+    else
+      tryErr (formatErrors errors);
 
   make =
     user:
@@ -369,19 +285,16 @@ let
   # `families` returns an attrset {v4 = bool; v6 = bool;} reflecting
   # whether the probe's targets cover each family. Used by `wan.make`
   # to enforce the family-coupling invariant (PLAN §5.4).
-  families =
-    p:
-    let
-      hasV4 = builtins.any (t: t._type == "ipv4") p.targets;
-      hasV6 = builtins.any (t: t._type == "ipv6") p.targets;
-    in
-    {
-      v4 = hasV4;
-      v6 = hasV6;
-    };
+  families = p: {
+    v4 = builtins.any (t: t._type == "ipv4") p.targets;
+    v6 = builtins.any (t: t._type == "ipv6") p.targets;
+  };
 
   # ===== Serialization =====
 
+  # Exposed for callers that need the JSON-shape attrset before
+  # serialization — e.g. `wan.toJSON` embeds the probe as a nested
+  # object rather than a nested JSON string.
   toJSONValue = p: {
     inherit (p)
       _type
@@ -398,35 +311,18 @@ let
 
   toJSON = p: builtins.toJSON (toJSONValue p);
 
-  # Exposed for callers that need the JSON-shape attrset before
-  # serialization — e.g. `wan.toJSON` embeds the probe as a nested
-  # object rather than a nested JSON string.
-
   # ===== Equality and ordering =====
 
   eq = a: b: a == b;
-
-  # Total order derived from canonical JSON. Stable, deterministic,
-  # round-trippable. There is no natural ordering on Probes.
-  compare =
-    a: b:
-    let
-      aj = toJSON a;
-      bj = toJSON b;
-    in
-    if aj < bj then
-      -1
-    else if aj > bj then
-      1
-    else
-      0;
-
-  lt = a: b: compare a b == -1;
-  le = a: b: compare a b <= 0;
-  gt = a: b: compare a b == 1;
-  ge = a: b: compare a b >= 0;
-  min = a: b: if le a b then a else b;
-  max = a: b: if ge a b then a else b;
+  inherit (orderingByString toJSON)
+    compare
+    lt
+    le
+    gt
+    ge
+    min
+    max
+    ;
 in
 {
   inherit
