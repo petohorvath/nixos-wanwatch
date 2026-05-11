@@ -6,4 +6,10 @@
   and any related primitives — flattened into `wanwatch.types.<name>`
   by `lib/types/default.nix`.
 */
-_: { }
+{
+  lib,
+  libnet,
+  primitives,
+  internal,
+}:
+{ }

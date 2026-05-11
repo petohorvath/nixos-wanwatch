@@ -23,8 +23,22 @@
 }:
 let
   primitives = import ./primitives.nix { inherit lib libnet; };
-  probe = import ./probe.nix { inherit lib libnet internal; };
-  wan = import ./wan.nix { inherit lib libnet internal; };
+  probe = import ./probe.nix {
+    inherit
+      lib
+      libnet
+      primitives
+      internal
+      ;
+  };
+  wan = import ./wan.nix {
+    inherit
+      lib
+      libnet
+      primitives
+      internal
+      ;
+  };
 in
 lib.mergeAttrsList [
   primitives
