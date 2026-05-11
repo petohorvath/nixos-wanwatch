@@ -52,6 +52,18 @@ let
     internal = { inherit member; };
   };
 
+  config = import ./config.nix {
+    inherit lib libnet;
+    internal = {
+      inherit
+        wan
+        group
+        marks
+        tables
+        ;
+    };
+  };
+
   allocator = import ./allocator.nix {
     inherit lib libnet;
     internal = { inherit primitives; };
@@ -66,6 +78,10 @@ let
     inherit lib libnet;
     internal = { inherit allocator; };
   };
+
+  # Late binding: `config` needs `marks` + `tables` (built above).
+  # `let` keeps the dependency order safe — `config` sees a fully
+  # built `internal` view via the recursive let.
 in
 {
   inherit
@@ -78,5 +94,6 @@ in
     allocator
     marks
     tables
+    config
     ;
 }
