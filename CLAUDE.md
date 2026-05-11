@@ -11,8 +11,8 @@ delivered as three layers:
 
 - **Pure-Nix library** (`lib/`) — typed values (`wan`, `probe`, `group`,
   `member`), validation, allocators (marks, tables), and pure selection
-  logic. Zero `nixpkgs` dependency in the core; option types opt-in
-  via `withLib`.
+  logic. Takes `{ lib, libnet }` at import time; uses `nixpkgs.lib`
+  freely. NixOS option types always available at `wanwatch.types`.
 - **NixOS module** (`modules/`) — `services.wanwatch.*` declares wans
   and groups, renders the daemon config, emits the systemd unit.
 - **Go daemon** (`daemon/`) — `wanwatchd` probes, decides, mutates
@@ -141,8 +141,10 @@ commit** with updated tests, rather than papering over.
 - Per-system: `x86_64-linux`, `aarch64-linux`, `x86_64-darwin`,
   `aarch64-darwin`. Daemon Linux-only — gate via
   `lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux`.
-- `lib/` evaluates with `lib = null` (pure-Nix core, libnet pattern);
-  `core` and `full` check tiers.
+- `nixpkgs.lib` is a standard dependency. `lib/` takes
+  `{ lib, libnet }` at import time and uses `lib.*` freely. No
+  "pure-Nix core" constraint — that pattern fits primitives
+  libraries like libnet, not downstream consumers like wanwatch.
 
 ### Modern Go
 
@@ -192,7 +194,7 @@ lib/
   default.nix
   wan.nix · probe.nix · group.nix · selector.nix
   marks.nix · tables.nix · config.nix · snippets.nix
-  types.nix · with-lib.nix
+  types.nix
   internal/
     types.nix                      # _type tagging, tryOk/tryErr
 modules/

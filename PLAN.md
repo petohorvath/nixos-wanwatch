@@ -157,11 +157,14 @@ This table lives in `docs/glossary.md` and is referenced from
 
 ### Layer responsibilities
 
-- **`lib/`** — pure Nix; validation, builders, predicates, and
+- **`lib/`** — validation, builders, predicates, and
   serialization for `wan`, `probe`, `group`, `member`. Allocators for
   fwmarks and routing-table ids. Pure selection function (used both
-  by daemon tests and by module-level assertions). Zero nixpkgs in
-  the core; option types opt-in via `withLib`.
+  by daemon tests and by module-level assertions). Takes
+  `{ lib, libnet }` at import time; `nixpkgs.lib` is a standard
+  dependency, used freely throughout (`lib.nameValuePair`,
+  `lib.partition`, `lib.types.*`, …). NixOS option types are
+  always available at `wanwatch.types`.
 - **`modules/`** — thin NixOS layer. `wanwatch.nix` is the main
   entrypoint (declares options, renders config, emits systemd unit,
   creates state dir + hooks dir). `telegraf.nix` is an opt-in
@@ -208,7 +211,7 @@ Module-level layout:
 
 | File | Exports |
 |---|---|
-| `lib/default.nix` | top-level entry; assembles all modules; `withLib` extension point |
+| `lib/default.nix` | top-level entry; assembles all modules; takes `{ lib, libnet }` |
 | `lib/wan.nix` | `wan` type + skeleton; accessors `name`, `interface`, `gatewayV4`, `gatewayV6`, `families` (returns the set of families with declared gateways), `targets` |
 | `lib/probe.nix` | `probe` type + skeleton; nested `thresholds`, `hysteresis`; `familyHealthPolicy` |
 | `lib/group.nix` | `group` type + skeleton; `member` type + skeleton; accessors `members`, `strategy`, `table`, `mark` |
@@ -217,9 +220,8 @@ Module-level layout:
 | `lib/tables.nix` | `allocate : groupNames → { <group> = <tableId>; … }` deterministic, same scheme as marks |
 | `lib/config.nix` | `toDaemonJson : evaluatedConfig → string` (canonical, sorted keys) |
 | `lib/snippets.nix` | nftzones-integration helpers (mark refs, mangle statements) |
-| `lib/types.nix` | flattened NixOS option types (via `withLib`) for module consumption |
-| `lib/with-lib.nix` | opt-in `nixpkgs.lib` injection (libnet pattern) |
-| `lib/internal/types.nix` | `_type` tagging helpers, `tryOk`, `tryErr` |
+| `lib/types.nix` | flattened NixOS option types (`lib.types.*`) for module consumption |
+| `lib/internal/types.nix` | `_type` tagging helpers, `tryOk`, `tryErr`, shared validators, ordering primitives |
 
 ### 5.2 NixOS module
 
@@ -830,8 +832,8 @@ at HEAD.
 - `flake.nix` skeleton (inputs: nixpkgs, libnet, treefmt-nix;
   outputs: lib, formatter, empty checks)
 - `lib/internal/types.nix` — `_type` tagging, `tryOk`, `tryErr`
-- `lib/with-lib.nix` — opt-in nixpkgs.lib injection (verbatim
-  pattern from libnet)
+- `lib/types.nix` — stub for NixOS option types (real types in
+  Pass 5)
 - `tests/unit/runner.nix` — `lib.runTests` derivation wrapper
 - `daemon/go.mod` skeleton + `daemon/internal/probe/stats.go`
   (pure sliding-window math) + tests
@@ -987,8 +989,12 @@ a specific commit and explained in the body.
   `x86_64-darwin`, `aarch64-darwin`. Daemon Linux-only — VM tier
   and `packages.wanwatchd` gated via
   `pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux`.
-- Pure-Nix core: `lib/` evaluates with `lib = null` (libnet pattern).
-  `core` and `full` check tiers.
+- `nixpkgs.lib` is a standard dependency, not an opt-in extension.
+  `lib/` takes `{ lib, libnet }` at import time and uses `lib.*`
+  freely. There is no "core that evaluates with `lib = null`" —
+  that pattern fits primitives libraries like libnet, not
+  downstream consumers like wanwatch whose NixOS module requires
+  `lib.evalModules` and `lib.types.*` regardless.
 - Current `lib.types.*` only; in particular avoid
   `lib.types.either` in favor of `lib.types.oneOf`, and
   `lib.types.uniq` is forbidden (removed in modern nixpkgs).
