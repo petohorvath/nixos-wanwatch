@@ -99,33 +99,22 @@ func startSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logge
 	return events
 }
 
-// eventLoop is the daemon's central dispatch. For this commit it
-// only logs each event; the Decision pipeline (threshold → hysteresis
-// → selector → apply) lands in the next commit.
+// eventLoop is the daemon's central dispatch. Routes each
+// ProbeResult / LinkEvent through `d`'s Decision pipeline.
 func eventLoop(
 	ctx context.Context,
+	d *daemon,
 	probeResults <-chan probe.ProbeResult,
 	linkEvents <-chan rtnl.LinkEvent,
-	logger *slog.Logger,
 ) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case r := <-probeResults:
-			logger.Debug("probe result",
-				"wan", r.Wan,
-				"family", r.Family,
-				"loss_ratio", r.Stats.LossRatio,
-				"rtt_us", r.Stats.RTTMicros,
-				"jitter_us", r.Stats.JitterMicros,
-			)
+			d.handleProbeResult(r)
 		case e := <-linkEvents:
-			logger.Info("link event",
-				"iface", e.Name,
-				"carrier", e.Carrier,
-				"operstate", e.Operstate,
-			)
+			d.handleLinkEvent(e)
 		}
 	}
 }

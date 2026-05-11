@@ -115,6 +115,13 @@ func run(parent context.Context, args []string, logSink *os.File) error {
 
 	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
 
+	d := newDaemon(&cfg, mreg, logger)
+	if err := d.bootstrap(); err != nil {
+		cancel()
+		<-mErrCh
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+
 	probeResults, err := startProbers(ctx, &cfg, logger)
 	if err != nil {
 		cancel()
@@ -123,7 +130,7 @@ func run(parent context.Context, args []string, logSink *os.File) error {
 	}
 	linkEvents := startSubscriber(ctx, &cfg, logger)
 
-	eventLoop(ctx, probeResults, linkEvents, logger)
+	eventLoop(ctx, d, probeResults, linkEvents)
 	logger.Info("shutdown signal received", "err", ctx.Err())
 
 	if err := <-mErrCh; err != nil && !errors.Is(err, context.Canceled) {

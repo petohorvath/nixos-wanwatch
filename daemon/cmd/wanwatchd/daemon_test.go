@@ -1,18 +1,27 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"log/slog"
-	"strings"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
 )
+
+// testDaemon builds a daemon wired against `cfg` without invoking
+// bootstrap() — netlink rule install isn't available in unit tests.
+func testDaemon(t *testing.T, cfg *config.Config) *daemon {
+	t.Helper()
+	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
+	cfg.Global.HooksDir = t.TempDir()
+	return newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
 
 func sptr(s string) *string { return &s }
 
@@ -70,10 +79,9 @@ func TestIdentKeysForIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestEventLoopForwardsProbeResultToLogger(t *testing.T) {
+func TestEventLoopRoutesProbeResultToDaemon(t *testing.T) {
 	t.Parallel()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	d := testDaemon(t, testCfg())
 
 	probeResults := make(chan probe.ProbeResult, 1)
 	linkEvents := make(chan rtnl.LinkEvent, 1)
@@ -86,28 +94,21 @@ func TestEventLoopForwardsProbeResultToLogger(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		eventLoop(ctx, probeResults, linkEvents, logger)
+		eventLoop(ctx, d, probeResults, linkEvents)
 		close(done)
 	}()
-	// Give the loop a moment to consume the queued result, then
-	// cancel.
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	<-done
 
-	out := buf.String()
-	if !strings.Contains(out, `wan=primary`) {
-		t.Errorf("log missing wan=primary; got:\n%s", out)
-	}
-	if !strings.Contains(out, `loss_ratio=0.5`) {
-		t.Errorf("log missing loss_ratio=0.5; got:\n%s", out)
+	if got := d.wans["primary"].families[probe.FamilyV4].stats.LossRatio; got != 0.5 {
+		t.Errorf("primary v4 LossRatio = %v, want 0.5", got)
 	}
 }
 
-func TestEventLoopForwardsLinkEventToLogger(t *testing.T) {
+func TestEventLoopRoutesLinkEventToDaemon(t *testing.T) {
 	t.Parallel()
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	d := testDaemon(t, testCfg())
 
 	probeResults := make(chan probe.ProbeResult, 1)
 	linkEvents := make(chan rtnl.LinkEvent, 1)
@@ -120,22 +121,21 @@ func TestEventLoopForwardsLinkEventToLogger(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		eventLoop(ctx, probeResults, linkEvents, logger)
+		eventLoop(ctx, d, probeResults, linkEvents)
 		close(done)
 	}()
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	<-done
 
-	out := buf.String()
-	if !strings.Contains(out, "iface=eth0") || !strings.Contains(out, "carrier=up") {
-		t.Errorf("log missing eth0/up; got:\n%s", out)
+	if d.wans["primary"].carrier != rtnl.CarrierUp {
+		t.Errorf("primary carrier = %v, want up", d.wans["primary"].carrier)
 	}
 }
 
 func TestEventLoopReturnsOnCtxCancel(t *testing.T) {
 	t.Parallel()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	d := testDaemon(t, testCfg())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	probeResults := make(chan probe.ProbeResult)
@@ -143,7 +143,7 @@ func TestEventLoopReturnsOnCtxCancel(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		eventLoop(ctx, probeResults, linkEvents, logger)
+		eventLoop(ctx, d, probeResults, linkEvents)
 		close(done)
 	}()
 	cancel()
