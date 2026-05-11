@@ -31,10 +31,39 @@
 
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
-      checks = forAllSystems (pkgs: {
-        format = (treefmtFor pkgs).config.build.check self;
-        unit = import ./tests/unit { inherit pkgs; };
-      });
+      checks = forAllSystems (
+        pkgs:
+        {
+          format = (treefmtFor pkgs).config.build.check self;
+          unit = import ./tests/unit { inherit pkgs; };
+        }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          daemon =
+            pkgs.runCommand "wanwatch-daemon-tests"
+              {
+                src = ./daemon;
+                nativeBuildInputs = [ pkgs.go ];
+                # No external Go deps in Pass 1; disable network paths so the
+                # build remains hermetic even if a stray import sneaks in.
+                GOFLAGS = "-mod=mod";
+                GOPROXY = "off";
+                GOSUMDB = "off";
+              }
+              ''
+                # Go 1.24+ refuses to honour go.mod that sits directly in a
+                # well-known system temp root (/build, /tmp). Stage the
+                # source under a sub-directory to side-step that mitigation.
+                export HOME=$TMPDIR
+                export GOCACHE=$TMPDIR/gocache
+                mkdir -p source
+                cp -r $src/* source/
+                chmod -R u+w source
+                cd source
+                go test -v ./...
+                touch $out
+              '';
+        }
+      );
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShellNoCC {
