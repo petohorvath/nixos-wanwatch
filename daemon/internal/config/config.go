@@ -134,40 +134,47 @@ func Parse(data []byte) (Config, error) {
 // is acceptable here (unlike `wan.tryMake`'s aggregation).
 func (c *Config) Validate() error {
 	if c.Global.StatePath == "" {
-		return fmt.Errorf("%w: global.statePath is empty", ErrInvalidConfig)
+		return invalidf("global.statePath is empty")
 	}
 	if c.Global.HooksDir == "" {
-		return fmt.Errorf("%w: global.hooksDir is empty", ErrInvalidConfig)
+		return invalidf("global.hooksDir is empty")
 	}
 	if c.Global.MetricsSocket == "" {
-		return fmt.Errorf("%w: global.metricsSocket is empty", ErrInvalidConfig)
+		return invalidf("global.metricsSocket is empty")
 	}
 
 	for key, wan := range c.Wans {
 		if wan.Name != key {
-			return fmt.Errorf("%w: wans[%q].name = %q (mismatch)", ErrInvalidConfig, key, wan.Name)
+			return invalidf("wans[%q].name = %q (mismatch)", key, wan.Name)
 		}
 		if wan.Interface == "" {
-			return fmt.Errorf("%w: wans[%q].interface is empty", ErrInvalidConfig, key)
+			return invalidf("wans[%q].interface is empty", key)
 		}
 		if wan.Gateways.V4 == nil && wan.Gateways.V6 == nil {
-			return fmt.Errorf("%w: wans[%q] has no gateways", ErrInvalidConfig, key)
+			return invalidf("wans[%q] has no gateways", key)
 		}
 	}
 
 	for key, group := range c.Groups {
 		if group.Name != key {
-			return fmt.Errorf("%w: groups[%q].name = %q (mismatch)", ErrInvalidConfig, key, group.Name)
+			return invalidf("groups[%q].name = %q (mismatch)", key, group.Name)
 		}
 		if len(group.Members) == 0 {
-			return fmt.Errorf("%w: groups[%q] has no members", ErrInvalidConfig, key)
+			return invalidf("groups[%q] has no members", key)
 		}
 		for i, m := range group.Members {
 			if _, ok := c.Wans[m.Wan]; !ok {
-				return fmt.Errorf("%w: groups[%q].members[%d].wan = %q is not declared in wans", ErrInvalidConfig, key, i, m.Wan)
+				return invalidf("groups[%q].members[%d].wan = %q is not declared in wans", key, i, m.Wan)
 			}
 		}
 	}
 
 	return nil
+}
+
+// invalidf wraps ErrInvalidConfig with a formatted detail message —
+// every structural-validation error has this shape, so factor the
+// `%w: ` prefix out.
+func invalidf(format string, args ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{ErrInvalidConfig}, args...)...)
 }

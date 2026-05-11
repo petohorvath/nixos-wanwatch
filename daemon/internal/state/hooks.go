@@ -68,6 +68,26 @@ type Runner struct {
 // Runner.Timeout is zero. Matches PLAN §12 OQ #5.
 const DefaultHookTimeout = 5 * time.Second
 
+// Env-var names passed to every hook invocation. Fixed by PLAN §5.5
+// — hook scripts depend on them. Exported so callers (and tests)
+// can reference the contract by name rather than by string literal.
+const (
+	EnvEvent        = "WANWATCH_EVENT"
+	EnvGroup        = "WANWATCH_GROUP"
+	EnvWanOld       = "WANWATCH_WAN_OLD"
+	EnvWanNew       = "WANWATCH_WAN_NEW"
+	EnvIfaceOld     = "WANWATCH_IFACE_OLD"
+	EnvIfaceNew     = "WANWATCH_IFACE_NEW"
+	EnvGatewayV4Old = "WANWATCH_GATEWAY_V4_OLD"
+	EnvGatewayV4New = "WANWATCH_GATEWAY_V4_NEW"
+	EnvGatewayV6Old = "WANWATCH_GATEWAY_V6_OLD"
+	EnvGatewayV6New = "WANWATCH_GATEWAY_V6_NEW"
+	EnvFamilies     = "WANWATCH_FAMILIES"
+	EnvTable        = "WANWATCH_TABLE"
+	EnvMark         = "WANWATCH_MARK"
+	EnvTimestamp    = "WANWATCH_TS"
+)
+
 // Run executes every hook under `<Dir>/<ctx.Event>.d/` with the
 // env vars in PLAN §5.5. Returns one HookResult per file. A
 // missing event directory returns nil — not an error; users with
@@ -154,20 +174,20 @@ func buildEnv(ctx HookContext) []string {
 		ts = time.Now().UTC()
 	}
 	extras := []string{
-		"WANWATCH_EVENT=" + string(ctx.Event),
-		"WANWATCH_GROUP=" + ctx.Group,
-		"WANWATCH_WAN_OLD=" + ctx.WanOld,
-		"WANWATCH_WAN_NEW=" + ctx.WanNew,
-		"WANWATCH_IFACE_OLD=" + ctx.IfaceOld,
-		"WANWATCH_IFACE_NEW=" + ctx.IfaceNew,
-		"WANWATCH_GATEWAY_V4_OLD=" + ctx.GwV4Old,
-		"WANWATCH_GATEWAY_V4_NEW=" + ctx.GwV4New,
-		"WANWATCH_GATEWAY_V6_OLD=" + ctx.GwV6Old,
-		"WANWATCH_GATEWAY_V6_NEW=" + ctx.GwV6New,
-		"WANWATCH_FAMILIES=" + families,
-		"WANWATCH_TABLE=" + strconv.Itoa(ctx.Table),
-		"WANWATCH_MARK=" + strconv.Itoa(ctx.Mark),
-		"WANWATCH_TS=" + ts.Format(time.RFC3339Nano),
+		EnvEvent + "=" + string(ctx.Event),
+		EnvGroup + "=" + ctx.Group,
+		EnvWanOld + "=" + ctx.WanOld,
+		EnvWanNew + "=" + ctx.WanNew,
+		EnvIfaceOld + "=" + ctx.IfaceOld,
+		EnvIfaceNew + "=" + ctx.IfaceNew,
+		EnvGatewayV4Old + "=" + ctx.GwV4Old,
+		EnvGatewayV4New + "=" + ctx.GwV4New,
+		EnvGatewayV6Old + "=" + ctx.GwV6Old,
+		EnvGatewayV6New + "=" + ctx.GwV6New,
+		EnvFamilies + "=" + families,
+		EnvTable + "=" + strconv.Itoa(ctx.Table),
+		EnvMark + "=" + strconv.Itoa(ctx.Mark),
+		EnvTimestamp + "=" + ts.Format(time.RFC3339Nano),
 	}
 	return append(base, extras...)
 }
