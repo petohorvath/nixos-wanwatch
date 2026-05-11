@@ -53,6 +53,13 @@
   the auto-allocation subset and returns groups with the resolved
   values substituted in.
 
+  Collision detection: explicit `mark` / `table` values
+  participate in the same id space as the auto-allocated ones.
+  Two groups can't share a mark or a table — whether both are
+  explicit, both auto, or one of each. Throws on collision so the
+  drift surfaces at module-eval time, not as a silent routing bug
+  in production.
+
   ===== schemaVersion =====
 
   Current schema version (int). Bumped on any backwards-incompatible
@@ -84,20 +91,58 @@ let
   resolveAllocations =
     groups:
     let
-      autoMarkNames = builtins.filter (n: groups.${n}.mark == null) (builtins.attrNames groups);
-      autoTableNames = builtins.filter (n: groups.${n}.table == null) (builtins.attrNames groups);
+      names = builtins.attrNames groups;
+      explicit =
+        field:
+        lib.foldl' (
+          acc: n:
+          let
+            v = groups.${n}.${field};
+          in
+          if v == null then acc else acc // { ${toString v} = n; }
+        ) { } names;
+
+      explicitMarks = explicit "mark";
+      explicitTables = explicit "table";
+
+      autoMarkNames = builtins.filter (n: groups.${n}.mark == null) names;
+      autoTableNames = builtins.filter (n: groups.${n}.table == null) names;
 
       autoMarks = marks.allocate autoMarkNames;
       autoTables = tables.allocate autoTableNames;
+
+      # Surface collisions between auto-allocated values and the
+      # explicit set. Two groups sharing a mark or a table would
+      # quietly mis-route in production — fail fast at eval time.
+      checkCollision =
+        field: assigned: explicitMap:
+        lib.foldl' (
+          _: n:
+          let
+            v = assigned.${n};
+            owner = explicitMap.${toString v} or null;
+          in
+          if owner == null then
+            null
+          else
+            builtins.throw "wanwatch: config.resolveAllocations: auto-allocated ${field} ${toString v} for group '${n}' collides with explicit value on group '${owner}'"
+        ) null (builtins.attrNames assigned);
+
+      _markCollision = checkCollision "mark" autoMarks explicitMarks;
+      _tableCollision = checkCollision "table" autoTables explicitTables;
     in
-    builtins.mapAttrs (
-      name: g:
-      g
-      // {
-        mark = if g.mark == null then autoMarks.${name} else g.mark;
-        table = if g.table == null then autoTables.${name} else g.table;
-      }
-    ) groups;
+    builtins.seq _markCollision (
+      builtins.seq _tableCollision (
+        builtins.mapAttrs (
+          name: g:
+          g
+          // {
+            mark = if g.mark == null then autoMarks.${name} else g.mark;
+            table = if g.table == null then autoTables.${name} else g.table;
+          }
+        ) groups
+      )
+    );
 
   render =
     {
