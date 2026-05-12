@@ -38,6 +38,11 @@ const (
 	FamilyV6
 )
 
+// AllFamilies enumerates every Family the daemon supports. Use it
+// where code iterates "do this per family" so adding a new family
+// only touches the enum, not the call sites.
+var AllFamilies = []Family{FamilyV4, FamilyV6}
+
 // String returns the family's display name — "v4" / "v6". Used in
 // log messages, metrics labels, and hook env vars.
 func (f Family) String() string {

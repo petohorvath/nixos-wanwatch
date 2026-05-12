@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"time"
@@ -53,15 +53,13 @@ type groupState struct {
 // daemon bundles the runtime state and subsystem handles. Wired
 // once in run(), then driven by eventLoop's dispatch.
 type daemon struct {
-	cfg        *config.Config
-	metrics    *metrics.Registry
-	stateW     *state.Writer
-	hookR      *state.Runner
-	logger     *slog.Logger
-	wans       map[string]*wanState
-	groups     map[string]*groupState
-	started    time.Time
-	startupRun bool
+	cfg     *config.Config
+	metrics *metrics.Registry
+	stateW  *state.Writer
+	hookR   *state.Runner
+	logger  *slog.Logger
+	wans    map[string]*wanState
+	groups  map[string]*groupState
 }
 
 // newDaemon constructs the runtime state from `cfg`. Hysteresis
@@ -77,7 +75,6 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 		logger:  logger,
 		wans:    make(map[string]*wanState, len(cfg.Wans)),
 		groups:  make(map[string]*groupState, len(cfg.Groups)),
-		started: time.Now().UTC(),
 	}
 	for name, wan := range cfg.Wans {
 		ws := &wanState{
@@ -113,7 +110,7 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 // EEXIST), so re-running is a no-op.
 func (d *daemon) bootstrap() error {
 	for _, g := range d.cfg.Groups {
-		for _, fam := range []probe.Family{probe.FamilyV4, probe.FamilyV6} {
+		for _, fam := range probe.AllFamilies {
 			if err := apply.EnsureRule(apply.FwmarkRule{
 				Family: toApplyFamily(fam),
 				Mark:   g.Mark,
@@ -236,7 +233,7 @@ func (d *daemon) recomputeGroup(g *groupState, reason decisionReason) {
 		d.applyRoutes(g, *sel.Active)
 	}
 	d.writeStateSnapshot()
-	d.runHooks(g, old, sel.Active, reason)
+	d.runHooks(g, old, sel.Active)
 }
 
 // applyRoutes writes the default route in each family the new
@@ -254,11 +251,12 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "rule_install").Inc()
 		return
 	}
-	for _, fam := range []probe.Family{probe.FamilyV4, probe.FamilyV6} {
+	for _, fam := range probe.AllFamilies {
 		gw := gatewayFor(ws.cfg, fam)
 		if gw == nil {
 			continue
 		}
+		famLabel := fam.String()
 		started := time.Now()
 		err := apply.WriteDefault(apply.DefaultRoute{
 			Family:  toApplyFamily(fam),
@@ -266,9 +264,7 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 			Gateway: gw,
 			IfIndex: ifindex,
 		})
-		dur := time.Since(started).Seconds()
-		famLabel := fmtFamily(fam)
-		d.metrics.ApplyRouteDuration.WithLabelValues(g.cfg.Name, famLabel).Observe(dur)
+		d.metrics.ApplyRouteDuration.WithLabelValues(g.cfg.Name, famLabel).Observe(time.Since(started).Seconds())
 		if err != nil {
 			d.logger.Error("route write", "group", g.cfg.Name, "family", famLabel, "err", err)
 			d.metrics.ApplyRouteErrors.WithLabelValues(g.cfg.Name, famLabel).Inc()
@@ -287,7 +283,7 @@ func (d *daemon) writeStateSnapshot() {
 	for _, ws := range d.wans {
 		fams := make(map[string]state.Family, len(ws.families))
 		for fam, fs := range ws.families {
-			fams[fmtFamily(fam)] = state.Family{
+			fams[fam.String()] = state.Family{
 				Healthy:  fs.healthy,
 				RTTMs:    float64(fs.stats.RTTMicros) / 1000,
 				JitterMs: float64(fs.stats.JitterMicros) / 1000,
@@ -318,12 +314,10 @@ func (d *daemon) writeStateSnapshot() {
 	d.metrics.StatePublications.Inc()
 }
 
-// runHooks dispatches the appropriate event hook directory. The
-// up/down/switch matrix follows PLAN §5.5:
-//   - old == nil, new != nil → up
-//   - old != nil, new == nil → down
-//   - old != new (both non-nil) → switch
-func (d *daemon) runHooks(g *groupState, old, new_ *string, reason decisionReason) {
+// runHooks dispatches the event matching the old→new active
+// transition (see hookEventFor in decision.go) into the configured
+// hook directory.
+func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 	event := hookEventFor(old, new_)
 	if event == "" {
 		return
@@ -357,7 +351,6 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string, reason decisionReaso
 		}
 		d.metrics.HookInvocations.WithLabelValues(string(event), result).Inc()
 	}
-	_ = reason // reserved for the "reason" hook env var once v0.2 adds it
 }
 
 // maxHooksPerEvent is a safety bound for the aggregate hook
@@ -379,38 +372,38 @@ func toApplyFamily(f probe.Family) apply.Family {
 	return apply.FamilyV4
 }
 
-func gatewayFor(w config.Wan, fam probe.Family) net.IP {
+// gatewayString returns the textual gateway for `w` in `fam`, or
+// the empty string when the WAN has no gateway in that family. The
+// config stores gateways as strings, so this is the canonical form;
+// gatewayFor parses it into net.IP for the routing-table writer.
+func gatewayString(w config.Wan, fam probe.Family) string {
 	switch fam {
 	case probe.FamilyV4:
 		if w.Gateways.V4 != nil {
-			return net.ParseIP(*w.Gateways.V4)
+			return *w.Gateways.V4
 		}
 	case probe.FamilyV6:
 		if w.Gateways.V6 != nil {
-			return net.ParseIP(*w.Gateways.V6)
+			return *w.Gateways.V6
 		}
 	}
-	return nil
+	return ""
+}
+
+func gatewayFor(w config.Wan, fam probe.Family) net.IP {
+	s := gatewayString(w, fam)
+	if s == "" {
+		return nil
+	}
+	return net.ParseIP(s)
 }
 
 func interfaceIndex(name string) (int, error) {
 	iface, err := net.InterfaceByName(name)
 	if err != nil {
-		return 0, errors.New("InterfaceByName " + name + ": " + err.Error())
+		return 0, fmt.Errorf("InterfaceByName %q: %w", name, err)
 	}
 	return iface.Index, nil
-}
-
-func hookEventFor(old, new_ *string) state.Event {
-	switch {
-	case old == nil && new_ != nil:
-		return state.EventUp
-	case old != nil && new_ == nil:
-		return state.EventDown
-	case old != nil && new_ != nil && *old != *new_:
-		return state.EventSwitch
-	}
-	return ""
 }
 
 func ifaceFor(wans map[string]*wanState, name *string) string {
@@ -431,17 +424,7 @@ func gwStr(wans map[string]*wanState, name *string, fam probe.Family) string {
 	if !ok {
 		return ""
 	}
-	switch fam {
-	case probe.FamilyV4:
-		if w.cfg.Gateways.V4 != nil {
-			return *w.cfg.Gateways.V4
-		}
-	case probe.FamilyV6:
-		if w.cfg.Gateways.V6 != nil {
-			return *w.cfg.Gateways.V6
-		}
-	}
-	return ""
+	return gatewayString(w.cfg, fam)
 }
 
 func probedFamiliesFor(wans map[string]*wanState, name *string) []string {
@@ -454,7 +437,7 @@ func probedFamiliesFor(wans map[string]*wanState, name *string) []string {
 	}
 	out := make([]string, 0, 2)
 	for fam := range w.families {
-		out = append(out, fmtFamily(fam))
+		out = append(out, fam.String())
 	}
 	return out
 }
@@ -467,7 +450,7 @@ func strPtr(p *string) string {
 }
 
 func (d *daemon) recordProbeMetrics(r probe.ProbeResult, stableHealthy bool) {
-	famLabel := fmtFamily(r.Family)
+	famLabel := r.Family.String()
 	d.metrics.ProbeJitter.WithLabelValues(r.Wan, famLabel).Set(float64(r.Stats.JitterMicros) / 1000)
 	d.metrics.ProbeLoss.WithLabelValues(r.Wan, famLabel).Set(r.Stats.LossRatio)
 	for _, t := range r.Stats.PerTarget {

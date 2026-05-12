@@ -1,13 +1,14 @@
-// wanwatchd is the wanwatch daemon — one process per host. It reads
+// wanwatchd is the wanwatch daemon — one process per host. Reads
 // the JSON config rendered by `lib/internal/config.nix`, drives one
 // ICMP prober per (WAN, family), listens for rtnetlink link events,
 // and emits Decisions that mutate kernel routing state plus the
 // externalized state.json.
 //
-// This file owns process lifecycle (flag parsing, logging, signal
-// handling, sd_notify) and bootstraps the package-level subsystems
-// (metrics, rtnl, probe, apply, state). The Decision pipeline lives
-// in run.go alongside the event loop.
+// File layout:
+//   - main.go     — process lifecycle (flags, logging, signals)
+//   - daemon.go   — startProbers/startSubscriber + eventLoop
+//   - decision.go — pure helpers (thresholds, family policy, sort)
+//   - state.go    — daemon struct + Decision pipeline
 package main
 
 import (

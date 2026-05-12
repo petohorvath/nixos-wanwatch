@@ -1,28 +1,17 @@
 package main
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 )
 
-// evaluateThresholds returns whether the cycle's stats indicate the
-// (WAN, family) is healthy, using two-threshold band-pass:
-//
-//   - currently healthy → flip to down only if loss% ≥ LossPctDown
-//     OR RTT (ms) ≥ RttMsDown
-//   - currently unhealthy → flip to up only if loss% ≤ LossPctUp
-//     AND RTT (ms) ≤ RttMsUp
-//
-// Between the bands, hold the previous verdict — the
-// consecutive-cycle hysteresis layer (selector.HysteresisState)
-// then prevents single-cycle flips from leaking through.
-//
-// The Nix-side option-type validation guarantees Up < Down for
-// both metrics, so the band is always non-empty.
+// evaluateThresholds is a two-threshold band-pass: above Down→down,
+// below Up→up, in-band hold. The Nix-side option type guarantees
+// Up < Down so the band is always non-empty.
 func evaluateThresholds(prev bool, stats probe.FamilyStats, t config.Thresholds) bool {
 	lossPct := stats.LossRatio * 100
 	rttMs := float64(stats.RTTMicros) / 1000
@@ -118,17 +107,25 @@ func equalStringPtr(a, b *string) bool {
 type decisionReason string
 
 const (
-	reasonStartup decisionReason = "startup"
 	reasonHealth  decisionReason = "health"
 	reasonCarrier decisionReason = "carrier"
 )
 
-// fmtFamily renders a probe.Family as the textual label used in
-// metrics and state.json. Centralized so the daemon and the
-// catalog agree byte-for-byte.
-func fmtFamily(f probe.Family) string {
-	if s := f.String(); s != "" {
-		return s
+// hookEventFor maps the old/new active pointers to the hook
+// directory the runner should dispatch into:
+//
+//   - nil → non-nil ⇒ up
+//   - non-nil → nil ⇒ down
+//   - non-nil → non-nil, different ⇒ switch
+//   - otherwise ⇒ "" (no event)
+func hookEventFor(old, new_ *string) state.Event {
+	switch {
+	case old == nil && new_ != nil:
+		return state.EventUp
+	case old != nil && new_ == nil:
+		return state.EventDown
+	case old != nil && new_ != nil && *old != *new_:
+		return state.EventSwitch
 	}
-	return fmt.Sprintf("Family(%d)", int(f))
+	return ""
 }
