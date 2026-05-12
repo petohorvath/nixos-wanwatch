@@ -45,6 +45,14 @@
 
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
+      packages = forAllSystems (
+        pkgs:
+        nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux rec {
+          wanwatchd = pkgs.callPackage ./pkgs/wanwatchd.nix { };
+          default = wanwatchd;
+        }
+      );
+
       checks = forAllSystems (
         pkgs:
         {
@@ -85,6 +93,12 @@
                 go test -v ./...
                 touch $out
               '';
+
+          # Build the daemon as part of `nix flake check` so a
+          # regression in `pkgs/wanwatchd.nix` (e.g. a missing source
+          # file under `fileset`, a vendored-dep drift) fails CI
+          # rather than waiting for an actual `nix build` invocation.
+          package = self.packages.${pkgs.stdenv.hostPlatform.system}.wanwatchd;
         }
       );
 
