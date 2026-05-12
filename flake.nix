@@ -46,6 +46,7 @@
       nixosModules = {
         default = import ./modules/wanwatch.nix { wanwatch = self.lib; };
         wanwatch = self.nixosModules.default;
+        telegraf = import ./modules/telegraf.nix;
       };
 
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
@@ -112,6 +113,7 @@
             inherit pkgs;
             wanwatch = self.lib;
             nixosModule = self.nixosModules.default;
+            telegrafModule = self.nixosModules.telegraf;
           };
         }
       );

@@ -11,6 +11,7 @@
   pkgs,
   wanwatch,
   nixosModule,
+  telegrafModule,
 }:
 
 let
@@ -77,6 +78,27 @@ let
 
   serviceCfg = evaluated.config.systemd.services.wanwatch.serviceConfig;
   ambientCaps = lib.concatStringsSep " " serviceCfg.AmbientCapabilities;
+
+  # Second scenario: telegraf scrape enabled. Pulls in the
+  # telegraf module from the host nixpkgs so its option surface
+  # exists; the wanwatch telegraf module references
+  # services.telegraf.extraConfig + telegraf user group membership.
+  withTelegraf = import (pkgs.path + "/nixos/lib/eval-config.nix") {
+    system = pkgs.stdenv.hostPlatform.system;
+    modules = [
+      nixosModule
+      telegrafModule
+      baseConfig
+      {
+        services.telegraf.enable = true;
+        services.wanwatch.telegraf.enable = true;
+      }
+    ];
+  };
+
+  promInputs = withTelegraf.config.services.telegraf.extraConfig.inputs.prometheus;
+  promInput = builtins.head promInputs;
+  telegrafGroups = withTelegraf.config.users.users.telegraf.extraGroups;
 in
 pkgs.runCommand "wanwatch-integration"
   {
@@ -108,6 +130,17 @@ pkgs.runCommand "wanwatch-integration"
 
     # 6. systemd unit is wired with the right capabilities.
     test "${ambientCaps}" = "CAP_NET_ADMIN CAP_NET_RAW"
+
+    # 7. Telegraf scrape integration: prometheus input points at
+    # the daemon's metrics socket, filters to wanwatch_* only,
+    # and the telegraf account joins the wanwatch group.
+    test "${builtins.head promInput.urls}" = "unix:///run/wanwatch/metrics.sock:/metrics"
+    test "${builtins.head promInput.namepass}" = "wanwatch_*"
+    test "${promInput.interval}" = "10s"
+    case " ${lib.concatStringsSep " " telegrafGroups} " in
+      *" wanwatch "*) ;;
+      *) echo "telegraf user not in wanwatch group"; exit 1 ;;
+    esac
 
     touch $out
   ''
