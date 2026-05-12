@@ -14,6 +14,16 @@
     # release.
     libnet.url = "git+file:///home/dev/projects/nix-libnet";
 
+    # nix-nftzones is only used by the nftzones-integration VM
+    # scenario (tests/vm/nftzones-integration.nix). Pinned to the
+    # same local-checkout style as libnet for the same reason;
+    # override via --override-input nftzones <ref> in CI / release.
+    nftzones.url = "git+file:///home/dev/projects/nix-nftzones";
+    nftzones.inputs.nixpkgs.follows = "nixpkgs";
+    nftzones.inputs.libnet.follows = "libnet";
+    nftzones.inputs.nftypes.url = "git+file:///home/dev/projects/nix-nftypes";
+    nftzones.inputs.nftypes.inputs.nixpkgs.follows = "nixpkgs";
+
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -23,6 +33,7 @@
       self,
       nixpkgs,
       libnet,
+      nftzones,
       treefmt-nix,
     }:
     let
@@ -152,6 +163,12 @@
           vm-family-health-policy = import ./tests/vm/family-health-policy.nix {
             inherit pkgs;
             nixosModule = self.nixosModules.default;
+          };
+          vm-nftzones-integration = import ./tests/vm/nftzones-integration.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+            nftzonesModule = nftzones.nixosModules.default;
+            nftypes = nftzones.inputs.nftypes.lib;
           };
         }
       );
