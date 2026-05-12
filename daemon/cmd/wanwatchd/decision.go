@@ -33,9 +33,10 @@ func evaluateThresholds(prev bool, stats probe.FamilyStats, t config.Thresholds)
 //   - "all" — every probed family must be healthy
 //   - "any" — at least one probed family must be healthy
 //
-// `families` carries Nil entries for families the WAN doesn't
-// probe (no gateway in that family) — those are skipped, not
-// counted against the verdict.
+// A family that hasn't received its first ProbeResult yet (`cooked
+// = false`) is treated as healthy — PLAN §8 cold-start says
+// "health is unknown but carrier is at least known", so we trust
+// carrier alone until the first sample arrives.
 func combineFamilies(families map[probe.Family]*familyState, policy string) bool {
 	var probed, healthy int
 	for _, f := range families {
@@ -43,7 +44,7 @@ func combineFamilies(families map[probe.Family]*familyState, policy string) bool
 			continue
 		}
 		probed++
-		if f.healthy {
+		if !f.cooked || f.healthy {
 			healthy++
 		}
 	}

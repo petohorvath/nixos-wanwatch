@@ -18,11 +18,18 @@ import (
 
 // familyState is the per-(WAN, family) slice of runtime state. One
 // per Pinger goroutine; updated when a ProbeResult arrives.
+//
+// `cooked` flips to true on the first ProbeResult — until then,
+// PLAN §8 cold-start grants the family healthy-via-carrier
+// (handled in combineFamilies). Without this, an interface that
+// boots before its first probe cycle would be unhealthy and the
+// daemon would publish no Selection even when carrier is fine.
 type familyState struct {
 	family  probe.Family
 	stats   probe.FamilyStats
 	hyst    *selector.HysteresisState
 	healthy bool
+	cooked  bool
 }
 
 // wanState is the per-WAN slice — carrier/operstate (from rtnl)
@@ -83,6 +90,12 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 			carrier:   rtnl.CarrierUnknown,
 			operstate: rtnl.OperstateUnknown,
 			families:  make(map[probe.Family]*familyState, 2),
+			// PLAN §8 cold-start: no probe samples yet means
+			// "health unknown but carrier known". Treat the WAN
+			// as health-positive so a carrier-up rtnl event can
+			// fire an initial Decision without waiting on the
+			// probe loop.
+			healthy: true,
 		}
 		if wan.Gateways.V4 != nil {
 			ws.families[probe.FamilyV4] = &familyState{
@@ -153,7 +166,9 @@ func (d *daemon) handleProbeResult(r probe.ProbeResult) {
 
 	d.recordProbeMetrics(r, stable)
 
-	if stable == fs.healthy {
+	prevCooked := fs.cooked
+	fs.cooked = true
+	if prevCooked && stable == fs.healthy {
 		return
 	}
 	fs.healthy = stable

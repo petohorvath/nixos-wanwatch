@@ -64,9 +64,9 @@ func TestEvaluateThresholdsFlipsUpRequiresBothMetrics(t *testing.T) {
 
 func TestCombineFamiliesAll(t *testing.T) {
 	t.Parallel()
-	healthyV4 := &familyState{healthy: true}
-	healthyV6 := &familyState{healthy: true}
-	unhealthyV6 := &familyState{healthy: false}
+	healthyV4 := &familyState{cooked: true, healthy: true}
+	healthyV6 := &familyState{cooked: true, healthy: true}
+	unhealthyV6 := &familyState{cooked: true, healthy: false}
 
 	if !combineFamilies(map[probe.Family]*familyState{
 		probe.FamilyV4: healthyV4,
@@ -85,16 +85,34 @@ func TestCombineFamiliesAll(t *testing.T) {
 func TestCombineFamiliesAny(t *testing.T) {
 	t.Parallel()
 	if !combineFamilies(map[probe.Family]*familyState{
-		probe.FamilyV4: {healthy: true},
-		probe.FamilyV6: {healthy: false},
+		probe.FamilyV4: {cooked: true, healthy: true},
+		probe.FamilyV6: {cooked: true, healthy: false},
 	}, "any") {
 		t.Error("one healthy under 'any' should be true")
 	}
 	if combineFamilies(map[probe.Family]*familyState{
-		probe.FamilyV4: {healthy: false},
-		probe.FamilyV6: {healthy: false},
+		probe.FamilyV4: {cooked: true, healthy: false},
+		probe.FamilyV6: {cooked: true, healthy: false},
 	}, "any") {
 		t.Error("none healthy under 'any' should be false")
+	}
+}
+
+func TestCombineFamiliesUncookedIsHealthyVote(t *testing.T) {
+	t.Parallel()
+	// PLAN §8 cold-start: before the first probe sample lands,
+	// the family contributes a healthy vote so a carrier-up rtnl
+	// event can fire an initial Decision.
+	if !combineFamilies(map[probe.Family]*familyState{
+		probe.FamilyV4: {cooked: false},
+	}, "all") {
+		t.Error("uncooked family under 'all' should vote healthy")
+	}
+	// After the first sample lands, the cooked verdict takes over.
+	if combineFamilies(map[probe.Family]*familyState{
+		probe.FamilyV4: {cooked: true, healthy: false},
+	}, "all") {
+		t.Error("cooked-unhealthy family should override cold-start")
 	}
 }
 
