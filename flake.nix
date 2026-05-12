@@ -140,6 +140,10 @@
             inherit pkgs;
             nixosModule = self.nixosModules.default;
           };
+          vm-hooks = import ./tests/vm/hooks.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
         }
       );
 
