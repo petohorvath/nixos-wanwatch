@@ -20,7 +20,7 @@ in
 
   testVersionExposed = {
     expr = wanwatch.version;
-    expected = "0.1.0-dev";
+    expected = "0.1.0";
   };
 
   testInternalNamespacesReachable = {
