@@ -121,6 +121,12 @@ func (d *daemon) bootstrap() error {
 		}
 	}
 	d.logger.Info("fwmark rules installed", "groups", len(d.cfg.Groups))
+
+	// Publish an initial state.json so consumers (state-readers,
+	// wanwatch_state_publications_total, integration checks) see
+	// the daemon's view from the very first scrape — even before
+	// any probe sample lands. PLAN §8 cold-start.
+	d.writeStateSnapshot()
 	return nil
 }
 

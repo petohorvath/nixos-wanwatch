@@ -115,6 +115,15 @@
             nixosModule = self.nixosModules.default;
             telegrafModule = self.nixosModules.telegraf;
           };
+
+          # VM tier: boot a real NixOS VM, start the daemon, and
+          # assert end-to-end behavior the unit + integration tiers
+          # can't reach (capabilities, systemd hardening,
+          # netlink-bound apply, real socket modes). Linux+KVM only.
+          vm-smoke = import ./tests/vm/smoke.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
         }
       );
 
