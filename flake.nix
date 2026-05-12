@@ -144,6 +144,11 @@
             inherit pkgs;
             nixosModule = self.nixosModules.default;
           };
+          vm-metrics = import ./tests/vm/metrics.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+            telegrafModule = self.nixosModules.telegraf;
+          };
         }
       );
 
