@@ -43,6 +43,11 @@
         libnet = libnet.lib.withLib nixpkgs.lib;
       };
 
+      nixosModules = {
+        default = import ./modules/wanwatch.nix { wanwatch = self.lib; };
+        wanwatch = self.nixosModules.default;
+      };
+
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
       packages = forAllSystems (
@@ -99,6 +104,15 @@
           # file under `fileset`, a vendored-dep drift) fails CI
           # rather than waiting for an actual `nix build` invocation.
           package = self.packages.${pkgs.stdenv.hostPlatform.system}.wanwatchd;
+
+          # Evaluate the NixOS module against a realistic
+          # declaration and assert the rendered config + module
+          # outputs are well-formed.
+          integration = import ./tests/integration {
+            inherit pkgs;
+            wanwatch = self.lib;
+            nixosModule = self.nixosModules.default;
+          };
         }
       );
 
