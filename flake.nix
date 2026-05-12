@@ -128,6 +128,18 @@
             inherit pkgs;
             nixosModule = self.nixosModules.default;
           };
+          vm-failover-v6 = import ./tests/vm/failover-v6.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
+          vm-failover-dual-stack = import ./tests/vm/failover-dual-stack.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
+          vm-recovery = import ./tests/vm/recovery.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
         }
       );
 
