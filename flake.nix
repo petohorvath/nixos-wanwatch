@@ -124,6 +124,10 @@
             inherit pkgs;
             nixosModule = self.nixosModules.default;
           };
+          vm-failover-v4 = import ./tests/vm/failover-v4.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
         }
       );
 
