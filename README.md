@@ -1,68 +1,91 @@
 # nixos-wanwatch
 
-Multi-WAN monitoring and failover for NixOS — probe WAN interfaces, decide
-which is healthy, select an active member per group, and switch kernel
-routing state on health changes.
+Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides which is healthy, selects an active member per group, and switches kernel routing state on health changes.
 
-**Status**: pre-release. No tagged version yet. The shape of the public
-surface is locked in [`PLAN.md`](./PLAN.md); implementation is in progress.
+**Status**: v0.1.0 — feature-complete per [`PLAN.md`](./PLAN.md). Library, NixOS module, daemon, and full test tier (unit + integration + VM) are in place.
 
 ## What it does
 
-- Probes each declared WAN interface with ICMP / ICMPv6 (per family).
-- Tracks RTT, jitter, and loss via a sliding-window algorithm.
-- Combines kernel carrier / operstate events with probe results into a
-  per-WAN Health verdict (`up` / `down` / `degraded` / `unknown`).
-- Selects an active Member per Group under a configurable Strategy
-  (v1: `primary-backup`, single-active).
-- Applies the decision to the kernel — rewrites the default route in
-  the group's routing table per family via netlink, flushes conntrack
-  entries on the dead path.
-- Publishes state at `/run/wanwatch/state.json` and runs hook scripts on
-  every Decision.
-- Exposes Prometheus metrics over a Unix socket for Telegraf /
-  Prometheus / any scraper.
+- ICMP / ICMPv6 probes per declared WAN, per family.
+- Sliding-window RTT / jitter / loss with hysteresis.
+- Carrier / operstate via rtnetlink — carrier-down fast-tracks to unhealthy.
+- Per-Group Strategy (v1: `primary-backup`) maps Health to a Selection.
+- Atomic apply: route + fwmark rule via netlink, conntrack flush, state snapshot, hook dispatch.
+- Prometheus metrics over a Unix socket. Optional Telegraf companion module.
+
+## Quickstart
+
+```nix
+{
+  inputs.wanwatch.url = "github:petohorvath/nixos-wanwatch";
+
+  outputs = { self, nixpkgs, wanwatch }: {
+    nixosConfigurations.router = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        wanwatch.nixosModules.default
+        ({ ... }: {
+          services.wanwatch = {
+            enable = true;
+
+            wans.primary = {
+              interface = "eth0";
+              gateways.v4 = "192.0.2.1";
+              probe.targets = [ "1.1.1.1" "8.8.8.8" ];
+            };
+
+            wans.backup = {
+              interface = "wwan0";
+              gateways.v4 = "100.64.0.1";
+              probe.targets = [ "1.1.1.1" ];
+            };
+
+            groups.home-uplink.members = [
+              { wan = "primary"; priority = 1; }
+              { wan = "backup";  priority = 2; }
+            ];
+          };
+        })
+      ];
+    };
+  };
+}
+```
+
+`config.services.wanwatch.marks.home-uplink` and `.tables.home-uplink` expose the auto-allocated fwmark / routing-table id for downstream firewall configs. See [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
 
 ## Components
 
 | Layer | Where | Role |
 |---|---|---|
-| Pure-Nix library | `lib/` | Types (`wan`, `probe`, `group`, `member`), validation, allocators, selection logic. Zero `nixpkgs` dependency in the core. |
-| NixOS module | `modules/` | `services.wanwatch.*` — renders daemon config, emits systemd unit, optional Telegraf integration. |
-| Go daemon | `daemon/` | `wanwatchd` — probing, decision, netlink-based apply, state publication, hook runner, Prometheus endpoint. |
+| Pure-Nix library | `lib/` | Typed values (`wan`, `probe`, `group`, `member`), validation, mark/table allocators, pure selector. |
+| NixOS module | `modules/` | `services.wanwatch.*` option surface, JSON renderer, hardened systemd unit. |
+| Go daemon | `daemon/` | `wanwatchd` — probe goroutines, rtnl subscriber, selector + hysteresis, netlink apply, state writer, hook runner, Prometheus endpoint. |
 
 ## Composition with sibling projects
 
-- **[`nix-libnet`](../nix-libnet)** — IP/CIDR/interface validation used
-  throughout the lib.
-- **[`nix-nftzones`](../nix-nftzones)** — zone-based nftables firewall.
-  wanwatch publishes per-group fwmarks; nftzones references them in
-  `sroute` / `droute` rules. No nftzones changes required.
+- **[`nix-libnet`](../nix-libnet)** — IP / CIDR / interface-name validators used throughout the lib.
+- **[`nix-nftzones`](../nix-nftzones)** — zone-based nftables firewall. References `services.wanwatch.marks.<group>` in `sroute` rules to direct traffic to the active member.
+
+## Commands
+
+```sh
+nix flake check       # unit + integration + VM tier (VM needs /dev/kvm)
+nix fmt               # nixfmt + gofumpt + goimports
+nix build .#wanwatchd # build the daemon binary
+nix develop           # devshell with go, gopls, golangci-lint
+```
 
 ## Documentation
 
-- [`PLAN.md`](./PLAN.md) — the v1 design plan; authoritative on scope,
-  API surface, build order, and conventions.
-- [`docs/glossary.md`](./docs/glossary.md) — terminology used across
-  code, comments, commits, and docs.
-- [`CLAUDE.md`](./CLAUDE.md) — conventions for AI-assisted contributions
-  and human contributors alike.
-
-## Quick check
-
-```sh
-nix flake check     # all unit + integration + vm tests
-nix fmt             # nixfmt + gofumpt + goimports via treefmt
-```
-
-## Local development against sibling projects
-
-The flake pins `nix-libnet` via a github URL by default. For local
-development against an unpushed checkout, override the input:
-
-```sh
-nix flake check --override-input libnet path:../nix-libnet
-```
+- [`PLAN.md`](./PLAN.md) — authoritative v1 design.
+- [`docs/wan-monitoring.md`](./docs/wan-monitoring.md) — newcomer's introduction.
+- [`docs/architecture.md`](./docs/architecture.md) — layering + data flow.
+- [`docs/selector.md`](./docs/selector.md) — strategy + hysteresis algorithm.
+- [`docs/nftzones-integration.md`](./docs/nftzones-integration.md) — wiring with the zone-based firewall.
+- [`docs/metrics.md`](./docs/metrics.md) — Prometheus catalog.
+- [`docs/specs/`](./docs/specs/) — frozen JSON contracts and prior-art distillation.
+- [`docs/glossary.md`](./docs/glossary.md) — enforced terminology.
 
 ## License
 
