@@ -149,6 +149,10 @@
             nixosModule = self.nixosModules.default;
             telegrafModule = self.nixosModules.telegraf;
           };
+          vm-family-health-policy = import ./tests/vm/family-health-policy.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
         }
       );
 
