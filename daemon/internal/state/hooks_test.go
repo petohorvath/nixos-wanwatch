@@ -223,3 +223,39 @@ func TestEventConstants(t *testing.T) {
 			EventUp, EventDown, EventSwitch)
 	}
 }
+
+// TestRunCapturesNonExitError: when the kernel refuses to exec the
+// script at all (missing interpreter), cmd.Run() returns a non-
+// `*exec.ExitError`. The runOne handler must still produce a
+// HookResult with ExitCode=-1 and a wrapped Err — not panic on
+// the errors.As branch.
+func TestRunCapturesNonExitError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "up.d")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Shebang points at a path that doesn't exist on any host;
+	// `execve` returns ENOENT, which Go surfaces as a PathError
+	// rather than an ExitError.
+	body := "#!/this/interpreter/does/not/exist\n:\n"
+	if err := os.WriteFile(filepath.Join(eventDir, "broken.sh"), []byte(body), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	r := Runner{Dir: dir}
+	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	if len(results) != 1 {
+		t.Fatalf("len(results) = %d, want 1", len(results))
+	}
+	if results[0].Err == nil {
+		t.Error("Err = nil, want non-nil for missing-interpreter exec failure")
+	}
+	if results[0].ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1 for non-ExitError failure", results[0].ExitCode)
+	}
+	if results[0].TimedOut {
+		t.Error("TimedOut = true, want false for non-timeout failure")
+	}
+}

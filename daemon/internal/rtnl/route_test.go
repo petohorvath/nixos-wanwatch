@@ -330,3 +330,33 @@ func TestRouteRunLoopCancelsBetweenUpdates(t *testing.T) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
+
+func TestInterfaceNameByIndexResolvesLoopback(t *testing.T) {
+	t.Parallel()
+	// `lo` is on every Linux host. ifindex 1 is the kernel
+	// convention but not a contract; lookup-by-name → ifindex →
+	// lookup-by-index lets the test work regardless of the host's
+	// interface enumeration order.
+	lo, err := net.InterfaceByName("lo")
+	if err != nil {
+		t.Skipf("no `lo` interface on this host: %v", err)
+	}
+	name, err := interfaceNameByIndex(lo.Index)
+	if err != nil {
+		t.Fatalf("interfaceNameByIndex(%d) = %v, want nil", lo.Index, err)
+	}
+	if name != "lo" {
+		t.Errorf("interfaceNameByIndex(%d) = %q, want %q", lo.Index, name, "lo")
+	}
+}
+
+func TestInterfaceNameByIndexRejectsBogusIndex(t *testing.T) {
+	t.Parallel()
+	// 0x7fff_ffff is "highly unlikely to be a real ifindex"; the
+	// kernel won't hand out an ifindex that large in any realistic
+	// runner. interfaceNameByIndex must surface the underlying
+	// net.InterfaceByIndex error rather than crashing.
+	if _, err := interfaceNameByIndex(0x7fffffff); err == nil {
+		t.Error("interfaceNameByIndex(bogus) = nil err, want non-nil")
+	}
+}

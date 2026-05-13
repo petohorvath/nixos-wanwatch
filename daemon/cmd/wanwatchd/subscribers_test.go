@@ -275,6 +275,29 @@ func TestWatchedInterfacesEmpty(t *testing.T) {
 	}
 }
 
+// TestFamiliesFromTargetsSkipsNonIP: non-IP strings in the
+// targets list are silently dropped — the config layer should
+// have rejected them already, but the daemon doesn't trust its
+// input and must not crash on garbage.
+func TestFamiliesFromTargetsSkipsNonIP(t *testing.T) {
+	t.Parallel()
+	got := familiesFromTargets([]string{"not-an-ip", "1.1.1.1", "also.not"})
+	if !got.v4 {
+		t.Error("v4 = false; want true (1.1.1.1 should still count)")
+	}
+	if got.v6 {
+		t.Error("v6 = true; want false (no v6 literal)")
+	}
+}
+
+func TestFamiliesFromTargetsAllInvalid(t *testing.T) {
+	t.Parallel()
+	got := familiesFromTargets([]string{"", "abc", "256.256.256.256"})
+	if got.v4 || got.v6 {
+		t.Errorf("got = %+v, want both false (no valid IPs)", got)
+	}
+}
+
 // equalUnorderedStrings returns true if a and b contain the same
 // elements regardless of order. targetsFor preserves the input
 // order today, but asserting on order would couple the test to

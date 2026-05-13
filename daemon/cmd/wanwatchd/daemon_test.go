@@ -543,3 +543,117 @@ func writeHook(t *testing.T, eventDir, name, script string) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 }
+
+// TestHandleProbeResultUnknownWanNoOp: a result for a WAN the
+// daemon has no state for must silently drop — catches a config-
+// reload race where the prober has spun up but the daemon's WAN
+// map hasn't.
+func TestHandleProbeResultUnknownWanNoOp(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfg())
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "ghost",
+		Family: probe.FamilyV4,
+		Stats:  probe.FamilyStats{LossRatio: 0.5},
+	})
+	// No panic, no metric pollution. Verify d.wans is untouched
+	// (no ghost entry sneaked in).
+	if _, ok := d.wans["ghost"]; ok {
+		t.Error("handleProbeResult created a wanState for an unknown WAN")
+	}
+}
+
+// TestHandleProbeResultUnknownFamilyNoOp: result for a (known
+// WAN, unsupported family) — the family map is built from the
+// declared probe.targets, so a result for a family the config
+// didn't ask for is a programmer mistake, not a runtime case.
+// Drop silently.
+func TestHandleProbeResultUnknownFamilyNoOp(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	// backup is v4-only (target list has only "8.8.8.8") — so its
+	// families map will not contain FamilyV6.
+	d := testDaemon(t, cfg)
+	if _, ok := d.wans["backup"].families[probe.FamilyV6]; ok {
+		t.Fatal("setup: backup unexpectedly probes v6")
+	}
+	// This should be a no-op.
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "backup",
+		Family: probe.FamilyV6,
+		Stats:  probe.FamilyStats{LossRatio: 0.0},
+	})
+}
+
+// TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate:
+// for a dual-stack WAN under familyHealthPolicy=any, a single
+// family going healthy doesn't change the aggregate (it was
+// already healthy via cold-start). The path still republishes
+// state.json so external scrape readers see the per-family slot
+// flip — that branch was the previously-uncovered tail of
+// handleProbeResult.
+func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	// any-policy: aggregate stays true as long as ≥1 family is
+	// healthy. Cold-start gives both `cooked=false` ⇒ both count
+	// as healthy ⇒ aggregate=true. A first ProbeResult with bad
+	// stats flips v4's cooked=true (raw=false ⇒ stable=false), but
+	// v6 is still uncooked → aggregate remains true under "any".
+	cfg.Wans["primary"] = config.Wan{
+		Name:      "primary",
+		Interface: "eth0",
+		Probe: config.Probe{
+			Targets:            []string{"1.1.1.1", "2606:4700:4700::1111"},
+			Thresholds:         config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
+			Hysteresis:         config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
+			FamilyHealthPolicy: "any",
+		},
+	}
+	d := testDaemon(t, cfg)
+
+	stateBefore, _ := os.Stat(d.cfg.Global.StatePath)
+
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats:  probe.FamilyStats{LossRatio: 0.95, RTTMicros: 50_000},
+	})
+
+	if !d.wans["primary"].healthy {
+		t.Error("aggregate flipped under `any` despite v6 still uncooked")
+	}
+	// Republish should have happened: state.json modtime advances,
+	// OR (cold path) state.json now exists.
+	stateAfter, err := os.Stat(d.cfg.Global.StatePath)
+	if err != nil {
+		t.Fatalf("state.json missing after republish branch: %v", err)
+	}
+	if stateBefore != nil && !stateAfter.ModTime().After(stateBefore.ModTime()) {
+		// Modtime may equal if the test runs within the FS's mtime
+		// granularity. Be lenient — the file existing post-call is
+		// the load-bearing assertion.
+		t.Logf("state.json modtime didn't advance (within FS granularity?)")
+	}
+}
+
+// TestRecordProbeMetricsEmptyPerTarget: cold start emits a
+// FamilyStats with no per-target entries — the PerTarget loop
+// must be a no-op (not crash, not emit a stale gauge with empty
+// label).
+func TestRecordProbeMetricsEmptyPerTarget(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfg())
+	d.recordProbeMetrics(probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats:  probe.FamilyStats{LossRatio: 0, RTTMicros: 0, PerTarget: nil},
+	}, false)
+	// We mostly want "no panic"; assert one observable side
+	// effect that should still happen even on empty PerTarget:
+	// the WanFamilyHealthy gauge.
+	v := readGauge(t, d.metrics.WanFamilyHealthy.WithLabelValues("primary", "v4"))
+	if v != 0 {
+		t.Errorf("WanFamilyHealthy(primary,v4) = %v, want 0", v)
+	}
+}

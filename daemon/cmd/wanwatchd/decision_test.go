@@ -289,3 +289,33 @@ func TestGroupContainsWANEmptyGroup(t *testing.T) {
 		t.Error("groupContainsWAN on empty group returned true")
 	}
 }
+
+// TestCombineFamiliesEmptyReturnsFalse: a WAN with zero probed
+// families isn't a useful runtime state, but the function is the
+// last line of defence — degenerate input must yield "unhealthy",
+// never panic or return true by default.
+func TestCombineFamiliesEmptyReturnsFalse(t *testing.T) {
+	t.Parallel()
+	cases := []string{"all", "any", "weird-policy"}
+	for _, policy := range cases {
+		t.Run(policy, func(t *testing.T) {
+			t.Parallel()
+			if combineFamilies(map[probe.Family]*familyState{}, policy) {
+				t.Errorf("combineFamilies(empty, %q) = true, want false", policy)
+			}
+		})
+	}
+}
+
+// TestCombineFamiliesNilEntry: a nil *familyState in the map must
+// be skipped (defensive guard), not crash.
+func TestCombineFamiliesNilEntry(t *testing.T) {
+	t.Parallel()
+	fams := map[probe.Family]*familyState{
+		probe.FamilyV4: nil,
+		probe.FamilyV6: {family: probe.FamilyV6, healthy: true, cooked: true},
+	}
+	if !combineFamilies(fams, "any") {
+		t.Error("combineFamilies({nil,v6-healthy}, any) = false, want true (nil skipped, v6 wins)")
+	}
+}

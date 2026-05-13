@@ -115,6 +115,19 @@ func TestValidateDefaultRouteRejects(t *testing.T) {
 			},
 			wantSub: "pointToPoint route must have nil Gateway",
 		},
+		{
+			// PointToPoint reaches its own family-check branch
+			// (separate from the gateway path) — pin that the
+			// pointToPoint-true codepath rejects an invalid family
+			// rather than passing it through to netlink.
+			name: "pointToPoint with invalid family",
+			mutate: func(d *DefaultRoute) {
+				d.PointToPoint = true
+				d.Gateway = nil
+				d.Family = probe.Family(99)
+			},
+			wantSub: "invalid family",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

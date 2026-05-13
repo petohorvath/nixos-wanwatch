@@ -71,6 +71,26 @@ func TestEnsureRuleWrapsOtherErrors(t *testing.T) {
 	}
 }
 
+// TestEnsureRuleViaSkipsRuleAddOnValidationFailure: validation
+// happens before the netlink call. A bad rule must never reach
+// `ruleAdd`, regardless of what the seam would have returned.
+func TestEnsureRuleViaSkipsRuleAddOnValidationFailure(t *testing.T) {
+	t.Parallel()
+	called := false
+	ruleAdd := func(*netlink.Rule) error {
+		called = true
+		return nil
+	}
+	r := validFwmarkRule()
+	r.Mark = 0 // validator rejects
+	if err := ensureRuleVia(ruleAdd, r); err == nil {
+		t.Error("ensureRuleVia(invalid) = nil err, want error")
+	}
+	if called {
+		t.Error("ruleAdd was called despite validation failure")
+	}
+}
+
 func TestValidateRuleRejects(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

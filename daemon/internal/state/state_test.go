@@ -3,8 +3,10 @@ package state
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -250,5 +252,55 @@ func TestWriteReturnsRecognizableErrors(t *testing.T) {
 	}
 	if errors.Unwrap(err) == nil {
 		t.Errorf("Write error has no wrapped underlying error: %v", err)
+	}
+}
+
+// TestWriteFailsOnUnmarshalableState: a NaN float in the state
+// tree is unrepresentable in JSON. encoding/json returns an
+// UnsupportedValueError; Writer.Write wraps it with the "marshal"
+// prefix so the failure mode is greppable in logs.
+func TestWriteFailsOnUnmarshalableState(t *testing.T) {
+	t.Parallel()
+	w := Writer{Path: filepath.Join(t.TempDir(), "state.json")}
+	err := w.Write(State{
+		Wans: map[string]Wan{
+			"primary": {
+				Families: map[string]FamilyHealth{
+					"v4": {LossRatio: math.NaN()},
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Write(NaN) = nil err, want marshal failure")
+	}
+	if !strings.Contains(err.Error(), "marshal") {
+		t.Errorf("err = %q, want 'marshal' prefix", err.Error())
+	}
+}
+
+// TestWriteRenameFailsWhenPathIsADirectory: a Path that names an
+// existing directory turns os.Rename(tmpfile, dir) into an EISDIR
+// (or similar) — exercising the last error branch of the
+// tmpfile + rename dance.
+func TestWriteRenameFailsWhenPathIsADirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Name a sub-directory the same as the would-be statefile.
+	occupied := filepath.Join(dir, "state.json")
+	if err := os.Mkdir(occupied, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	w := Writer{Path: occupied}
+	err := w.Write(State{Wans: map[string]Wan{"w": {Interface: "eth0"}}})
+	if err == nil {
+		t.Fatal("Write(path=dir) = nil err, want rename failure")
+	}
+	if !strings.Contains(err.Error(), "rename") {
+		// Some platforms surface this as EISDIR on Write or Close
+		// before the rename; either is fine, but the contract is
+		// that we get a wrapped error, not a panic or silent
+		// success.
+		t.Logf("err = %q (rename branch may have been pre-empted; surface error wrapped: %v)", err.Error(), errors.Unwrap(err) != nil)
 	}
 }

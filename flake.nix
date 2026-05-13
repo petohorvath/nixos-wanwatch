@@ -218,13 +218,13 @@
                 # mirrors PLAN §9.2; keep this list as the single
                 # source of truth — CI just reads it back.
                 cat > coverage.thresholds <<'EOF'
-                internal/apply:85
-                internal/config:90
+                internal/apply:90
+                internal/config:95
                 internal/metrics:85
                 internal/probe:80
-                internal/rtnl:70
+                internal/rtnl:73
                 internal/selector:95
-                internal/state:85
+                internal/state:93
                 EOF
 
                 go test -cover ./internal/... > coverage.out 2>&1 || {
