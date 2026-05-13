@@ -4,6 +4,19 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ## [Unreleased]
 
+### Changed
+
+- **API break — `wans.<name>.gateways` removed.** Replaced by a single `pointToPoint` bool (default `false`). For broadcast links the daemon now discovers the default-route next-hop dynamically via netlink (`RTNLGRP_IPV4_ROUTE` + `RTNLGRP_IPV6_ROUTE`) from the kernel's main routing table. For point-to-point links (PPP, WireGuard, GRE, tun) set `pointToPoint = true` and the daemon installs `scope link` default routes — no gateway needed.
+- A WAN's served families are now derived solely from `probe.targets` (v4 literals ⇒ serves v4; v6 literals ⇒ serves v6). No separate gateway declaration to keep in sync; family-coupling validation is therefore retired.
+- `state.json` schema bumped to **2**: per-WAN `gateways: { v4, v6 }` reflecting the discovered next-hops. Schema 1 readers will need to be updated.
+- Hook env vars `WANWATCH_GATEWAY_V4/V6_OLD/NEW` now carry the discovered next-hop instead of the operator-typed value. Empty when the WAN is point-to-point or the cache has no entry yet.
+
+### Added
+
+- `daemon/internal/rtnl.RouteSubscriber` — emits per-`(iface, family)` default-route add/del events from the main RIB, filtered to WAN interfaces.
+- `daemon/cmd/wanwatchd.GatewayCache` — mirrors the kernel's view; drives non-PtP route writes and re-applies on route flap.
+- VM scenario `tests/vm/gateway-discovery.nix` — end-to-end coverage of the discovery loop.
+
 ## [0.1.0] — 2026-05-12
 
 Initial public release. Feature-complete per [`PLAN.md`](./PLAN.md) v1 scope.
@@ -56,7 +69,7 @@ Initial public release. Feature-complete per [`PLAN.md`](./PLAN.md) v1 scope.
 ### Schemas
 
 - `config.json` schema version: **1**.
-- `state.json` schema version: **1**.
+- `state.json` schema version: **1**. (Bumped to **2** in [Unreleased] — see the per-WAN `gateways` addition above.)
 
 [Unreleased]: https://github.com/petohorvath/nixos-wanwatch/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/petohorvath/nixos-wanwatch/releases/tag/v0.1.0

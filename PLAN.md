@@ -218,7 +218,7 @@ that resolve to the operational modules.
 | `lib/internal/default.nix` | three-tier composition (primitives → probe → wan) |
 | `lib/internal/primitives.nix` | generic helpers: `tryOk`/`tryErr`, `check`, `parseOptional`, `partitionTry`, `formatErrors`, `isValidName`, `isPositiveInt` |
 | `lib/internal/probe.nix` | `probe` value type — `make`, `tryMake`, `isProbe`, accessors, `families`, full skeleton; owns `_type = "probe"` |
-| `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `isWan`, accessors, family-coupling, full skeleton; owns `_type = "wan"` |
+| `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `toJSONValue`, `families` accessor; `pointToPoint` toggles scope-link vs gateway-discovery apply path |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
 | `lib/internal/selector.nix` *(Pass 4)* | pure `compute` + closed-set strategy registry (v1: `primary-backup`) |
 | `lib/internal/marks.nix` *(Pass 3)* | `allocate : groupNames → { <group> = <mark>; … }` deterministic |
@@ -240,8 +240,10 @@ User-facing option tree (illustrative; final schema lives in
   nftzones' zone/filter pattern).
 - `wans.<name>.interface` is validated via
   `libnet.types.interfaceName` (kernel-`dev_valid_name` parity).
-- `gateways.{v4,v6}` and probe targets are validated via
-  `libnet.types.{ipv4,ipv6,ip}`.
+- Probe targets are validated via
+  `libnet.types.{ipv4,ipv6,ip}`. WANs no longer carry a static
+  gateway declaration — the daemon discovers next-hops at runtime
+  via netlink, surfaced in `state.json`.
 - `strategy` is an enum; v1 accepts only `"primary-backup"` (lib
   enforces a closed set — see §5.1).
 
@@ -258,10 +260,8 @@ services.wanwatch = {
 
   wans.primary = {
     interface = "eth0";
-    gateways = {
-      v4 = "192.0.2.1";        # optional
-      v6 = "2001:db8::1";      # optional; at least one of v4/v6 required
-    };
+    # pointToPoint = false (default) — daemon discovers the
+    # gateway via netlink. Set true for PPP / WireGuard / tun.
     probe = {
       method  = "icmp";        # uses ICMP for v4 targets, ICMPv6 for v6 targets
       targets = [              # family auto-detected from each address
@@ -289,7 +289,8 @@ services.wanwatch = {
 
   wans.backup = {
     interface = "wwan0";
-    gateways.v4 = "100.64.0.1";    # v4-only WAN
+    pointToPoint = true;           # LTE / PPP — no broadcast next-hop
+    # probe.targets v4-only → WAN serves v4 only
     # …
   };
 
@@ -328,45 +329,38 @@ Consumers should always reference these by name
 literal — the allocator output depends on the full group-name set
 and may change if groups are added or removed.
 
-### 5.4 Family-coupling invariant
+### 5.4 Family derivation from probe targets
 
-A WAN's probed families derive from its declared gateways. The lib
-enforces this **strictly** — `wan.make` and `wan.tryMake` reject
-configs where the gateway set and probe-target set disagree.
+A WAN's served families are derived from `probe.targets` — a v4
+literal means it serves v4, a v6 literal means it serves v6. There
+is no separate gateway / family declaration; the daemon discovers
+the next-hop dynamically from the kernel's main routing table
+(see §8 GatewayCache).
 
-**Rules**:
-
-- At least one of `gateways.v4` / `gateways.v6` must be set.
-- For each declared gateway family, `probe.targets` must contain at
-  least one target in that family.
-- `probe.targets` must not contain targets in a family the WAN has
-  no gateway for.
-
-**Error kinds** — aggregated nftzones-style (all violations reported
-together via `lib.nameValuePair`, not fail-on-first):
+**Validators on `wan.make` / `wan.tryMake`**:
 
 | Error kind | Triggered by |
 |---|---|
-| `"wanNoGateways"` | `gateways = {}` (both v4 and v6 unset / null) |
-| `"wanV4GatewayNoTargets"` | `gateways.v4` set; no v4 IP in `probe.targets` |
-| `"wanV6GatewayNoTargets"` | `gateways.v6` set; no v6 IP in `probe.targets` |
-| `"wanV4TargetNoGateway"` | v4 IP in `probe.targets`; `gateways.v4` null |
-| `"wanV6TargetNoGateway"` | v6 IP in `probe.targets`; `gateways.v6` null |
+| `"wanInvalidName"` | missing / non-identifier `name` |
+| `"wanInvalidInterface"` | interface fails `dev_valid_name` |
+| `"wanInvalidPointToPoint"` | `pointToPoint` not a bool |
+| `"wanInvalidProbe"` | embedded `probe.make` rejected the config |
 
-**Validation order**: `wanNoGateways` short-circuits the per-family
-checks — they'd generate noise when there's no gateway to classify
-targets against. The four per-family rules are independent of each
-other and reported together in a single aggregated error.
+Probe-level constraints (e.g. "at least one target") live on the
+probe value type — see `probe.tryMake` errors. Aggregation is
+nftzones-style (all violations reported together via
+`lib.nameValuePair`, not fail-on-first).
 
-**Test discipline** (`tests/unit/wan.nix`):
+**Test discipline** (`tests/unit/internal/wan.nix`):
 
-- Each error kind exercised in isolation (single-violation config).
+- Each error kind exercised in isolation.
 - At least one multi-violation config asserting that all
   violations appear in a single error report.
-- Positive case: dual-stack WAN with mixed-family targets accepted.
-- Positive case: v4-only WAN with v4-only targets accepted.
-- Positive case: v6-only WAN with v6-only targets accepted.
-- `tryMake` returns `{ success = false; error = "...wanV4GatewayNoTargets..."; }`
+- Positive case: dual-stack WAN (mixed-family targets).
+- Positive case: v4-only WAN.
+- Positive case: v6-only WAN.
+- Positive case: `pointToPoint = true` accepted.
+- `tryMake` returns `{ success = false; error = "...wanInvalidProbe..."; }`
   rather than throwing.
 
 **Rationale**: WAN monitoring is critical infrastructure. A WAN
@@ -382,7 +376,7 @@ Three artifacts comprise the daemon's public contract:
    (`schema: 1`). Written by the NixOS module, read by the daemon at
    startup. Full schema in `docs/specs/daemon-config.md`.
 2. **State file** `/run/wanwatch/state.json` — schema versioned
-   (`schema: 1`). Written atomically (tmpfile + rename) on every
+   (`schema: 2`). Written atomically (tmpfile + rename) on every
    Decision. Consumers (Telegraf, custom scripts, `wanwatchctl`)
    read it. Full schema in `docs/specs/daemon-state.md`.
 3. **Hook env vars** — when invoking `/etc/wanwatch/hooks/{up,down,switch}.d/*`:
@@ -855,10 +849,10 @@ non-trivial tests, but the infrastructure works).
 
 ### Pass 2 — leaf value types
 
-- `lib/internal/wan.nix` + tests — `gateways = { v4; v6; }` shape;
-  at least one of v4/v6 required (validation in `make`/`tryMake`);
-  accessors `gatewayV4`, `gatewayV6`, `families` (returns the set of
-  families the WAN has gateways for); owns `isWan` predicate.
+- `lib/internal/wan.nix` + tests — `interface` + `pointToPoint`
+  fields; `families` accessor derives the served families from the
+  embedded probe's targets. No static gateway declaration — the
+  daemon learns next-hops at runtime (see Pass 5 GatewayCache).
 - `lib/internal/probe.nix` + nested `thresholds`, `hysteresis`,
   `familyHealthPolicy` + tests — `targets` validated as list of
   IPs; family of each target detected via `libnet.ip.family`; owns

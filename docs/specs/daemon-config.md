@@ -46,7 +46,7 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 {
   "name": "primary",
   "interface": "eth0",
-  "gateways": { "v4": "192.0.2.1", "v6": null },
+  "pointToPoint": false,
   "probe": { ... }
 }
 ```
@@ -55,11 +55,10 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 |---|---|---|---|
 | `name` | string | yes | Must match the attribute key. |
 | `interface` | string | yes | Linux interface name (passes `dev_valid_name`). |
-| `gateways.v4` | string \| null | one-of | IPv4 default gateway. Null means no v4. |
-| `gateways.v6` | string \| null | one-of | IPv6 default gateway. Null means no v6. |
+| `pointToPoint` | bool | no (default `false`) | When true the daemon installs `scope link` default routes (PPP / WireGuard / GRE / tun); when false the daemon discovers the gateway via netlink from the kernel's main routing table at runtime. |
 | `probe` | object | yes | Probe configuration; shape below. |
 
-At least one of `gateways.v4` / `gateways.v6` must be non-null. Family-coupling: every gateway family must have at least one target literal in `probe.targets` of the same family.
+The families a WAN serves are derived from `probe.targets`: a v4 IP literal means the WAN serves v4, a v6 literal means it serves v6. There is no separate gateway / family declaration — the daemon learns the next-hop dynamically and surfaces it in [`state.json`](./daemon-state.md) under `wans.<name>.gateways.{v4,v6}`.
 
 ## `wans.<name>.probe`
 

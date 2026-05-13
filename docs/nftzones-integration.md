@@ -24,13 +24,11 @@ The table id is *shared* across families: v4 uses `table <table>` in the v4 RIB;
     enable = true;
     wans.primary = {
       interface = "eth0";
-      gateways.v4 = "192.0.2.1";
-      gateways.v6 = "2001:db8::1";
       probe.targets = [ "1.1.1.1" "2606:4700:4700::1111" ];
     };
     wans.backup = {
       interface = "wwan0";
-      gateways.v4 = "100.64.0.1";
+      pointToPoint = true;
       probe.targets = [ "8.8.8.8" ];
     };
     groups.home-uplink.members = [

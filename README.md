@@ -30,13 +30,12 @@ Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides whic
 
             wans.primary = {
               interface = "eth0";
-              gateways.v4 = "192.0.2.1";
               probe.targets = [ "1.1.1.1" "8.8.8.8" ];
             };
 
             wans.backup = {
               interface = "wwan0";
-              gateways.v4 = "100.64.0.1";
+              pointToPoint = true;     # LTE / PPP / WireGuard / tun
               probe.targets = [ "1.1.1.1" ];
             };
 

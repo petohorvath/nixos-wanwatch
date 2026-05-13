@@ -2,7 +2,9 @@
 
 The JSON snapshot the daemon publishes to `services.wanwatch.global.statePath` (default `/run/wanwatch/state.json`). Written atomically (tmpfile + `rename`) so readers always see a consistent file.
 
-**Schema version**: `1`. Bumped on any backwards-incompatible field change.
+**Schema version**: `2`. Bumped on any backwards-incompatible field change.
+
+Schema-2 additions: per-WAN `gateways.{v4,v6}` reflecting the daemon-discovered next-hop. See `SchemaVersion` history in `daemon/internal/state/state.go`.
 
 Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches `State` and `State.Wans/Groups` value types.
 
@@ -10,7 +12,7 @@ Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches 
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "updatedAt": "2026-05-12T14:30:01.234567890Z",
   "wans":   { "<name>": { ... }, ... },
   "groups": { "<name>": { ... }, ... }
@@ -32,6 +34,7 @@ Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches 
   "carrier": "up",
   "operstate": "up",
   "healthy": true,
+  "gateways": { "v4": "192.0.2.1", "v6": "2001:db8::1" },
   "families": {
     "v4": { ... },
     "v6": { ... }
@@ -45,7 +48,9 @@ Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches 
 | `carrier` | string | `"up"` / `"down"` / `"unknown"`. |
 | `operstate` | string | IFLA_OPERSTATE textual: `up`, `down`, `dormant`, `lowerlayerdown`, `notpresent`, `testing`, `unknown`. |
 | `healthy` | bool | Aggregate per `probe.familyHealthPolicy`. |
-| `families` | object | Per-family slice; one entry per declared gateway family. |
+| `gateways.v4` | string | Daemon-discovered v4 next-hop, or `""` if the kernel has no v4 default on this interface (or the route is scope-link, i.e. `pointToPoint`). Schema-2. |
+| `gateways.v6` | string | Same for v6. Schema-2. |
+| `families` | object | Per-family slice; one entry per family present in `probe.targets`. |
 
 ## `wans.<name>.families.<v4|v6>`
 
@@ -96,8 +101,8 @@ Hooks under `<hooksDir>/{up,down,switch}.d/*` receive the following env vars on 
 | `WANWATCH_WAN_OLD` | Always. Previous active WAN; empty if none. |
 | `WANWATCH_WAN_NEW` | Always. New active WAN; empty if none. |
 | `WANWATCH_IFACE_OLD` / `_NEW` | Always. Linux interface names; empty when the corresponding WAN is unset. |
-| `WANWATCH_GATEWAY_V4_OLD` / `_NEW` | Always. v4 gateways; empty when the WAN has no v4. |
-| `WANWATCH_GATEWAY_V6_OLD` / `_NEW` | Always. v6 gateways; empty when the WAN has no v6. |
+| `WANWATCH_GATEWAY_V4_OLD` / `_NEW` | Always. Discovered v4 next-hop for the WAN's interface; empty when the kernel has no v4 default on it (or the WAN is `pointToPoint`). |
+| `WANWATCH_GATEWAY_V6_OLD` / `_NEW` | Always. Same for v6. |
 | `WANWATCH_FAMILIES` | Always. Comma-joined set of probed families for the new WAN. `""` when new is null. |
 | `WANWATCH_TABLE` | Always. Routing-table id (int as string). |
 | `WANWATCH_MARK` | Always. fwmark (int as string). |

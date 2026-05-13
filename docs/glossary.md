@@ -44,10 +44,17 @@ new term means updating this file in the same commit.
 
 A WAN is a "family" in the IP-stack sense:
 
-- `v4` — the WAN has `gateways.v4` set; its v4 default route lives in
-  the group's v4 routing table.
-- `v6` — likewise for `gateways.v6`.
+- `v4` — at least one of the WAN's `probe.targets` is an IPv4
+  literal; its v4 default route lives in the group's v4 routing
+  table.
+- `v6` — likewise for v6 literals in `probe.targets`.
+
+The daemon discovers the per-family default-route next-hop from
+the kernel's main routing table at runtime — there is no separate
+operator-typed gateway declaration. For interfaces with no
+broadcast next-hop (PPP, WireGuard, GRE, tun) set
+`pointToPoint = true` so the daemon installs a `scope link`
+default route instead.
 
 Per-family Health is combined into per-WAN Health under the WAN's
-`probe.familyHealthPolicy` (`all` / `any`). See
-[`PLAN.md`](../PLAN.md) §5.4 for the family-coupling invariant.
+`probe.familyHealthPolicy` (`all` / `any`).
