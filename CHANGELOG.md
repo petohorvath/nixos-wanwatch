@@ -8,14 +8,30 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 - **API break — `wans.<name>.gateways` removed.** Replaced by a single `pointToPoint` bool (default `false`). For broadcast links the daemon now discovers the default-route next-hop dynamically via netlink (`RTNLGRP_IPV4_ROUTE` + `RTNLGRP_IPV6_ROUTE`) from the kernel's main routing table. For point-to-point links (PPP, WireGuard, GRE, tun) set `pointToPoint = true` and the daemon installs `scope link` default routes — no gateway needed.
 - A WAN's served families are now derived solely from `probe.targets` (v4 literals ⇒ serves v4; v6 literals ⇒ serves v6). No separate gateway declaration to keep in sync; family-coupling validation is therefore retired.
-- `state.json` schema bumped to **2**: per-WAN `gateways: { v4, v6 }` reflecting the discovered next-hops. Schema 1 readers will need to be updated.
+- New per-WAN `gateways: { v4, v6 }` block in `state.json` reflecting the discovered next-hops.
 - Hook env vars `WANWATCH_GATEWAY_V4/V6_OLD/NEW` now carry the discovered next-hop instead of the operator-typed value. Empty when the WAN is point-to-point or the cache has no entry yet.
+- **`state.json` field renames** (no schema bump pre-release): `wans.<name>.families.<v4|v6>.rttMs` → `.rttSeconds`, `.jitterMs` → `.jitterSeconds`, `.lossPct` (0..100) → `.lossRatio` (0..1). Pulls the wire shape onto the same units the Prometheus gauges use.
+- **Metric renames**: `wanwatch_probe_rtt_milliseconds` → `wanwatch_probe_rtt_seconds`, `wanwatch_probe_jitter_milliseconds` → `wanwatch_probe_jitter_seconds`. Prometheus convention is base units.
+- `selector.Apply` (Go) renamed to `selector.Select` — `Apply` is reserved by the glossary for kernel-state mutation in `internal/apply`.
+- `Gateway` is now a glossary term (was an unnamed runtime concept). Daemon-internal struct field abbreviations `GwV4Old` / `GwV4New` / `GwV6Old` / `GwV6New` on `state.HookContext` spelled out as `GatewayV4Old` / `GatewayV4New` / `GatewayV6Old` / `GatewayV6New` to match the env-var names they populate.
 
 ### Added
 
 - `daemon/internal/rtnl.RouteSubscriber` — emits per-`(iface, family)` default-route add/del events from the main RIB, filtered to WAN interfaces.
 - `daemon/cmd/wanwatchd.GatewayCache` — mirrors the kernel's view; drives non-PtP route writes and re-applies on route flap.
 - VM scenario `tests/vm/gateway-discovery.nix` — end-to-end coverage of the discovery loop.
+- `daemon/cmd/wanwatchd/daemon_test.go` — first unit coverage for the daemon's pipeline (`writeStateSnapshot`, `handleProbeResult`, `handleRouteEvent`). Lived as `state.go` before with no test file.
+
+### Internal
+
+- Unified `probe.Family` and `apply.Family` onto a single enum (values now match `unix.AF_INET` / `AF_INET6` so netlink passthrough is a single cast). Old `state.Family` struct renamed to `state.FamilyHealth` to free up the name.
+- `selector.Selection.Active` is now a comparable `Active{Wan string, Has bool}` struct (was `*string`). Removes the `equalStringPtr` / `strPtr` helpers and the loop-local pointer trick in `primaryBackup`.
+- `context.Context` propagated through `apply.WriteDefault` / `EnsureRule` / `FlushBySource` and the daemon's `bootstrap` / `handle*Event` / `recomputeGroup` / `applyRoutes` chain.
+- `state.Writer` now serializes `Write` calls with a `sync.Mutex` (was "serialize at the caller" documentation).
+- `probe.NewWindow` returns an error instead of panicking; `selector.NewHysteresisState(up, down)` takes thresholds at construction rather than per-call.
+- `cmd/wanwatchd` file shuffle: the file holding the `daemon` struct is now `daemon.go` (was `state.go`), the subscriber wiring is `subscribers.go` (was `daemon.go`), free helpers extracted to `helpers.go`.
+- `docs/glossary.md` row for `Health` now matches the v1 boolean shape; the four-state spec (`up`/`down`/`degraded`/`unknown`) deferred to v2 — see `TODO.md`.
+- `state.SchemaVersion` pinned at 1 pre-release; the first tagged release freezes shape 1.
 
 ## [0.1.0] — 2026-05-12
 
@@ -69,7 +85,7 @@ Initial public release. Feature-complete per [`PLAN.md`](./PLAN.md) v1 scope.
 ### Schemas
 
 - `config.json` schema version: **1**.
-- `state.json` schema version: **1**. (Bumped to **2** in [Unreleased] — see the per-WAN `gateways` addition above.)
+- `state.json` schema version: **1**. (Stays at 1 in [Unreleased] — pre-release we don't bump for in-tree refactors. The first tagged release freezes shape 1.)
 
 [Unreleased]: https://github.com/petohorvath/nixos-wanwatch/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/petohorvath/nixos-wanwatch/releases/tag/v0.1.0
