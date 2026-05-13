@@ -440,10 +440,10 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 		// blank when (a) the iface has no cached default route yet,
 		// or (b) the route is scope-link (point-to-point) so there
 		// is no gateway to surface.
-		GwV4Old:  gws.String(oldIface, rtnl.RouteFamilyV4),
-		GwV4New:  gws.String(newIface, rtnl.RouteFamilyV4),
-		GwV6Old:  gws.String(oldIface, rtnl.RouteFamilyV6),
-		GwV6New:  gws.String(newIface, rtnl.RouteFamilyV6),
+		GatewayV4Old: gws.String(oldIface, rtnl.RouteFamilyV4),
+		GatewayV4New: gws.String(newIface, rtnl.RouteFamilyV4),
+		GatewayV6Old: gws.String(oldIface, rtnl.RouteFamilyV6),
+		GatewayV6New: gws.String(newIface, rtnl.RouteFamilyV6),
 		Families: probedFamiliesFor(d.wans, new_),
 		Table:    g.cfg.Table,
 		Mark:     g.cfg.Mark,

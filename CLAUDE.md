@@ -68,14 +68,14 @@ Strictly per [`docs/glossary.md`](./docs/glossary.md). Terms are
 non-overlapping; reusing them loosely is a defect. Adding a term means
 updating the glossary in the same commit.
 
-Key terms: **WAN** (the interface + its Probe; gateways are
-discovered at runtime), **Probe** (the *config* of how to test),
-**Sample** (one probe attempt), **Window** (sliding samples),
-**Health** (derived status), **Hysteresis** (flap suppression),
-**Group**, **Member**, **Strategy**, **Selection** (current chosen
-member), **Decision** (a Selection *change*), **Apply** (kernel
-mutation), **State** (the externalized snapshot), **Hook** (user
-script).
+Key terms: **WAN** (the interface + its Probe), **Probe** (the
+*config* of how to test), **Sample** (one probe attempt), **Window**
+(sliding samples), **Health** (derived status), **Hysteresis** (flap
+suppression), **Group**, **Member**, **Strategy**, **Selection**
+(current chosen member), **Decision** (a Selection *change*),
+**Gateway** (kernel-discovered next-hop per (WAN, family)),
+**Apply** (kernel mutation), **State** (the externalized snapshot),
+**Hook** (user script).
 
 ### API skeleton (pure-Nix lib)
 

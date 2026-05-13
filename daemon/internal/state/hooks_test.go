@@ -100,9 +100,9 @@ func TestRunPassesEnvVars(t *testing.T) {
 		Event:    EventUp,
 		Group:    "home",
 		WanNew:   "primary",
-		GwV4New:  "192.0.2.1",
-		Families: []string{"v4", "v6"},
-		Table:    100,
+		GatewayV4New: "192.0.2.1",
+		Families:     []string{"v4", "v6"},
+		Table:        100,
 	})
 
 	data, err := os.ReadFile(outFile)

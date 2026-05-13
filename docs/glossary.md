@@ -21,6 +21,7 @@ new term means updating this file in the same commit.
 | **Strategy** | Algorithm choosing active Member(s) from healthy ones. v1: `primary-backup`. | Selection |
 | **Selection** | Current chosen Member(s) per Group. Output of Strategy applied to Member Health. | Decision |
 | **Decision** | A Selection *change* event — old Selection → new Selection. Triggers Apply. | Selection |
+| **Gateway** | Daemon-mirrored default-route next-hop for a (WAN, family). Discovered via rtnetlink from the kernel's main routing table; empty when no default exists on the WAN's interface or when the WAN is `pointToPoint`. Consumed by Apply when writing per-Group default routes. | Apply |
 | **Apply** | The act of mutating kernel state (route, conntrack) to reflect a Decision. | Decision |
 | **State** | Externalized view: per-WAN Health, per-Group Selection. Atomic JSON file. | Selection (sub-component) |
 | **Hook** | User script invoked on Decision with structured env vars. | Apply |
@@ -39,6 +40,10 @@ new term means updating this file in the same commit.
   daemon emits one Decision per Group whose Selection changed.
 - **Apply** runs once per Decision; **Hooks** run after Apply, with
   the Decision's data in env vars.
+- A **Gateway** is per-(WAN, family) and tracked independently of
+  Health: a WAN can be Health-up with no Gateway yet (kernel hasn't
+  installed a default route) — Apply will skip that family's route
+  write and reapply when the Gateway is discovered.
 
 ## Family
 

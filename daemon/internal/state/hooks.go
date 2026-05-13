@@ -32,10 +32,10 @@ type HookContext struct {
 	WanNew    string
 	IfaceOld  string
 	IfaceNew  string
-	GwV4Old   string
-	GwV4New   string
-	GwV6Old   string
-	GwV6New   string
+	GatewayV4Old string
+	GatewayV4New string
+	GatewayV6Old string
+	GatewayV6New string
 	Families  []string // e.g. ["v4", "v6"]
 	Table     int
 	Mark      int
@@ -180,10 +180,10 @@ func buildEnv(ctx HookContext) []string {
 		EnvWanNew + "=" + ctx.WanNew,
 		EnvIfaceOld + "=" + ctx.IfaceOld,
 		EnvIfaceNew + "=" + ctx.IfaceNew,
-		EnvGatewayV4Old + "=" + ctx.GwV4Old,
-		EnvGatewayV4New + "=" + ctx.GwV4New,
-		EnvGatewayV6Old + "=" + ctx.GwV6Old,
-		EnvGatewayV6New + "=" + ctx.GwV6New,
+		EnvGatewayV4Old + "=" + ctx.GatewayV4Old,
+		EnvGatewayV4New + "=" + ctx.GatewayV4New,
+		EnvGatewayV6Old + "=" + ctx.GatewayV6Old,
+		EnvGatewayV6New + "=" + ctx.GatewayV6New,
 		EnvFamilies + "=" + families,
 		EnvTable + "=" + strconv.Itoa(ctx.Table),
 		EnvMark + "=" + strconv.Itoa(ctx.Mark),
