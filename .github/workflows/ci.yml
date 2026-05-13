@@ -1,0 +1,200 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  # `pull_request` (NOT `pull_request_target`) is intentional. The
+  # plain trigger runs fork PRs with a read-only GITHUB_TOKEN and
+  # no access to secrets — safe given the workflow runs untrusted
+  # Nix evaluation. `pull_request_target` would check out the PR
+  # head while running with the *base* repo's token — the classic
+  # supply-chain footgun. Do not change without considering token
+  # scope and what the workflow runs.
+  pull_request:
+
+# Default to read-only for all jobs. CI runs untrusted code from
+# fork PRs (Nix evaluation, Go builds, VM tests); a least-privilege
+# GITHUB_TOKEN limits blast radius if a flake input or action is
+# compromised. Override per-job if a step ever needs to write.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Each job caches /nix/store via nix-community/cache-nix-action so
+# subsequent runs don't have to re-fetch every nixpkgs derivation
+# (the VM test machinery alone is multi-GB). The cache key is
+# `(os, arch, job, flake.lock)` so a lockfile bump cleanly retires
+# stale stores; restore-prefix lets a near-miss warm-restore from
+# any earlier same-job cache. Purge keeps the GHA cache budget
+# (10 GB / repo) under control by dropping older same-prefix
+# entries.
+jobs:
+  format:
+    name: format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          purge-created: 0
+          purge-primary-key: never
+      - name: Apply formatter
+        run: nix fmt
+      - name: Verify no formatting drift
+        run: git diff --exit-code
+
+  # Unit and integration jobs run across both Linux systems the
+  # flake exposes. Nix can't cross-build between architectures
+  # without a remote builder, so each `system` runs on a matching
+  # GitHub-hosted runner: x86_64-linux on `ubuntu-latest`,
+  # aarch64-linux on `ubuntu-24.04-arm` (free for public repos).
+  # Darwin is not built — the daemon is Linux-only and the
+  # integration scenarios evaluate a NixOS module.
+  unit:
+    name: unit tests (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          purge-created: 0
+          purge-primary-key: never
+      - name: Build unit checks
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.unit
+
+  # The `daemon` flake check runs `go test ./...` against the
+  # vendored sources inside a Nix sandbox. Same matrix as unit —
+  # the daemon is pure-Go (CGO_ENABLED=0) so arm64 is in scope.
+  daemon:
+    name: daemon tests (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          purge-created: 0
+          purge-primary-key: never
+      - name: Build daemon check (go test ./...)
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.daemon
+      - name: Build wanwatchd package
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.package
+
+  integration:
+    name: integration tests (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          purge-created: 0
+          purge-primary-key: never
+      - name: Build integration checks
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.integration
+
+  # VM tests run on x86_64-linux only. Nested KVM is reliably
+  # available on free `ubuntu-latest` runners; the equivalent on
+  # `ubuntu-24.04-arm` is not guaranteed and pkgs.testers.nixosTest
+  # would refuse to start without `/dev/kvm`.
+  #
+  # All scenarios build in one `nix build` invocation so the
+  # NixOS-test machinery and shared store paths are realized once,
+  # not ten times. A single scenario failure aborts the whole job;
+  # `--keep-going` could be added if per-scenario isolation
+  # matters more than total runtime.
+  vm:
+    name: vm tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      # GitHub-hosted ubuntu-latest runners support nested
+      # virtualization, but `/dev/kvm` is owned by root:kvm with
+      # mode 0660 by default. The nix-daemon needs world-readable
+      # access, so widen permissions via udev before installing
+      # Nix. Pattern lifted from nixpkgs CI.
+      - name: Enable KVM device access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+        with:
+          extra_nix_config: |
+            system-features = kvm nixos-test benchmark big-parallel uid-range
+      # VM gets a larger store budget — the NixOS test machinery
+      # alone is multiple GB. Purge stays aggressive so we don't
+      # blow the 10 GB per-repo cache cap when the other jobs also
+      # save their stores.
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          gc-max-store-size-linux: 8G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          purge-created: 0
+          purge-primary-key: never
+      - name: Build VM checks
+        run: |
+          nix build --print-build-logs \
+            .#checks.x86_64-linux.vm-smoke \
+            .#checks.x86_64-linux.vm-failover-v4 \
+            .#checks.x86_64-linux.vm-failover-v6 \
+            .#checks.x86_64-linux.vm-failover-dual-stack \
+            .#checks.x86_64-linux.vm-recovery \
+            .#checks.x86_64-linux.vm-hooks \
+            .#checks.x86_64-linux.vm-metrics \
+            .#checks.x86_64-linux.vm-family-health-policy \
+            .#checks.x86_64-linux.vm-gateway-discovery \
+            .#checks.x86_64-linux.vm-nftzones-integration
