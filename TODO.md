@@ -120,6 +120,23 @@ implementation is mechanical.
 
 ---
 
+## tracking — waiting on upstream
+
+### Bump nixpkgs once go1.26.3+ lands
+
+`.github/workflows/audit.yml`'s `govulncheck` job stays red on
+GO-2026-4971 — a Windows-only panic in `net.Dial` /
+`net.ListenPacket` introduced in `net@go1.26.2` and fixed in
+`net@go1.26.3`. The daemon is Linux-only so the call paths are
+unreachable in practice, but govulncheck flags any reachable
+import of the affected functions regardless of build target.
+
+Resolution is a `nix flake update nixpkgs` once `nixos-unstable`
+ships go1.26.3+. No code change on our side; verify by running
+the audit workflow afterwards and watching the run go green.
+
+---
+
 ## cleanup — internal refactors
 
 Captured during reviews; deemed not worth blocking the original
