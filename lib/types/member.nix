@@ -21,6 +21,7 @@
 }:
 let
   inherit (lib) types mkOption;
+  inherit (internal.member) defaults;
 
   memberWan = primitives.identifier;
   memberWeight = primitives.positiveInt;
@@ -39,7 +40,7 @@ let
       };
       weight = mkOption {
         type = memberWeight;
-        default = 100;
+        default = defaults.weight;
         description = ''
           Tiebreaker among Members with equal priority. v1's
           primary-backup strategy ignores weight; it matters once
@@ -48,7 +49,7 @@ let
       };
       priority = mkOption {
         type = memberPriority;
-        default = 1;
+        default = defaults.priority;
         description = ''
           Lower = preferred by the primary-backup strategy. Ties
           broken lexicographically by `wan` for determinism.

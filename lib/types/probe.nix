@@ -32,12 +32,14 @@
 let
   inherit (lib) types mkOption;
 
-  # Single source of truth: enums come from `internal.probe`'s
-  # registries so the option type and the validator agree by
-  # construction. Without this, adding a method (or family-health
-  # policy) would have to touch two files in lockstep.
+  # Single source of truth: enums and scalar defaults come from
+  # `internal.probe`'s registries / defaults attrset, so the option
+  # type and the validator agree by construction. Adding a method,
+  # family-health policy, or changing a default no longer requires
+  # touching two files in lockstep.
   probeMethod = types.enum internal.probe.validMethods;
   probeFamilyHealthPolicy = types.enum internal.probe.validFamilyHealthPolicies;
+  inherit (internal.probe) defaults;
 
   probeTarget = libnet.types.ip;
 
@@ -45,7 +47,7 @@ let
     options = {
       lossPctDown = mkOption {
         type = primitives.pctInt;
-        default = 30;
+        default = defaults.thresholds.lossPctDown;
         description = ''
           Loss-percentage threshold above which a WAN flips to
           unhealthy. Compared against the rolling sliding-window
@@ -54,7 +56,7 @@ let
       };
       lossPctUp = mkOption {
         type = primitives.pctInt;
-        default = 10;
+        default = defaults.thresholds.lossPctUp;
         description = ''
           Loss-percentage at or below which a WAN flips back to
           healthy. Must be strictly below `lossPctDown` — the
@@ -65,7 +67,7 @@ let
       };
       rttMsDown = mkOption {
         type = primitives.positiveInt;
-        default = 500;
+        default = defaults.thresholds.rttMsDown;
         description = ''
           Mean RTT (milliseconds) above which a WAN flips to
           unhealthy.
@@ -73,7 +75,7 @@ let
       };
       rttMsUp = mkOption {
         type = primitives.positiveInt;
-        default = 250;
+        default = defaults.thresholds.rttMsUp;
         description = ''
           Mean RTT (milliseconds) at or below which a WAN flips
           back to healthy. Must be strictly below `rttMsDown`.
@@ -86,14 +88,14 @@ let
     options = {
       consecutiveDown = mkOption {
         type = primitives.positiveInt;
-        default = 3;
+        default = defaults.hysteresis.consecutiveDown;
         description = ''
           Consecutive bad cycles required to mark a WAN unhealthy.
         '';
       };
       consecutiveUp = mkOption {
         type = primitives.positiveInt;
-        default = 5;
+        default = defaults.hysteresis.consecutiveUp;
         description = ''
           Consecutive good cycles required to mark a WAN healthy
           again.
@@ -106,7 +108,7 @@ let
     options = {
       method = mkOption {
         type = probeMethod;
-        default = "icmp";
+        default = defaults.method;
         description = ''
           Probing protocol. v1 supports `"icmp"` only; v2 will add
           TCP / HTTP / DNS once the daemon's probe layer grows.
@@ -128,7 +130,7 @@ let
       };
       intervalMs = mkOption {
         type = primitives.positiveInt;
-        default = 500;
+        default = defaults.intervalMs;
         description = ''
           Milliseconds between probe cycles. Multiple probes may be
           in flight simultaneously (dpinger-style) — `timeoutMs` is
@@ -137,14 +139,14 @@ let
       };
       timeoutMs = mkOption {
         type = primitives.positiveInt;
-        default = 1000;
+        default = defaults.timeoutMs;
         description = ''
           Per-probe timeout in milliseconds. May exceed `intervalMs`.
         '';
       };
       windowSize = mkOption {
         type = primitives.positiveInt;
-        default = 10;
+        default = defaults.windowSize;
         description = ''
           Number of samples in the sliding window used to compute
           loss / mean RTT / jitter.
@@ -162,7 +164,7 @@ let
       };
       familyHealthPolicy = mkOption {
         type = probeFamilyHealthPolicy;
-        default = "all";
+        default = defaults.familyHealthPolicy;
         description = ''
           How per-family Health combines into per-WAN Health.
           `"all"` (default) — WAN healthy iff every configured

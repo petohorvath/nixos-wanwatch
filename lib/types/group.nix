@@ -31,6 +31,7 @@
 }:
 let
   inherit (lib) types mkOption;
+  inherit (internal.group) defaults;
 
   groupName = primitives.identifier;
 
@@ -72,7 +73,7 @@ let
         };
         strategy = mkOption {
           type = groupStrategy;
-          default = "primary-backup";
+          default = defaults.strategy;
           description = ''
             Selection strategy. v1 supports `"primary-backup"`
             only — picks the lowest-priority healthy Member.
@@ -80,7 +81,7 @@ let
         };
         table = mkOption {
           type = groupTable;
-          default = null;
+          default = defaults.table;
           example = 100;
           description = ''
             Routing-table id for this group's policy-routed
@@ -92,7 +93,7 @@ let
         };
         mark = mkOption {
           type = groupMark;
-          default = null;
+          default = defaults.mark;
           example = 100;
           description = ''
             fwmark used to dispatch traffic to `table`. Null =
