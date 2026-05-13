@@ -192,3 +192,106 @@ func TestEventLoopReturnsOnCtxCancel(t *testing.T) {
 		t.Fatal("eventLoop did not return within 1s of ctx cancel")
 	}
 }
+
+func TestTargetsForFiltersByFamily(t *testing.T) {
+	t.Parallel()
+	wan := config.Wan{
+		Probe: config.Probe{
+			Targets: []string{"1.1.1.1", "2606:4700:4700::1111", "8.8.8.8", "not-an-ip"},
+		},
+	}
+
+	v4 := targetsFor(wan, probe.FamilyV4)
+	want4 := []string{"1.1.1.1", "8.8.8.8"}
+	if !equalUnorderedStrings(v4, want4) {
+		t.Errorf("targetsFor(v4) = %v, want %v", v4, want4)
+	}
+
+	v6 := targetsFor(wan, probe.FamilyV6)
+	want6 := []string{"2606:4700:4700::1111"}
+	if !equalUnorderedStrings(v6, want6) {
+		t.Errorf("targetsFor(v6) = %v, want %v", v6, want6)
+	}
+}
+
+func TestTargetsForEmpty(t *testing.T) {
+	t.Parallel()
+	wan := config.Wan{Probe: config.Probe{}}
+	if got := targetsFor(wan, probe.FamilyV4); len(got) != 0 {
+		t.Errorf("targetsFor on empty Targets = %v, want []", got)
+	}
+}
+
+func TestTargetsForAllInvalid(t *testing.T) {
+	t.Parallel()
+	// Non-IP strings shouldn't crash and shouldn't be emitted.
+	wan := config.Wan{Probe: config.Probe{Targets: []string{"not-ip", "also.not"}}}
+	if got := targetsFor(wan, probe.FamilyV4); len(got) != 0 {
+		t.Errorf("targetsFor on non-IP input = %v, want []", got)
+	}
+}
+
+func TestWatchedInterfaces(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{
+		Wans: map[string]config.Wan{
+			"primary": {Interface: "eth0"},
+			"backup":  {Interface: "wwan0"},
+		},
+	}
+	got := watchedInterfaces(cfg)
+	if len(got) != 2 {
+		t.Errorf("len = %d, want 2 (got %v)", len(got), got)
+	}
+	if _, ok := got["eth0"]; !ok {
+		t.Error("eth0 missing from watched set")
+	}
+	if _, ok := got["wwan0"]; !ok {
+		t.Error("wwan0 missing from watched set")
+	}
+}
+
+func TestWatchedInterfacesCollapsesDuplicates(t *testing.T) {
+	t.Parallel()
+	// Two WANs on the same interface (not a useful config, but the
+	// set-of-interfaces contract should collapse them to one entry).
+	cfg := &config.Config{
+		Wans: map[string]config.Wan{
+			"alpha": {Interface: "eth0"},
+			"beta":  {Interface: "eth0"},
+		},
+	}
+	got := watchedInterfaces(cfg)
+	if len(got) != 1 {
+		t.Errorf("len = %d, want 1 (deduped to eth0); got %v", len(got), got)
+	}
+}
+
+func TestWatchedInterfacesEmpty(t *testing.T) {
+	t.Parallel()
+	got := watchedInterfaces(&config.Config{})
+	if len(got) != 0 {
+		t.Errorf("empty cfg → %v, want empty map", got)
+	}
+}
+
+// equalUnorderedStrings returns true if a and b contain the same
+// elements regardless of order. targetsFor preserves the input
+// order today, but asserting on order would couple the test to
+// an internal detail that's not part of the contract.
+func equalUnorderedStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, s := range a {
+		seen[s]++
+	}
+	for _, s := range b {
+		seen[s]--
+		if seen[s] < 0 {
+			return false
+		}
+	}
+	return true
+}

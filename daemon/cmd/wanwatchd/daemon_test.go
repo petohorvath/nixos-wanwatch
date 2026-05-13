@@ -151,3 +151,73 @@ func TestHandleRouteEventDelClearsCache(t *testing.T) {
 		t.Error("cache still has eth0/v4 after Del event")
 	}
 }
+
+// TestUpdateGroupActiveGauge: the per-member `wanwatch_group_active`
+// gauge must read 1 for the active member and 0 for every other
+// member of the group. Drives the function directly because the
+// pipeline that normally calls it (recomputeGroup) needs a
+// healthy WAN + clean apply path to fire.
+func TestUpdateGroupActiveGauge(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, &config.Config{
+		Wans: testCfg().Wans,
+		Groups: map[string]selector.Group{
+			"home": {
+				Name:     "home",
+				Strategy: "primary-backup",
+				Table:    100,
+				Mark:     0x100,
+				Members: []selector.Member{
+					{Wan: "primary", Priority: 1},
+					{Wan: "backup", Priority: 2},
+				},
+			},
+		},
+	})
+	g := d.groups["home"]
+	g.active = selector.Active{Wan: "primary", Has: true}
+
+	d.updateGroupActiveGauge(g)
+
+	// Verify by scraping the registry — that's the consumer
+	// contract; reading the gauge directly via Prometheus's
+	// internal types would bypass it.
+	pri := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary"))
+	bak := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "backup"))
+	if pri != 1 {
+		t.Errorf("active member primary: gauge = %v, want 1", pri)
+	}
+	if bak != 0 {
+		t.Errorf("inactive member backup: gauge = %v, want 0", bak)
+	}
+}
+
+// TestUpdateGroupActiveGaugeAbsentClearsAll: when no member is
+// active (Selection.Has == false), every per-member gauge should
+// read 0.
+func TestUpdateGroupActiveGaugeAbsentClearsAll(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, &config.Config{
+		Wans: testCfg().Wans,
+		Groups: map[string]selector.Group{
+			"home": {
+				Name:     "home",
+				Strategy: "primary-backup",
+				Members: []selector.Member{
+					{Wan: "primary", Priority: 1},
+					{Wan: "backup", Priority: 2},
+				},
+			},
+		},
+	})
+	g := d.groups["home"]
+	// Seed: pretend primary was active, then clear it.
+	g.active = selector.Active{Wan: "primary", Has: true}
+	d.updateGroupActiveGauge(g)
+	g.active = selector.NoActive
+	d.updateGroupActiveGauge(g)
+
+	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 0 {
+		t.Errorf("primary after clear: gauge = %v, want 0", v)
+	}
+}
