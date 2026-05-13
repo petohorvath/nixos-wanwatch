@@ -53,7 +53,7 @@ NixOS config → lib (validation, allocators) → module (renders JSON, emits un
                                                          ↓
                                                    wanwatchd
                                                    ├── probe   (icmp + v6, sliding window)
-                                                   ├── rtnl    (link / carrier events)
+                                                   ├── rtnl    (link/carrier + default-route events)
                                                    ├── selector (pure: Health → Selection)
                                                    ├── apply   (netlink: route, rule, conntrack)
                                                    ├── state   (atomic JSON + hooks)
@@ -68,9 +68,10 @@ Strictly per [`docs/glossary.md`](./docs/glossary.md). Terms are
 non-overlapping; reusing them loosely is a defect. Adding a term means
 updating the glossary in the same commit.
 
-Key terms: **WAN** (the interface + gateway(s)), **Probe** (the *config*
-of how to test), **Sample** (one probe attempt), **Window** (sliding
-samples), **Health** (derived status), **Hysteresis** (flap suppression),
+Key terms: **WAN** (the interface + its Probe; gateways are
+discovered at runtime), **Probe** (the *config* of how to test),
+**Sample** (one probe attempt), **Window** (sliding samples),
+**Health** (derived status), **Hysteresis** (flap suppression),
 **Group**, **Member**, **Strategy**, **Selection** (current chosen
 member), **Decision** (a Selection *change*), **Apply** (kernel
 mutation), **State** (the externalized snapshot), **Hook** (user
@@ -85,9 +86,9 @@ the same minimal skeleton:
 make / tryMake / toJSONValue
 ```
 
-Pure-function modules (`selector`, `marks`, `tables`, `config`,
-`snippets`) get an explicitly different skeleton (`compute`,
-`allocate`, `render`, …) — also documented.
+Pure-function modules (`selector`, `marks`, `tables`, `config`)
+get an explicitly different skeleton (`compute`, `allocate`,
+`render`, …) — also documented.
 
 A meta-test in `tests/unit/skeleton.nix` asserts every value type
 exports the full skeleton. Failing it on a PR means "you added a type
@@ -199,7 +200,7 @@ lib/
     group.nix · member.nix         # Pass 3
     selector.nix                   # Pass 4
     marks.nix · tables.nix         # Pass 3
-    config.nix · snippets.nix      # Pass 4–5
+    config.nix                     # Pass 4
   types/                           # NixOS option types per concept
     default.nix                    # flattens per-type files
     primitives.nix
@@ -229,6 +230,7 @@ docs/
 | File | Audience |
 |---|---|
 | [`PLAN.md`](./PLAN.md) | Authoritative v1 design. Everyone. |
+| [`TODO.md`](./TODO.md) | Deferred work — what didn't make the current release. |
 | [`docs/glossary.md`](./docs/glossary.md) | All contributors. Terminology is enforced. |
 | `docs/wan-monitoring.md` | Newcomers. The model + quickstart. (Pass 6) |
 | `docs/architecture.md` | Integrators / debuggers. Layers + data flow. (Pass 6) |

@@ -134,4 +134,4 @@ logger -t wanwatch \
 
 ## Compatibility policy
 
-Same rules as [`daemon-config.md`](./daemon-config.md): bump `state.SchemaVersion` only when an existing field changes meaning or a required field is added without a default.
+Bump `state.SchemaVersion` whenever a field is added, renamed, or changes meaning. Unlike `config.json` (where naive readers are the daemon itself, which we control), `state.json` consumers are downstream — dashboards, ad-hoc scripts, monitoring agents — and benefit from a schema number they can branch on to opt into new fields. Additive bumps are therefore deliberate.

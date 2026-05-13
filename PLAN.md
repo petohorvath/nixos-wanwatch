@@ -217,7 +217,7 @@ that resolve to the operational modules.
 | `lib/default.nix` | top-level entry; composes `internal` + `types`; exposes `probe` / `wan` aliases |
 | `lib/internal/default.nix` | three-tier composition (primitives → probe → wan) |
 | `lib/internal/primitives.nix` | generic helpers: `tryOk`/`tryErr`, `check`, `partitionTry`, `formatErrors`, `isValidName`, `isPositiveInt` |
-| `lib/internal/probe.nix` | `probe` value type — `make`, `tryMake`, `isProbe`, accessors, `families`, full skeleton; owns `_type = "probe"` |
+| `lib/internal/probe.nix` | `probe` value type — `make`, `tryMake`, `toJSONValue`, `families` accessor |
 | `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `toJSONValue`, `families` accessor; `pointToPoint` toggles scope-link vs gateway-discovery apply path |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
 | `lib/internal/selector.nix` *(Pass 4)* | pure `compute` + closed-set strategy registry (v1: `primary-backup`) |
@@ -855,8 +855,8 @@ non-trivial tests, but the infrastructure works).
   daemon learns next-hops at runtime (see Pass 5 GatewayCache).
 - `lib/internal/probe.nix` + nested `thresholds`, `hysteresis`,
   `familyHealthPolicy` + tests — `targets` validated as list of
-  IPs; family of each target detected via `libnet.ip.family`; owns
-  `isProbe` predicate.
+  IPs; family of each target detected via libnet's `ip.isIpv4` /
+  `ip.isIpv6`.
 - `daemon/internal/probe/icmp.go` + tests (`golang.org/x/net/icmp`)
   — handles both ICMP (v4) and ICMPv6 from the start, dispatched by
   target family.

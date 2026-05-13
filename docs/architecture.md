@@ -54,7 +54,7 @@ Imported with `{ lib, libnet }`. Every value type follows the same minimal skele
 lib/internal/
   primitives.nix     — tryOk/tryErr, check, formatErrors
   probe.nix          — value type + threshold/hysteresis sub-types
-  wan.nix            — value type, family-coupling validator
+  wan.nix            — value type; families derived from probe.targets
   member.nix         — per-Group attributes (priority, weight)
   group.nix          — value type, strategy enum, mark/table
   marks.nix          — deterministic int allocator

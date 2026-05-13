@@ -9,7 +9,7 @@ new term means updating this file in the same commit.
 
 | Term | Definition | Not to be confused with |
 |---|---|---|
-| **WAN** | An egress interface with one or two gateways (v4 / v6). The atomic monitored unit. | Group, Member |
+| **WAN** | An egress interface plus a Probe configuration. Serves one or two IP families depending on `probe.targets`; next-hops are discovered at runtime via netlink. The atomic monitored unit. | Group, Member |
 | **Probe** | Configuration of *how* a WAN is tested — targets, method, interval, thresholds, hysteresis. | Sample |
 | **Target** | A single IP being probed. A Probe has one or more Targets. | Probe |
 | **Sample** | One probe attempt + result (RTT in microseconds, or `loss`). | Probe |
