@@ -187,6 +187,16 @@ in
   config = lib.mkIf cfg.enable {
     environment.etc."wanwatch/config.json".text = renderedConfig;
 
+    # Tell systemd-networkd to leave foreign routing-policy rules
+    # alone. The wanwatch daemon installs fwmark rules at bootstrap
+    # and depends on them surviving until shutdown; networkd's
+    # default `ManageForeignRoutingPolicyRules=yes` would delete
+    # them during its periodic reconciliation pass. Only takes
+    # effect when networkd is in use, so this is conditional on
+    # the option existing — networkd-free deployments are
+    # unaffected.
+    systemd.network.config.networkConfig.ManageForeignRoutingPolicyRules = lib.mkDefault false;
+
     users.users = lib.mkIf (cfg.user == "wanwatch") {
       wanwatch = {
         isSystemUser = true;
