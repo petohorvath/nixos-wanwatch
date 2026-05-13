@@ -54,11 +54,22 @@ type RouteSubscriber struct {
 // (watched-iface × family); the daemon sizes it at 64 which is
 // far above any realistic upper bound.
 func (s *RouteSubscriber) Prime(ctx context.Context, out chan<- RouteEvent) error {
+	return s.primeVia(ctx, netlink.RouteList, out)
+}
+
+// routeListFn matches netlink.RouteList and is the seam
+// RouteSubscriber.primeVia exposes for tests.
+type routeListFn func(link netlink.Link, family int) ([]netlink.Route, error)
+
+// primeVia is Prime parameterized on the route enumerator. Tests
+// drive synthetic routes through it to exercise the existing-
+// routes filtering + emission paths without a netlink socket.
+func (s *RouteSubscriber) primeVia(ctx context.Context, listFn routeListFn, out chan<- RouteEvent) error {
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
 	}
 	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
-		routes, err := netlink.RouteList(nil, family)
+		routes, err := listFn(nil, family)
 		if err != nil {
 			return fmt.Errorf("rtnl: RouteList family=%d: %w", family, err)
 		}
@@ -89,6 +100,17 @@ func (s *RouteSubscriber) Prime(ctx context.Context, out chan<- RouteEvent) erro
 // fresh goroutine and reuse the same channel after a transient
 // failure.
 func (s *RouteSubscriber) Run(ctx context.Context, out chan<- RouteEvent) error {
+	return s.runVia(ctx, netlink.RouteSubscribeWithOptions, out)
+}
+
+// routeSubscribeFn matches netlink.RouteSubscribeWithOptions and
+// is the seam RouteSubscriber.runVia exposes for tests.
+type routeSubscribeFn func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, opts netlink.RouteSubscribeOptions) error
+
+// runVia is Run parameterized on the subscription function. Same
+// rationale as Subscriber.runVia in subscriber.go — tests drive
+// the wire-up without a netlink socket.
+func (s *RouteSubscriber) runVia(ctx context.Context, subscribe routeSubscribeFn, out chan<- RouteEvent) error {
 	updates := make(chan netlink.RouteUpdate, routeUpdateBuffer)
 	done := make(chan struct{})
 	defer close(done)
@@ -97,7 +119,7 @@ func (s *RouteSubscriber) Run(ctx context.Context, out chan<- RouteEvent) error 
 	// request (RTM_GETROUTE with an IfInfomsg body where the
 	// kernel expects an RtMsg); recent kernels reject it. Skip
 	// it and rely on `Prime` for the existing-routes pass.
-	if err := netlink.RouteSubscribeWithOptions(updates, done, netlink.RouteSubscribeOptions{}); err != nil {
+	if err := subscribe(updates, done, netlink.RouteSubscribeOptions{}); err != nil {
 		return fmt.Errorf("rtnl: RouteSubscribe: %w", err)
 	}
 	if s.ifaceLookup == nil {

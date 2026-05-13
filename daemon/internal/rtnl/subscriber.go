@@ -32,6 +32,19 @@ const updateChanBuffer = 256
 // fresh goroutine and reuse the same channel after a transient
 // failure.
 func (s *Subscriber) Run(ctx context.Context, out chan<- LinkEvent) error {
+	return s.runVia(ctx, netlink.LinkSubscribeWithOptions, out)
+}
+
+// linkSubscribeFn matches netlink.LinkSubscribeWithOptions and is
+// the seam Subscriber.runVia exposes for tests: real production
+// uses the netlink call; tests inject a stub that either errors
+// or fills the `updates` channel with synthetic LinkUpdates.
+type linkSubscribeFn func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, opts netlink.LinkSubscribeOptions) error
+
+// runVia is Run parameterized on the subscription function — the
+// only piece of Run that needs a netlink socket. Tests drive this
+// directly to cover the error wrapping and the runLoop wire-up.
+func (s *Subscriber) runVia(ctx context.Context, subscribe linkSubscribeFn, out chan<- LinkEvent) error {
 	updates := make(chan netlink.LinkUpdate, updateChanBuffer)
 	done := make(chan struct{})
 	defer close(done)
@@ -40,7 +53,7 @@ func (s *Subscriber) Run(ctx context.Context, out chan<- LinkEvent) error {
 	// the daemon learns carrier/operstate at boot without waiting
 	// for the first transition.
 	opts := netlink.LinkSubscribeOptions{ListExisting: true}
-	if err := netlink.LinkSubscribeWithOptions(updates, done, opts); err != nil {
+	if err := subscribe(updates, done, opts); err != nil {
 		return fmt.Errorf("rtnl: LinkSubscribe: %w", err)
 	}
 	return s.runLoop(ctx, updates, out)

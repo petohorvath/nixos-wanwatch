@@ -169,11 +169,29 @@ func (p *Pinger) resolveTargets() (map[string]net.Addr, error) {
 // doesn't surface — and SyscallConn is required for the
 // SO_BINDTODEVICE setsockopt that prevents probe-traffic leakage.
 func dialICMP(family Family, iface string) (pingConn, error) {
+	return dialICMPVia(family, iface, net.ListenPacket, bindToDevice)
+}
+
+// listenPacketFn matches net.ListenPacket. dialICMPVia takes it as
+// a parameter so tests can substitute a stub that returns a
+// chosen net.PacketConn (or an error) without needing CAP_NET_RAW.
+type listenPacketFn func(network, address string) (net.PacketConn, error)
+
+// bindToDeviceFn matches the bindToDevice signature for the same
+// reason — without it, tests of dialICMPVia would still need a
+// real raw socket to reach the bind step.
+type bindToDeviceFn func(conn *net.IPConn, iface string) error
+
+// dialICMPVia is dialICMP parameterized on its two syscall-touching
+// dependencies. Same control flow, but the v4/v6 network-string
+// branch, the *net.IPConn type-assert branch, and the Close-on-
+// error branches are now testable without netlink permissions.
+func dialICMPVia(family Family, iface string, listen listenPacketFn, bind bindToDeviceFn) (pingConn, error) {
 	network := "ip4:icmp"
 	if family == FamilyV6 {
 		network = "ip6:ipv6-icmp"
 	}
-	pc, err := net.ListenPacket(network, "")
+	pc, err := listen(network, "")
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +200,7 @@ func dialICMP(family Family, iface string) (pingConn, error) {
 		_ = pc.Close()
 		return nil, fmt.Errorf("probe: net.ListenPacket(%s) returned %T, want *net.IPConn", network, pc)
 	}
-	if err := bindToDevice(ipConn, iface); err != nil {
+	if err := bind(ipConn, iface); err != nil {
 		_ = ipConn.Close()
 		return nil, err
 	}
@@ -205,14 +223,23 @@ func bindToDevice(conn *net.IPConn, iface string) error {
 	if ctrlErr != nil {
 		return ctrlErr
 	}
-	if setErr != nil {
-		// EPERM here means CAP_NET_RAW wasn't granted — surface
-		// it explicitly so the operator can fix the systemd unit
-		// rather than chasing a vague "permission denied".
-		if errors.Is(setErr, os.ErrPermission) {
-			return fmt.Errorf("SO_BINDTODEVICE: %w (need CAP_NET_RAW)", setErr)
-		}
-		return setErr
+	return wrapBindError(setErr)
+}
+
+// wrapBindError converts the raw SetsockoptString error returned by
+// bindToDevice into the daemon-facing form. EPERM is the only
+// branch with a meaningful transform (the CAP_NET_RAW hint); the
+// rest of the function exists to make that branch testable without
+// the runtime needing actual CAP_NET_RAW (or its absence).
+func wrapBindError(setErr error) error {
+	if setErr == nil {
+		return nil
 	}
-	return nil
+	// EPERM here means CAP_NET_RAW wasn't granted — surface it
+	// explicitly so the operator can fix the systemd unit rather
+	// than chasing a vague "permission denied".
+	if errors.Is(setErr, os.ErrPermission) {
+		return fmt.Errorf("SO_BINDTODEVICE: %w (need CAP_NET_RAW)", setErr)
+	}
+	return setErr
 }

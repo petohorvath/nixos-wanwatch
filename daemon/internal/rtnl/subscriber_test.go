@@ -3,6 +3,7 @@ package rtnl
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,5 +216,65 @@ func TestRunLoopCancelsBetweenUpdates(t *testing.T) {
 	err := (&Subscriber{}).runLoop(ctx, updates, out)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// TestSubscriberRunViaWrapsSubscribeError: a netlink subscribe
+// failure must be wrapped with the `rtnl: LinkSubscribe:` prefix
+// so logs name the layer responsible.
+func TestSubscriberRunViaWrapsSubscribeError(t *testing.T) {
+	t.Parallel()
+	want := errors.New("netlink: subscribe denied")
+	subscribe := func(chan<- netlink.LinkUpdate, <-chan struct{}, netlink.LinkSubscribeOptions) error {
+		return want
+	}
+	err := (&Subscriber{}).runVia(context.Background(), subscribe, make(chan LinkEvent, 1))
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want subscribe-error chained via %%w", err)
+	}
+	if !strings.Contains(err.Error(), "rtnl: LinkSubscribe") {
+		t.Errorf("err = %q, want 'rtnl: LinkSubscribe' prefix", err.Error())
+	}
+}
+
+// TestSubscriberRunViaWiresSubscribeToRunLoop: a successful
+// subscribe hands the `updates` channel through to runLoop — a
+// LinkUpdate written by the stub must surface as a LinkEvent on
+// `out`, proving the wire-up isn't dropped on the floor.
+func TestSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
+	t.Parallel()
+	// `subscribe` writes synthetic updates to the channel runVia
+	// hands it, then signals readiness via `subscribed`. Writing
+	// from the runVia goroutine itself avoids racing the producer
+	// against an external sender that doesn't know when ch is
+	// non-nil.
+	subscribed := make(chan struct{})
+	subscribe := func(ch chan<- netlink.LinkUpdate, _ <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+		ch <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
+		close(subscribed)
+		return nil
+	}
+	out := make(chan LinkEvent, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- (&Subscriber{}).runVia(ctx, subscribe, out)
+	}()
+
+	<-subscribed
+	select {
+	case ev := <-out:
+		if ev.Name != "eth0" || ev.Carrier != CarrierUp {
+			t.Errorf("event = %+v, want eth0/up", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no LinkEvent within 1s; subscribe→runLoop wiring broken")
+	}
+
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("runVia returned %v, want context.Canceled after cancel", err)
 	}
 }

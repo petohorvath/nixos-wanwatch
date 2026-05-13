@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -358,5 +359,126 @@ func TestInterfaceNameByIndexRejectsBogusIndex(t *testing.T) {
 	// net.InterfaceByIndex error rather than crashing.
 	if _, err := interfaceNameByIndex(0x7fffffff); err == nil {
 		t.Error("interfaceNameByIndex(bogus) = nil err, want non-nil")
+	}
+}
+
+// TestRouteSubscriberRunViaWrapsSubscribeError: same shape as the
+// link-subscriber wrap-test — pin the `rtnl: RouteSubscribe:`
+// prefix so logs name the layer.
+func TestRouteSubscriberRunViaWrapsSubscribeError(t *testing.T) {
+	t.Parallel()
+	want := errors.New("netlink: route subscribe denied")
+	subscribe := func(chan<- netlink.RouteUpdate, <-chan struct{}, netlink.RouteSubscribeOptions) error {
+		return want
+	}
+	err := (&RouteSubscriber{}).runVia(context.Background(), subscribe, make(chan RouteEvent, 1))
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want subscribe-error chained via %%w", err)
+	}
+	if !strings.Contains(err.Error(), "rtnl: RouteSubscribe") {
+		t.Errorf("err = %q, want 'rtnl: RouteSubscribe' prefix", err.Error())
+	}
+}
+
+// TestRouteSubscriberRunViaWiresSubscribeToRunLoop: pushing a
+// default-route update through the seam yields a RouteEvent.
+// Uses an ifaceLookup stub so the test doesn't need real
+// netlink-resolvable ifindices.
+func TestRouteSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
+	t.Parallel()
+	subscribed := make(chan struct{})
+	subscribe := func(ch chan<- netlink.RouteUpdate, _ <-chan struct{}, _ netlink.RouteSubscribeOptions) error {
+		ch <- mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 7, nil)
+		close(subscribed)
+		return nil
+	}
+	s := &RouteSubscriber{
+		ifaceLookup: func(idx int) (string, error) {
+			if idx == 7 {
+				return "eth0", nil
+			}
+			return "", errors.New("not found")
+		},
+	}
+	out := make(chan RouteEvent, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- s.runVia(ctx, subscribe, out) }()
+
+	<-subscribed
+	select {
+	case ev := <-out:
+		if ev.Iface != "eth0" || ev.Gateway.String() != "192.0.2.1" {
+			t.Errorf("event = %+v, want eth0/192.0.2.1", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no RouteEvent within 1s; subscribe→runLoop wiring broken")
+	}
+
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("runVia returned %v, want context.Canceled", err)
+	}
+}
+
+// TestRouteSubscriberPrimeViaWrapsListError: a RouteList failure
+// for either family must be wrapped with the daemon-side prefix.
+func TestRouteSubscriberPrimeViaWrapsListError(t *testing.T) {
+	t.Parallel()
+	want := errors.New("netlink: route list denied")
+	listFn := func(netlink.Link, int) ([]netlink.Route, error) { return nil, want }
+
+	s := &RouteSubscriber{}
+	err := s.primeVia(context.Background(), listFn, make(chan RouteEvent, 1))
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want list-error chained via %%w", err)
+	}
+	if !strings.Contains(err.Error(), "rtnl: RouteList") {
+		t.Errorf("err = %q, want 'rtnl: RouteList' prefix", err.Error())
+	}
+}
+
+// TestRouteSubscriberPrimeViaEmitsPerFamilyDefaults: a non-empty
+// RouteList for each family must emit a RouteEvent per default
+// route on a watched iface. The stub returns a single v4 default
+// for the first call and nothing for v6 — assert one emit.
+func TestRouteSubscriberPrimeViaEmitsPerFamilyDefaults(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
+		calls++
+		if family == unix.AF_INET {
+			return []netlink.Route{{
+				Table:     unix.RT_TABLE_MAIN,
+				Family:    unix.AF_INET,
+				LinkIndex: 7,
+				Gw:        net.ParseIP("192.0.2.1"),
+			}}, nil
+		}
+		return nil, nil
+	}
+	s := &RouteSubscriber{
+		ifaceLookup: func(idx int) (string, error) {
+			if idx == 7 {
+				return "eth0", nil
+			}
+			return "", errors.New("not found")
+		},
+	}
+	out := make(chan RouteEvent, 4)
+	if err := s.primeVia(context.Background(), listFn, out); err != nil {
+		t.Fatalf("primeVia = %v, want nil", err)
+	}
+	if calls != 2 {
+		t.Errorf("RouteList calls = %d, want 2 (one per family)", calls)
+	}
+	if got := len(out); got != 1 {
+		t.Fatalf("len(out) = %d, want 1 (v4 default on eth0)", got)
+	}
+	ev := <-out
+	if ev.Iface != "eth0" || ev.Gateway.String() != "192.0.2.1" || ev.Family != RouteFamilyV4 {
+		t.Errorf("event = %+v, want eth0/v4/192.0.2.1", ev)
 	}
 }

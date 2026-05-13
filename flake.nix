@@ -221,8 +221,8 @@
                 internal/apply:90
                 internal/config:95
                 internal/metrics:85
-                internal/probe:80
-                internal/rtnl:73
+                internal/probe:85
+                internal/rtnl:90
                 internal/selector:95
                 internal/state:93
                 EOF
