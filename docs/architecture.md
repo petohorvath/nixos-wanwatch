@@ -48,11 +48,11 @@ Three layers, bottom-up: pure-Nix library, NixOS module, Go daemon. The library 
 
 ### `lib/`
 
-Imported with `{ lib, libnet }`. Every value type follows the same skeleton: `make`, `tryMake`, `is<T>`, `eq`, `compare`, `min`, `max`, `toJSON`, `_type`.
+Imported with `{ lib, libnet }`. Every value type follows the same minimal skeleton: `make`, `tryMake`, `toJSONValue`.
 
 ```
 lib/internal/
-  primitives.nix     — hasTag, tryOk/tryErr, formatErrors
+  primitives.nix     — tryOk/tryErr, check, formatErrors
   probe.nix          — value type + threshold/hysteresis sub-types
   wan.nix            — value type, family-coupling validator
   member.nix         — per-Group attributes (priority, weight)

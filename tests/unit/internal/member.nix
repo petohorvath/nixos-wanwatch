@@ -33,9 +33,9 @@ in
 {
   # ===== Happy path — minimal input =====
 
-  testMakeMinimalReturnsTaggedValue = {
-    expr = (member.make minimalInput)._type;
-    expected = "member";
+  testMakeMinimalReturnsValue = {
+    expr = builtins.isAttrs (member.make minimalInput);
+    expected = true;
   };
 
   testMakeMinimalUsesDefaultWeight = {
@@ -66,28 +66,6 @@ in
       weight = 50;
       priority = 2;
     };
-  };
-
-  # ===== Predicate: isMember =====
-
-  testIsMemberOnMember = {
-    expr = member.isMember (member.make minimalInput);
-    expected = true;
-  };
-
-  testIsMemberOnRawAttrs = {
-    expr = member.isMember { wan = "primary"; };
-    expected = false;
-  };
-
-  testIsMemberOnProbe = {
-    expr = member.isMember (wanwatch.probe.make { targets = [ "1.1.1.1" ]; });
-    expected = false;
-  };
-
-  testIsMemberOnString = {
-    expr = member.isMember "primary";
-    expected = false;
   };
 
   # ===== Error: memberInvalidWan =====
@@ -202,11 +180,6 @@ in
   };
 
   # ===== toJSONValue =====
-
-  testToJSONValueIncludesTypeTag = {
-    expr = (member.toJSONValue (member.make minimalInput))._type;
-    expected = "member";
-  };
 
   testToJSONValueIncludesWan = {
     expr = (member.toJSONValue (member.make minimalInput)).wan;

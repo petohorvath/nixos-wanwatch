@@ -82,7 +82,7 @@ Every value type (`wan`, `probe`, `group`, `member`) implements
 the same minimal skeleton:
 
 ```
-make / tryMake / is<T> / toJSONValue / _type
+make / tryMake / toJSONValue
 ```
 
 Pure-function modules (`selector`, `marks`, `tables`, `config`,
@@ -194,7 +194,7 @@ lib/
   default.nix                      # composes internal + types
   internal/                        # operational code per concept
     default.nix                    # three-tier composition
-    primitives.nix                 # generic helpers (hasTag, tryOk/tryErr, …)
+    primitives.nix                 # generic helpers (tryOk/tryErr, check, …)
     probe.nix · wan.nix
     group.nix · member.nix         # Pass 3
     selector.nix                   # Pass 4

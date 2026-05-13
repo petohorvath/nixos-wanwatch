@@ -53,7 +53,6 @@
 }:
 let
   inherit (internal.primitives)
-    hasTag
     tryOk
     tryErr
     check
@@ -61,9 +60,6 @@ let
     isPositiveInt
     ;
   formatErrors = internal.primitives.formatErrors "member.make";
-
-  tag = "member";
-  isMember = hasTag tag;
 
   # ===== Defaults =====
 
@@ -101,7 +97,6 @@ let
     cfg: validateWan cfg.wan ++ validateWeight cfg.weight ++ validatePriority cfg.priority;
 
   buildValue = cfg: {
-    _type = tag;
     inherit (cfg) wan weight priority;
   };
 
@@ -130,7 +125,6 @@ let
 
   toJSONValue = m: {
     inherit (m)
-      _type
       wan
       weight
       priority
@@ -141,7 +135,6 @@ in
   inherit
     make
     tryMake
-    isMember
     toJSONValue
     ;
   inherit wan weight priority;

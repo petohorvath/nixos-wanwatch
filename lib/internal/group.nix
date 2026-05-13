@@ -62,7 +62,6 @@
 }:
 let
   inherit (internal.primitives)
-    hasTag
     tryOk
     tryErr
     check
@@ -73,9 +72,6 @@ let
     ;
   formatErrors = internal.primitives.formatErrors "group.make";
   inherit (internal) member;
-
-  tag = "group";
-  isGroup = hasTag tag;
 
   # ===== Defaults =====
 
@@ -175,7 +171,6 @@ let
     structuralErrs ++ duplicateErrs;
 
   buildValue = cfg: parsedMembers: {
-    _type = tag;
     inherit (cfg)
       name
       strategy
@@ -213,7 +208,6 @@ let
   # ===== Serialization =====
 
   toJSONValue = g: {
-    _type = tag;
     inherit (g)
       name
       strategy
@@ -227,7 +221,6 @@ in
   inherit
     make
     tryMake
-    isGroup
     toJSONValue
     ;
   inherit

@@ -21,8 +21,7 @@
   ===== make =====
 
   Input:  attrset of fields (any subset; missing fields take defaults)
-  Output: tagged probe value `{ _type = "probe"; ... }` with each
-          target parsed into a libnet.ip value
+  Output: probe value with each target parsed into a libnet.ip value
   Throws: aggregated error string if any field fails validation.
 
   ===== tryMake =====
@@ -72,7 +71,6 @@
 }:
 let
   inherit (internal.primitives)
-    hasTag
     tryOk
     tryErr
     check
@@ -81,12 +79,6 @@ let
     isPositiveInt
     ;
   formatErrors = internal.primitives.formatErrors "probe.make";
-
-  # The probe module owns its own `_type` tag string and its
-  # corresponding predicate. Other modules reach the predicate via
-  # `internal.probe.isProbe`; no centralized type registry.
-  tag = "probe";
-  isProbe = hasTag tag;
 
   # ===== Defaults =====
 
@@ -235,7 +227,6 @@ let
     ++ validateFamilyHealthPolicy cfg.familyHealthPolicy;
 
   buildValue = cfg: parsedTargets: {
-    _type = tag;
     method = cfg.method;
     targets = parsedTargets;
     intervalMs = cfg.intervalMs;
@@ -290,7 +281,6 @@ let
   # rendered config is byte-stable across builds.
   toJSONValue = p: {
     inherit (p)
-      _type
       method
       intervalMs
       timeoutMs
@@ -306,7 +296,6 @@ in
   inherit
     make
     tryMake
-    isProbe
     toJSONValue
     ;
   inherit

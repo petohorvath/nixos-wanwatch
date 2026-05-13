@@ -44,7 +44,6 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 
 ```json
 {
-  "_type": "wan",
   "name": "primary",
   "interface": "eth0",
   "gateways": { "v4": "192.0.2.1", "v6": null },
@@ -54,7 +53,6 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `_type` | string | yes | Always `"wan"`. Tag for runtime type checks. |
 | `name` | string | yes | Must match the attribute key. |
 | `interface` | string | yes | Linux interface name (passes `dev_valid_name`). |
 | `gateways.v4` | string \| null | one-of | IPv4 default gateway. Null means no v4. |
@@ -67,7 +65,6 @@ At least one of `gateways.v4` / `gateways.v6` must be non-null. Family-coupling:
 
 ```json
 {
-  "_type": "probe",
   "method": "icmp",
   "targets": [ "1.1.1.1", "2606:4700:4700::1111" ],
   "intervalMs": 1000,
@@ -89,7 +86,6 @@ At least one of `gateways.v4` / `gateways.v6` must be non-null. Family-coupling:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `_type` | string | — | Always `"probe"`. |
 | `method` | string | `"icmp"` | Probe method. v1: `icmp` only. |
 | `targets` | array<string> | required | IP literals — v4 or v6. Non-empty. |
 | `intervalMs` | int | `1000` | Time between cycles. |
@@ -109,7 +105,6 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 
 ```json
 {
-  "_type": "group",
   "name": "home-uplink",
   "members": [ { ... }, { ... } ],
   "strategy": "primary-backup",
@@ -120,7 +115,6 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `_type` | string | yes | Always `"group"`. |
 | `name` | string | yes | Must match the attribute key. |
 | `members` | array<object> | yes | Non-empty; no duplicate `wan` references. |
 | `strategy` | string | yes | v1: `"primary-backup"`. |
@@ -131,7 +125,6 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 
 ```json
 {
-  "_type": "member",
   "wan": "primary",
   "weight": 100,
   "priority": 1
@@ -140,7 +133,6 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `_type` | string | yes | Always `"member"`. |
 | `wan` | string | yes | References a key in the top-level `wans` map. |
 | `weight` | int | yes | `1..1000`. Reserved for v2's multi-active strategies; ignored under `primary-backup`. |
 | `priority` | int | yes | `1..1000`. Lower is preferred under `primary-backup`. |

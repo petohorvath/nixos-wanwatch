@@ -190,9 +190,7 @@ Every value type implements the same minimal skeleton:
 For value type T ∈ { wan, probe, group, member }:
   make        : attrs → T              throws on invalid input
   tryMake     : attrs → tryResult T    { success; value; error; }
-  is<T>       : any → bool             type predicate (e.g. isWan)
   toJSONValue : T → attrset            canonical attrset embedded by config.render
-  _type       : string                 runtime tag — "wan", "probe", …
 ```
 
 A unit test asserts that every value type exports the full skeleton;
@@ -218,7 +216,7 @@ that resolve to the operational modules.
 |---|---|
 | `lib/default.nix` | top-level entry; composes `internal` + `types`; exposes `probe` / `wan` aliases |
 | `lib/internal/default.nix` | three-tier composition (primitives → probe → wan) |
-| `lib/internal/primitives.nix` | generic helpers: `hasTag`, `ensureTag`, `tryOk`/`tryErr`, `check`, `tagError`, `parseOptional`, `partitionTry`, `formatErrors`, `isValidName`, `isPositiveInt` |
+| `lib/internal/primitives.nix` | generic helpers: `tryOk`/`tryErr`, `check`, `tagError`, `parseOptional`, `partitionTry`, `formatErrors`, `isValidName`, `isPositiveInt` |
 | `lib/internal/probe.nix` | `probe` value type — `make`, `tryMake`, `isProbe`, accessors, `families`, full skeleton; owns `_type = "probe"` |
 | `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `isWan`, accessors, family-coupling, full skeleton; owns `_type = "wan"` |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |

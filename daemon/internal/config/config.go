@@ -53,7 +53,6 @@ type Global struct {
 // *name* (via Member.Wan); this struct's other fields drive the
 // probe and apply layers in Pass 4+.
 type Wan struct {
-	Type      string   `json:"_type"`
 	Name      string   `json:"name"`
 	Interface string   `json:"interface"`
 	Gateways  Gateways `json:"gateways"`
@@ -71,7 +70,6 @@ type Gateways struct {
 
 // Probe mirrors `wanwatch.probe.toJSONValue`.
 type Probe struct {
-	Type               string     `json:"_type"`
 	Method             string     `json:"method"`
 	Targets            []string   `json:"targets"`
 	IntervalMs         int        `json:"intervalMs"`

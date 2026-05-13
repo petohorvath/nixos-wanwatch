@@ -19,12 +19,10 @@ const validConfig = `{
   },
   "wans": {
     "primary": {
-      "_type": "wan",
       "name": "primary",
       "interface": "eth0",
       "gateways": { "v4": "192.0.2.1", "v6": null },
       "probe": {
-        "_type": "probe",
         "method": "icmp",
         "targets": ["1.1.1.1"],
         "intervalMs": 500,

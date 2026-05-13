@@ -7,82 +7,12 @@
   Coverage discipline per PLAN.md §9.1: every public function
   exercised on both positive and negative inputs, including each
   `throws` branch via `builtins.tryEval` (`.success == false`).
-  Type-specific predicates (`isWan`, `isProbe`, …) live with their
-  owning type modules and are tested in `tests/unit/internal/<type>.nix`.
 */
 { pkgs, ... }:
 let
   primitives = import ../../../lib/internal/primitives.nix { inherit (pkgs) lib; };
-  inherit (import ../helpers.nix { inherit pkgs; }) evalThrows;
-
-  # A representative tagged value for the hasTag / ensureTag tests.
-  tagged = {
-    _type = "wan";
-    name = "eth0";
-  };
-
-  # A different-tag value for mismatch cases.
-  otherTagged = {
-    _type = "probe";
-    targets = [ "1.1.1.1" ];
-  };
 in
 {
-  # ===== hasTag — positive cases =====
-
-  testHasTagMatches = {
-    expr = primitives.hasTag "wan" tagged;
-    expected = true;
-  };
-
-  # ===== hasTag — negative cases =====
-
-  testHasTagWrongTag = {
-    expr = primitives.hasTag "wan" otherTagged;
-    expected = false;
-  };
-
-  testHasTagMissingTypeAttr = {
-    expr = primitives.hasTag "wan" { name = "eth0"; };
-    expected = false;
-  };
-
-  testHasTagNotAttrs = {
-    expr = primitives.hasTag "wan" "eth0";
-    expected = false;
-  };
-
-  testHasTagInt = {
-    expr = primitives.hasTag "wan" 42;
-    expected = false;
-  };
-
-  testHasTagList = {
-    expr = primitives.hasTag "wan" [ "eth0" ];
-    expected = false;
-  };
-
-  testHasTagNull = {
-    expr = primitives.hasTag "wan" null;
-    expected = false;
-  };
-
-  testHasTagEmptyAttrs = {
-    expr = primitives.hasTag "wan" { };
-    expected = false;
-  };
-
-  testHasTagCurriable = {
-    # `hasTag tag` must be a curried function suitable for
-    # `filter`/`any` and for per-type `is<Type>` binding.
-    expr = builtins.filter (primitives.hasTag "wan") [
-      tagged
-      otherTagged
-      "eth0"
-    ];
-    expected = [ tagged ];
-  };
-
   # ===== tryOk =====
 
   testTryOkStructure = {
@@ -90,15 +20,6 @@ in
     expected = {
       success = true;
       value = 42;
-      error = null;
-    };
-  };
-
-  testTryOkWithAttrs = {
-    expr = primitives.tryOk tagged;
-    expected = {
-      success = true;
-      value = tagged;
       error = null;
     };
   };
@@ -130,40 +51,6 @@ in
       value = null;
       error = "";
     };
-  };
-
-  # ===== ensureTag — passes through =====
-
-  testEnsureTagReturnsValueOnMatch = {
-    expr = primitives.ensureTag "wan" "fn" tagged;
-    expected = tagged;
-  };
-
-  # ===== ensureTag — throws =====
-
-  testEnsureTagThrowsOnWrongTag = {
-    expr = evalThrows (primitives.ensureTag "wan" "fn" otherTagged);
-    expected = true;
-  };
-
-  testEnsureTagThrowsOnString = {
-    expr = evalThrows (primitives.ensureTag "wan" "fn" "eth0");
-    expected = true;
-  };
-
-  testEnsureTagThrowsOnInt = {
-    expr = evalThrows (primitives.ensureTag "wan" "fn" 42);
-    expected = true;
-  };
-
-  testEnsureTagThrowsOnNull = {
-    expr = evalThrows (primitives.ensureTag "wan" "fn" null);
-    expected = true;
-  };
-
-  testEnsureTagThrowsOnAttrsWithoutType = {
-    expr = evalThrows (primitives.ensureTag "wan" "fn" { name = "eth0"; });
-    expected = true;
   };
 
   # ===== formatErrors =====

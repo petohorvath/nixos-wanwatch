@@ -297,8 +297,9 @@ in
     ];
   };
 
-  testRenderWansContainTypeTags = {
-    # Each rendered wan must be a JSON-shape object with _type="wan".
+  testRenderWansAreSerializedObjects = {
+    # Each rendered wan must surface as an attrset (toJSONValue form),
+    # not the raw tagged value.
     expr =
       let
         rendered = config.render {
@@ -307,8 +308,8 @@ in
           };
         };
       in
-      rendered.wans.primary._type;
-    expected = "wan";
+      rendered.wans.primary.interface;
+    expected = "eth0";
   };
 
   testRenderGroupsHaveResolvedMarkAndTable = {

@@ -4,8 +4,8 @@
   Coverage discipline per PLAN.md §9.1: every public function
   exercised on positive and negative inputs; every error kind
   triggered in isolation and at least one aggregated multi-error
-  case; the §5.1 API skeleton (`make` / `tryMake` / `isProbe` /
-  `eq` / `compare` / derived ordering / `toJSON`) all exercised.
+  case; the §5.1 API skeleton (`make` / `tryMake` / `toJSONValue`)
+  exercised.
 */
 { pkgs, libnet, ... }:
 let
@@ -48,9 +48,9 @@ in
 {
   # ===== Happy path — minimal input =====
 
-  testMakeMinimalReturnsTaggedValue = {
-    expr = (probe.make minimalInput)._type;
-    expected = "probe";
+  testMakeMinimalReturnsValue = {
+    expr = builtins.isAttrs (probe.make minimalInput);
+    expected = true;
   };
 
   testMakeMinimalUsesDefaultMethod = {
@@ -222,34 +222,7 @@ in
     };
   };
 
-  # ===== Predicate: isProbe =====
-
-  testIsProbeOnProbe = {
-    expr = probe.isProbe (probe.make minimalInput);
-    expected = true;
-  };
-
-  testIsProbeOnRawAttrs = {
-    expr = probe.isProbe { foo = "bar"; };
-    expected = false;
-  };
-
-  testIsProbeOnWan = {
-    expr = probe.isProbe { _type = "wan"; };
-    expected = false;
-  };
-
-  testIsProbeOnString = {
-    expr = probe.isProbe "icmp";
-    expected = false;
-  };
-
   # ===== toJSONValue =====
-
-  testToJSONValueIncludesTypeTag = {
-    expr = (probe.toJSONValue (probe.make minimalInput))._type;
-    expected = "probe";
-  };
 
   testToJSONValueStringifiesTargets = {
     # Targets render as strings, not nested libnet structures.
@@ -542,8 +515,8 @@ in
   };
 
   testTryMakeReturnsValue = {
-    expr = (probe.tryMake minimalInput).value._type;
-    expected = "probe";
+    expr = builtins.isAttrs (probe.tryMake minimalInput).value;
+    expected = true;
   };
 
   testTryMakeErrOnInvalid = {

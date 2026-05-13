@@ -52,9 +52,9 @@ in
 {
   # ===== Happy path =====
 
-  testMakeMinimalReturnsTaggedValue = {
-    expr = (group.make minimalInput)._type;
-    expected = "group";
+  testMakeMinimalReturnsValue = {
+    expr = builtins.isAttrs (group.make minimalInput);
+    expected = true;
   };
 
   testMakeMinimalUsesDefaultStrategy = {
@@ -90,11 +90,8 @@ in
   };
 
   testMembersParsedToMemberValues = {
-    expr = builtins.map (m: m._type) (group.members (group.make fullInput));
-    expected = [
-      "member"
-      "member"
-    ];
+    expr = builtins.all builtins.isAttrs (group.members (group.make fullInput));
+    expected = true;
   };
 
   testWansAccessorReturnsNameList = {
@@ -103,28 +100,6 @@ in
       "primary"
       "backup"
     ];
-  };
-
-  # ===== Predicate: isGroup =====
-
-  testIsGroupOnGroup = {
-    expr = group.isGroup (group.make minimalInput);
-    expected = true;
-  };
-
-  testIsGroupOnMember = {
-    expr = group.isGroup (wanwatch.member.make { wan = "primary"; });
-    expected = false;
-  };
-
-  testIsGroupOnRawAttrs = {
-    expr = group.isGroup { name = "home"; };
-    expected = false;
-  };
-
-  testIsGroupOnString = {
-    expr = group.isGroup "home";
-    expected = false;
   };
 
   # ===== Error: groupInvalidName =====
@@ -364,11 +339,6 @@ in
   };
 
   # ===== toJSONValue =====
-
-  testToJSONValueIncludesTypeTag = {
-    expr = (group.toJSONValue (group.make minimalInput))._type;
-    expected = "group";
-  };
 
   testToJSONValueEmbedsMembersAsAttrsets = {
     expr = builtins.isAttrs (builtins.head (group.toJSONValue (group.make minimalInput)).members);

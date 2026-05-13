@@ -2,7 +2,7 @@
   Skeleton meta-test. Asserts that every value-type module in the
   wanwatch lib exports the load-bearing API:
 
-    make / tryMake / is<T> / toJSONValue
+    make / tryMake / toJSONValue
 
   This is a guard rail, not a behaviour test. Per-type test files
   (`probe.nix`, `wan.nix`, …) verify *what* each function does;
@@ -24,39 +24,18 @@ let
     inherit libnet;
   };
 
-  # ===== The required skeleton =====
-
   requiredCommonFunctions = [
     "make"
     "tryMake"
     "toJSONValue"
   ];
 
-  # ===== Value-type registry =====
-  #
-  # Entry: { module = wanwatch.<name>; predicate = "is<Title>"; }
-  # Add a new line per Pass 3+ value type (group, member, …).
-
   valueTypes = {
-    probe = {
-      module = wanwatch.probe;
-      predicate = "isProbe";
-    };
-    member = {
-      module = wanwatch.member;
-      predicate = "isMember";
-    };
-    wan = {
-      module = wanwatch.wan;
-      predicate = "isWan";
-    };
-    group = {
-      module = wanwatch.group;
-      predicate = "isGroup";
-    };
+    probe = wanwatch.probe;
+    member = wanwatch.member;
+    wan = wanwatch.wan;
+    group = wanwatch.group;
   };
-
-  # ===== Test generation =====
 
   mkPresenceTest = typeName: module: fnName: {
     name = "testSkeleton_${typeName}_exports_${fnName}";
@@ -66,20 +45,9 @@ let
     };
   };
 
-  mkPredicateTest = typeName: module: predicateName: {
-    name = "testSkeleton_${typeName}_exports_${predicateName}";
-    value = {
-      expr = module ? ${predicateName} && builtins.isFunction module.${predicateName};
-      expected = true;
-    };
-  };
-
   testsForType =
-    typeName: spec:
-    builtins.listToAttrs (
-      [ (mkPredicateTest typeName spec.module spec.predicate) ]
-      ++ map (fnName: mkPresenceTest typeName spec.module fnName) requiredCommonFunctions
-    );
+    typeName: module:
+    builtins.listToAttrs (map (fnName: mkPresenceTest typeName module fnName) requiredCommonFunctions);
 
   allSkeletonTests = builtins.foldl' (
     acc: typeName: acc // testsForType typeName valueTypes.${typeName}

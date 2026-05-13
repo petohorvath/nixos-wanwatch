@@ -4,8 +4,7 @@
   Coverage discipline per PLAN.md §9.1: every public function exercised
   on positive and negative inputs; every error kind triggered in
   isolation; at least one multi-violation case for aggregated reporting;
-  the §5.1 API skeleton (`make` / `tryMake` / `isWan` / `eq` / `compare` /
-  derived ordering / `toJSON`) all exercised.
+  the §5.1 API skeleton (`make` / `tryMake` / `toJSONValue`) exercised.
 
   Family-coupling invariant (PLAN §5.4) gets its own block of tests:
   each of the five error kinds in isolation plus positive cases for
@@ -57,19 +56,19 @@ in
 {
   # ===== Happy path — three topologies =====
 
-  testMakeDualStackReturnsTaggedValue = {
-    expr = (wan.make dualStackInput)._type;
-    expected = "wan";
+  testMakeDualStackReturnsValue = {
+    expr = builtins.isAttrs (wan.make dualStackInput);
+    expected = true;
   };
 
   testMakeV4OnlyAccepted = {
-    expr = (wan.make v4OnlyInput)._type;
-    expected = "wan";
+    expr = wan.gatewayV4 (wan.make v4OnlyInput) != null;
+    expected = true;
   };
 
   testMakeV6OnlyAccepted = {
-    expr = (wan.make v6OnlyInput)._type;
-    expected = "wan";
+    expr = wan.gatewayV6 (wan.make v6OnlyInput) != null;
+    expected = true;
   };
 
   testMakeDualStackPreservesName = {
@@ -129,35 +128,13 @@ in
   };
 
   testProbeAccessorReturnsProbeValue = {
-    expr = (wan.probe (wan.make dualStackInput))._type;
-    expected = "probe";
+    expr = builtins.isAttrs (wan.probe (wan.make dualStackInput));
+    expected = true;
   };
 
   testTargetsForwardedFromProbe = {
     expr = builtins.length (wan.targets (wan.make dualStackInput));
     expected = 2;
-  };
-
-  # ===== Predicate: isWan =====
-
-  testIsWanOnWan = {
-    expr = wan.isWan (wan.make dualStackInput);
-    expected = true;
-  };
-
-  testIsWanOnProbe = {
-    expr = wan.isWan (wanwatch.probe.make { targets = [ "1.1.1.1" ]; });
-    expected = false;
-  };
-
-  testIsWanOnRawAttrs = {
-    expr = wan.isWan { name = "primary"; };
-    expected = false;
-  };
-
-  testIsWanOnString = {
-    expr = wan.isWan "primary";
-    expected = false;
   };
 
   # ===== Error: wanInvalidName =====
@@ -406,11 +383,6 @@ in
   };
 
   # ===== toJSONValue =====
-
-  testToJSONValueIncludesTypeTag = {
-    expr = (wan.toJSONValue (wan.make dualStackInput))._type;
-    expected = "wan";
-  };
 
   testToJSONValueIncludesName = {
     expr = (wan.toJSONValue (wan.make dualStackInput)).name;

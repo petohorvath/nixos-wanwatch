@@ -3,33 +3,15 @@
   library. Exposed under `wanwatch.internal.primitives`.
 
   Sections:
-    - Tagging       — `hasTag`, `ensureTag`
     - tryResult     — `tryOk`, `tryErr`
     - Validation    — `check`, `tagError`, `parseOptional`,
                       `partitionTry`, `isValidName`,
                       `isPositiveInt`, `formatErrors`
 
-  This module owns nothing type-specific. Each value type
-  (probe, wan, …) owns its own `is<Type>` predicate and its
-  own `_type` tag string; this file provides only the
-  type-agnostic infrastructure those modules build on.
+  This module owns nothing type-specific.
 
   Uses `nixpkgs.lib` freely (`lib.nameValuePair`,
   `lib.concatMapStringsSep`, etc.).
-
-  ===== hasTag =====
-
-  `hasTag tag v`: true iff `v` is an attrset with `_type == tag`.
-  Returns false for non-attrs, attrs without `_type`, and attrs
-  with a different `_type`. Generic — each value type binds it
-  to its own tag string via `is<Type> = primitives.hasTag "<type>"`.
-
-  ===== ensureTag =====
-
-  `ensureTag tag ctx v`: returns `v` if it matches `tag`; otherwise
-  throws with a message mentioning both the expected and the
-  observed shape, prefixed with `ctx` so users can locate the
-  call site without a stack trace.
 
   ===== tryOk / tryErr =====
 
@@ -97,17 +79,6 @@
 */
 { lib }:
 let
-  hasTag = tag: v: builtins.isAttrs v && v ? _type && v._type == tag;
-
-  ensureTag =
-    tag: ctx: v:
-    if hasTag tag v then
-      v
-    else
-      builtins.throw "wanwatch: ${ctx}: expected ${tag} value, got ${
-        if builtins.isAttrs v && v ? _type then "${v._type} value" else builtins.typeOf v
-      }";
-
   tryOk = value: {
     success = true;
     inherit value;
@@ -147,8 +118,6 @@ let
 in
 {
   inherit
-    hasTag
-    ensureTag
     tryOk
     tryErr
     formatErrors
