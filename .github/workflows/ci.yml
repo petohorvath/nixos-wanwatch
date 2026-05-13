@@ -147,13 +147,30 @@ jobs:
   # `ubuntu-24.04-arm` is not guaranteed and pkgs.testers.nixosTest
   # would refuse to start without `/dev/kvm`.
   #
+  # Matrixed over two nixpkgs channels:
+  #   - "unstable" → checks.x86_64-linux.vm-<scenario>
+  #   - "stable"   → checks.x86_64-linux.vm-stable-<scenario>
+  # Stable catches regressions before they ship to release users;
+  # unstable surfaces the newer-kernel / newer-systemd issues
+  # stable will pick up next. Independent jobs so each gets its
+  # own /nix/store cache and a single channel's failure is
+  # obvious in the run status.
+  #
   # All scenarios build in one `nix build` invocation so the
   # NixOS-test machinery and shared store paths are realized once,
   # not ten times. `--keep-going` keeps building the rest after a
   # single scenario failure so a CI run reports every broken
   # scenario, not just the first.
   vm:
-    name: vm tests
+    name: vm tests (${{ matrix.channel }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: unstable
+            prefix: vm-
+          - channel: stable
+            prefix: vm-stable-
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -173,28 +190,30 @@ jobs:
           extra_nix_config: |
             system-features = kvm nixos-test benchmark big-parallel uid-range
       # VM gets a larger store budget — the NixOS test machinery
-      # alone is multiple GB. Purge stays aggressive so we don't
+      # alone is multiple GB, and stable + unstable pull in two
+      # independent closures. Purge stays aggressive so we don't
       # blow the 10 GB per-repo cache cap when the other jobs also
       # save their stores.
       - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.channel }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.channel }}-
           gc-max-store-size-linux: 8G
           purge: true
-          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.channel }}-
           purge-created: 0
           purge-primary-key: never
       - name: Build VM checks
         run: |
+          PFX=${{ matrix.prefix }}
           nix build --print-build-logs --keep-going \
-            .#checks.x86_64-linux.vm-smoke \
-            .#checks.x86_64-linux.vm-failover-v4 \
-            .#checks.x86_64-linux.vm-failover-v6 \
-            .#checks.x86_64-linux.vm-failover-dual-stack \
-            .#checks.x86_64-linux.vm-recovery \
-            .#checks.x86_64-linux.vm-hooks \
-            .#checks.x86_64-linux.vm-metrics \
-            .#checks.x86_64-linux.vm-family-health-policy \
-            .#checks.x86_64-linux.vm-gateway-discovery \
-            .#checks.x86_64-linux.vm-nftzones-integration
+            .#checks.x86_64-linux.${PFX}smoke \
+            .#checks.x86_64-linux.${PFX}failover-v4 \
+            .#checks.x86_64-linux.${PFX}failover-v6 \
+            .#checks.x86_64-linux.${PFX}failover-dual-stack \
+            .#checks.x86_64-linux.${PFX}recovery \
+            .#checks.x86_64-linux.${PFX}hooks \
+            .#checks.x86_64-linux.${PFX}metrics \
+            .#checks.x86_64-linux.${PFX}family-health-policy \
+            .#checks.x86_64-linux.${PFX}gateway-discovery \
+            .#checks.x86_64-linux.${PFX}nftzones-integration

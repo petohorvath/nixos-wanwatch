@@ -4,6 +4,16 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+    # A second nixpkgs pinned to the current stable channel. Used
+    # exclusively by the `vm-stable-*` flake checks, which boot
+    # NixOS VMs built against stable so kernel / systemd-networkd
+    # / iproute2 regressions that hit unstable first don't ship
+    # silently to stable users. Sibling-flake inputs (libnet,
+    # nftzones, nftypes) continue to follow `nixpkgs` (unstable)
+    # because their lib outputs are pure-Nix and don't depend on
+    # any nixpkgs.lib API delta between channels.
+    nixpkgs-stable.url = "github:NixOS/nixpkgs/nixos-25.11";
+
     # nix-libnet provides IP/CIDR/interface validation primitives
     # used throughout `lib/`. Pinned to the GitHub default so a
     # fresh clone works without further configuration. For
@@ -33,6 +43,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-stable,
       libnet,
       nftzones,
       treefmt-nix,
@@ -48,6 +59,67 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
       treefmtFor = pkgs: treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
+
+      # Per-channel pkgs lookup. `nixpkgs` is the unstable input
+      # everything else uses; `nixpkgs-stable` is consulted only
+      # for the `vm-stable-*` checks.
+      stablePkgsFor = system: nixpkgs-stable.legacyPackages.${system};
+
+      # mkVmChecks returns the full set of VM scenarios built
+      # against `pkgs`. Used twice from `checks`: once with the
+      # unstable `pkgs` (the historical default) and once with the
+      # stable channel's pkgs.
+      mkVmChecks = pkgs: {
+        smoke = import ./tests/vm/smoke.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        failover-v4 = import ./tests/vm/failover-v4.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        failover-v6 = import ./tests/vm/failover-v6.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        failover-dual-stack = import ./tests/vm/failover-dual-stack.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        recovery = import ./tests/vm/recovery.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        hooks = import ./tests/vm/hooks.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        metrics = import ./tests/vm/metrics.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+          telegrafModule = self.nixosModules.telegraf;
+        };
+        family-health-policy = import ./tests/vm/family-health-policy.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        gateway-discovery = import ./tests/vm/gateway-discovery.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
+        nftzones-integration = import ./tests/vm/nftzones-integration.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+          nftzonesModule = nftzones.nixosModules.default;
+          nftypes = nftzones.inputs.nftypes.lib;
+        };
+      };
+
+      # Flatten {name = drv;} → {vm-${name} = drv;} for one
+      # channel's worth of VM scenarios.
+      vmChecksWithPrefix =
+        prefix: vmChecks:
+        nixpkgs.lib.mapAttrs' (name: drv: nixpkgs.lib.nameValuePair "${prefix}${name}" drv) vmChecks;
     in
     {
       lib = import ./lib {
@@ -128,54 +200,23 @@
             telegrafModule = self.nixosModules.telegraf;
           };
 
-          # VM tier: boot a real NixOS VM, start the daemon, and
-          # assert end-to-end behavior the unit + integration tiers
-          # can't reach (capabilities, systemd hardening,
-          # netlink-bound apply, real socket modes). Linux+KVM only.
-          vm-smoke = import ./tests/vm/smoke.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-failover-v4 = import ./tests/vm/failover-v4.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-failover-v6 = import ./tests/vm/failover-v6.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-failover-dual-stack = import ./tests/vm/failover-dual-stack.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-recovery = import ./tests/vm/recovery.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-hooks = import ./tests/vm/hooks.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-metrics = import ./tests/vm/metrics.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-            telegrafModule = self.nixosModules.telegraf;
-          };
-          vm-family-health-policy = import ./tests/vm/family-health-policy.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-gateway-discovery = import ./tests/vm/gateway-discovery.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-          };
-          vm-nftzones-integration = import ./tests/vm/nftzones-integration.nix {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-            nftzonesModule = nftzones.nixosModules.default;
-            nftypes = nftzones.inputs.nftypes.lib;
-          };
         }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+          # VM tier: boot a real NixOS VM, start the daemon, and
+          # assert end-to-end behavior the unit + integration
+          # tiers can't reach (capabilities, systemd hardening,
+          # netlink-bound apply, real socket modes). Linux+KVM
+          # only.
+          #
+          # Every scenario is materialized against both the
+          # unstable nixpkgs and the current stable channel
+          # (`vm-*` vs `vm-stable-*`). Stable catches regressions
+          # before they reach release users; unstable surfaces
+          # the newer-kernel / newer-systemd issues stable will
+          # pick up next.
+          vmChecksWithPrefix "vm-" (mkVmChecks pkgs)
+          // vmChecksWithPrefix "vm-stable-" (mkVmChecks (stablePkgsFor pkgs.stdenv.hostPlatform.system))
+        )
       );
 
       devShells = forAllSystems (pkgs: {
