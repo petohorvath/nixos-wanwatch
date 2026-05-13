@@ -2,20 +2,22 @@
   "nodes": {
     "libnet": {
       "inputs": {
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": [
+          "nixpkgs"
+        ]
       },
       "locked": {
         "lastModified": 1777185794,
         "narHash": "sha256-DUBTzspP83civeOVWuVvS9E+DfyM/QFeDsuOCISNVbs=",
-        "ref": "refs/heads/main",
+        "owner": "petohorvath",
+        "repo": "nix-libnet",
         "rev": "ade900e152c6edd5d96bc976ed474dbfd4b604d6",
-        "revCount": 29,
-        "type": "git",
-        "url": "file:///home/dev/projects/nix-libnet"
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "file:///home/dev/projects/nix-libnet"
+        "owner": "petohorvath",
+        "repo": "nix-libnet",
+        "type": "github"
       }
     },
     "nftypes": {
@@ -27,15 +29,15 @@
       "locked": {
         "lastModified": 1778155077,
         "narHash": "sha256-2N7V3u60WXYr+66PuNziUrbCifikHgaqBhyq3OTH+vk=",
-        "ref": "refs/heads/main",
+        "owner": "petohorvath",
+        "repo": "nix-nftypes",
         "rev": "1fd7ab9619473fc4fb3dce0bbc94b0fc62a3ca0d",
-        "revCount": 45,
-        "type": "git",
-        "url": "file:///home/dev/projects/nix-nftypes"
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "file:///home/dev/projects/nix-nftypes"
+        "owner": "petohorvath",
+        "repo": "nix-nftypes",
+        "type": "github"
       }
     },
     "nftzones": {
@@ -51,34 +53,18 @@
       "locked": {
         "lastModified": 1778586525,
         "narHash": "sha256-Ggp+O3LPoY6/qf2gI3AKcxAC6ja5z+gDNU+S54YldVA=",
-        "ref": "refs/heads/main",
+        "owner": "petohorvath",
+        "repo": "nix-nftzones",
         "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
-        "revCount": 100,
-        "type": "git",
-        "url": "file:///home/dev/projects/nix-nftzones"
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "file:///home/dev/projects/nix-nftzones"
+        "owner": "petohorvath",
+        "repo": "nix-nftzones",
+        "type": "github"
       }
     },
     "nixpkgs": {
-      "locked": {
-        "lastModified": 1776169885,
-        "narHash": "sha256-l/iNYDZ4bGOAFQY2q8y5OAfBBtrDAaPuRQqWaFHVRXM=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "4bd9165a9165d7b5e33ae57f3eecbcb28fb231c9",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixos-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
-    "nixpkgs_2": {
       "locked": {
         "lastModified": 1777954456,
         "narHash": "sha256-hGdgeU2Nk87RAuZyYjyDjFL6LK7dAZN5RE9+hrDTkDU=",
@@ -98,7 +84,7 @@
       "inputs": {
         "libnet": "libnet",
         "nftzones": "nftzones",
-        "nixpkgs": "nixpkgs_2",
+        "nixpkgs": "nixpkgs",
         "treefmt-nix": "treefmt-nix"
       }
     },

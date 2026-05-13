@@ -4,24 +4,25 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    # nix-libnet provides IP/CIDR/interface validation primitives used
-    # throughout `lib/`. Local-development checkout pinned via an
-    # absolute path: input — relative `path:../nix-libnet` doesn't
-    # resolve cleanly in pure evaluation because the working copy is
-    # staged to `/nix/store/...` before `..` is resolved. Override at
-    # eval time with `--override-input libnet path:../nix-libnet` or
-    # flip the default to a github: URL once libnet has a tagged
-    # release.
-    libnet.url = "git+file:///home/dev/projects/nix-libnet";
+    # nix-libnet provides IP/CIDR/interface validation primitives
+    # used throughout `lib/`. Pinned to the GitHub default so a
+    # fresh clone works without further configuration. For
+    # iterate-on-both-repos local development, override with
+    # `--override-input libnet path:/abs/path/to/nix-libnet` (or
+    # add to a per-tree `.envrc`); a relative `path:../nix-libnet`
+    # does not resolve cleanly under pure evaluation because the
+    # working copy is staged to `/nix/store/...` before `..` is
+    # resolved.
+    libnet.url = "github:petohorvath/nix-libnet";
+    libnet.inputs.nixpkgs.follows = "nixpkgs";
 
     # nix-nftzones is only used by the nftzones-integration VM
-    # scenario (tests/vm/nftzones-integration.nix). Pinned to the
-    # same local-checkout style as libnet for the same reason;
-    # override via --override-input nftzones <ref> in CI / release.
-    nftzones.url = "git+file:///home/dev/projects/nix-nftzones";
+    # scenario (tests/vm/nftzones-integration.nix). Same
+    # local-dev override pattern as libnet.
+    nftzones.url = "github:petohorvath/nix-nftzones";
     nftzones.inputs.nixpkgs.follows = "nixpkgs";
     nftzones.inputs.libnet.follows = "libnet";
-    nftzones.inputs.nftypes.url = "git+file:///home/dev/projects/nix-nftypes";
+    nftzones.inputs.nftypes.url = "github:petohorvath/nix-nftypes";
     nftzones.inputs.nftypes.inputs.nixpkgs.follows = "nixpkgs";
 
     treefmt-nix.url = "github:numtide/treefmt-nix";
