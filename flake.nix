@@ -219,12 +219,12 @@
                 # source of truth — CI just reads it back.
                 cat > coverage.thresholds <<'EOF'
                 internal/apply:90
-                internal/config:95
-                internal/metrics:85
-                internal/probe:85
-                internal/rtnl:90
-                internal/selector:95
-                internal/state:93
+                internal/config:100
+                internal/metrics:88
+                internal/probe:86
+                internal/rtnl:91
+                internal/selector:100
+                internal/state:94
                 EOF
 
                 go test -cover ./internal/... > coverage.out 2>&1 || {
