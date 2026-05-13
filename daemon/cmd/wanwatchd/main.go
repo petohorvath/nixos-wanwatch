@@ -130,7 +130,12 @@ func run(parent context.Context, args []string, logSink *os.File) error {
 		return fmt.Errorf("probers: %w", err)
 	}
 	linkEvents := startSubscriber(ctx, &cfg, logger)
-	routeEvents := startRouteSubscriber(ctx, &cfg, logger)
+	routeEvents, err := startRouteSubscriber(ctx, &cfg, logger)
+	if err != nil {
+		cancel()
+		<-mErrCh
+		return fmt.Errorf("route subscriber: %w", err)
+	}
 
 	eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 	logger.Info("shutdown signal received", "err", ctx.Err())

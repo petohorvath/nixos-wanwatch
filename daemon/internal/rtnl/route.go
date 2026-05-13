@@ -42,49 +42,25 @@ type RouteSubscriber struct {
 	ifaceCache map[int]string
 }
 
-// Run subscribes to RTNLGRP_IPV4_ROUTE + RTNLGRP_IPV6_ROUTE,
-// primes the watcher with every default route currently in the
-// main RIB, and pushes one `RouteEvent` onto `out` for every
-// add/del thereafter. Returns when ctx is cancelled or the
-// netlink subscription fails.
+// Prime walks the kernel's current v4 + v6 routes and pushes a
+// RouteEvent onto `out` for every default route on a watched
+// interface. Callers should invoke this synchronously before
+// starting the event loop, so the gateway cache is populated
+// before any consumer reads from `out` — otherwise a link-event
+// from the link subscriber can drive an applyRoutes call that
+// finds the cache empty and skips the route write.
 //
-// `out` is *not* closed on return; callers can retry Run with a
-// fresh goroutine and reuse the same channel after a transient
-// failure.
-func (s *RouteSubscriber) Run(ctx context.Context, out chan<- RouteEvent) error {
-	updates := make(chan netlink.RouteUpdate, routeUpdateBuffer)
-	done := make(chan struct{})
-	defer close(done)
-
-	// The library's own ListExisting=true sends a malformed dump
-	// request (RTM_GETROUTE with an IfInfomsg body instead of an
-	// RtMsg one) that recent kernels reject. Subscribe without
-	// it and prime ourselves via netlink.RouteList — routes
-	// already installed when the daemon starts (the common case
-	// on a fresh boot, where systemd-networkd has finished by
-	// the time wanwatchd's main goroutine reaches here) would
-	// otherwise be invisible until they flap.
-	if err := netlink.RouteSubscribeWithOptions(updates, done, netlink.RouteSubscribeOptions{}); err != nil {
-		return fmt.Errorf("rtnl: RouteSubscribe: %w", err)
-	}
+// `out`'s buffer must hold at least one event per
+// (watched-iface × family); the daemon sizes it at 64 which is
+// far above any realistic upper bound.
+func (s *RouteSubscriber) Prime(ctx context.Context, out chan<- RouteEvent) error {
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
 	}
-	if err := s.dumpExisting(ctx, out); err != nil {
-		return fmt.Errorf("rtnl: dump existing routes: %w", err)
-	}
-	return s.runLoop(ctx, updates, out)
-}
-
-// dumpExisting walks the kernel's current v4 + v6 routes and
-// feeds each one through handleUpdate, emitting matching
-// RouteEvents on `out`. Mirrors what the library's
-// ListExisting=true path was supposed to do.
-func (s *RouteSubscriber) dumpExisting(ctx context.Context, out chan<- RouteEvent) error {
 	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
 		routes, err := netlink.RouteList(nil, family)
 		if err != nil {
-			return fmt.Errorf("RouteList family=%d: %w", family, err)
+			return fmt.Errorf("rtnl: RouteList family=%d: %w", family, err)
 		}
 		for _, r := range routes {
 			ev, emit := s.handleUpdate(netlink.RouteUpdate{
@@ -102,6 +78,32 @@ func (s *RouteSubscriber) dumpExisting(ctx context.Context, out chan<- RouteEven
 		}
 	}
 	return nil
+}
+
+// Run subscribes to RTNLGRP_IPV4_ROUTE + RTNLGRP_IPV6_ROUTE and
+// pushes one `RouteEvent` onto `out` for every default-route
+// add/del observed thereafter. Pair with `Prime` for the
+// existing-routes case — Run itself does not dump.
+//
+// `out` is *not* closed on return; callers can retry Run with a
+// fresh goroutine and reuse the same channel after a transient
+// failure.
+func (s *RouteSubscriber) Run(ctx context.Context, out chan<- RouteEvent) error {
+	updates := make(chan netlink.RouteUpdate, routeUpdateBuffer)
+	done := make(chan struct{})
+	defer close(done)
+
+	// The library's own ListExisting=true sends a malformed dump
+	// request (RTM_GETROUTE with an IfInfomsg body where the
+	// kernel expects an RtMsg); recent kernels reject it. Skip
+	// it and rely on `Prime` for the existing-routes pass.
+	if err := netlink.RouteSubscribeWithOptions(updates, done, netlink.RouteSubscribeOptions{}); err != nil {
+		return fmt.Errorf("rtnl: RouteSubscribe: %w", err)
+	}
+	if s.ifaceLookup == nil {
+		s.ifaceLookup = interfaceNameByIndex
+	}
+	return s.runLoop(ctx, updates, out)
 }
 
 // runLoop drains `updates`, folds each via handleUpdate, and
