@@ -8,9 +8,9 @@
   pipes the layers together.
 
   Layer order:
-    1. `primitives` — leaf. Generic helpers (hasTag, tryOk/tryErr,
-                      check, parseOptional, formatErrors,
-                      isValidName, ordering). Takes only `lib`.
+    1. `primitives` — leaf. Generic helpers (tryOk/tryErr,
+                      check, partitionTry, formatErrors,
+                      isValidName, isPositiveInt). Takes only `lib`.
     2. `probe`      — depends on primitives. Probe value type.
     3. `member`     — depends on primitives. Member value type
                       (labelled WAN reference within a group).

@@ -180,47 +180,6 @@ in
     ];
   };
 
-  # ===== parseOptional =====
-
-  testParseOptionalNullInput = {
-    expr =
-      let
-        parser = _: throw "must not be called";
-      in
-      primitives.parseOptional parser null;
-    expected = {
-      success = true;
-      value = null;
-      error = null;
-    };
-  };
-
-  testParseOptionalDelegatesNonNull = {
-    expr =
-      let
-        parser = s: primitives.tryOk "parsed:${s}";
-      in
-      primitives.parseOptional parser "input";
-    expected = {
-      success = true;
-      value = "parsed:input";
-      error = null;
-    };
-  };
-
-  testParseOptionalPropagatesError = {
-    expr =
-      let
-        parser = _: primitives.tryErr "bad";
-      in
-      primitives.parseOptional parser "input";
-    expected = {
-      success = false;
-      value = null;
-      error = "bad";
-    };
-  };
-
   # ===== isValidName =====
 
   testIsValidNameAcceptsAlpha = {

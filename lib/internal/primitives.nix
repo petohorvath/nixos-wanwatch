@@ -4,7 +4,7 @@
 
   Sections:
     - tryResult     — `tryOk`, `tryErr`
-    - Validation    — `check`, `parseOptional`, `partitionTry`,
+    - Validation    — `check`, `partitionTry`,
                       `isValidName`, `isPositiveInt`, `formatErrors`
 
   This module owns nothing type-specific.
@@ -40,13 +40,6 @@
   `{ parsed = [<success values>]; errors = [<error strings>]; }`.
   Used by `probe.parseTargets` and `group.parseMembers` —
   callers that need both halves of the partition.
-
-  ===== parseOptional =====
-
-  `parseOptional parser input`: null-passthrough adapter. When
-  `input` is null, returns `tryOk null`. Otherwise delegates to
-  `parser input`. Used by parsers wrapping optional fields where
-  the absence of a value is itself a valid state.
 
   ===== isValidName =====
 
@@ -92,8 +85,6 @@ let
     kind: cond: msg:
     if cond then [ ] else [ (lib.nameValuePair kind msg) ];
 
-  parseOptional = parser: input: if input == null then tryOk null else parser input;
-
   partitionTry =
     parser: items:
     let
@@ -114,7 +105,6 @@ in
     tryErr
     formatErrors
     check
-    parseOptional
     partitionTry
     isValidName
     isPositiveInt

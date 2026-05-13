@@ -8,9 +8,6 @@ import (
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
 )
 
-// gwKey indexes the GatewayCache by interface name + IP family —
-// the granularity at which the kernel reports default routes via
-// rtnetlink and at which the daemon writes them via apply.WriteDefault.
 type gwKey struct {
 	Iface  string
 	Family rtnl.RouteFamily
@@ -19,17 +16,10 @@ type gwKey struct {
 // GatewayCache mirrors the kernel's "default route per (iface,
 // family)" view of the main routing table. The daemon writes its
 // own routes into per-group tables; the cache only tracks routes
-// the kernel installed (typically by systemd-networkd / dhcpcd /
-// pppd / the user's DHCP client).
+// the kernel installed.
 //
-// The cache replaces the operator-typed `gateways.{v4,v6}`
-// declaration — the daemon now learns the next-hop dynamically
-// instead of requiring it in config.
-//
-// Empty IP value is intentional: scope-link defaults (PPP /
-// WireGuard / GRE / tun) have no next-hop. The cache records that
-// the family is "served" but holds nil — apply.WriteDefault will
-// skip non-PtP-declared WANs in that case.
+// A nil IP value is a scope-link default (PPP / WireGuard / GRE /
+// tun): the (iface, family) pair has a route but no next-hop.
 //
 // Safe for concurrent use.
 type GatewayCache struct {
@@ -67,11 +57,28 @@ func (c *GatewayCache) Get(iface string, fam rtnl.RouteFamily) (net.IP, bool) {
 	return gw, ok
 }
 
-// String returns the gateway as a canonical string (`"192.0.2.1"`,
-// `"2001:db8::1"`, or `""` if no entry / scope-link entry). Used
-// to emit hook env vars (WANWATCH_GATEWAY_V4/V6_OLD/NEW).
-func (c *GatewayCache) String(iface string, fam rtnl.RouteFamily) string {
-	gw, ok := c.Get(iface, fam)
+// Snapshot returns a copy of the cache taken under a single
+// RLock. Callers that need many entries in one pass (state.json
+// publication, hook env-var assembly) should snapshot once
+// rather than calling Get repeatedly.
+type Snapshot map[gwKey]net.IP
+
+func (c *GatewayCache) Snapshot() Snapshot {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make(Snapshot, len(c.entries))
+	for k, v := range c.entries {
+		out[k] = v
+	}
+	return out
+}
+
+// String returns the gateway as a canonical string
+// (`"192.0.2.1"`, `"2001:db8::1"`) or `""` when the cache has no
+// entry or holds a scope-link (nil) entry. The empty-string
+// collapse matches the JSON state-file and hook env-var contracts.
+func (s Snapshot) String(iface string, fam rtnl.RouteFamily) string {
+	gw, ok := s[gwKey{Iface: iface, Family: fam}]
 	if !ok || gw == nil {
 		return ""
 	}

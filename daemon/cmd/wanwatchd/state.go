@@ -328,7 +328,7 @@ func (d *daemon) handleRouteEvent(e rtnl.RouteEvent) {
 		d.gateways.Clear(e.Iface, e.Family)
 	}
 
-	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !ipEqual(prev, e.Gateway)
+	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !prev.Equal(e.Gateway)
 	if !changed {
 		return
 	}
@@ -345,18 +345,6 @@ func (d *daemon) handleRouteEvent(e rtnl.RouteEvent) {
 	}
 }
 
-// ipEqual compares two net.IP values treating nil as a distinct
-// value from a non-nil zero address. Mirrors net.IP.Equal's
-// in-family normalization (so 192.0.2.1 == ::ffff:192.0.2.1) but
-// doesn't paper over nil — a nil-to-non-nil transition is a real
-// change.
-func ipEqual(a, b net.IP) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return a.Equal(b)
-}
-
 // writeStateSnapshot serializes the runtime state into the form
 // state.Writer expects, then writes atomically. Increments
 // `state_publications_total` on success.
@@ -365,6 +353,7 @@ func (d *daemon) writeStateSnapshot() {
 		Wans:   make(map[string]state.Wan, len(d.wans)),
 		Groups: make(map[string]state.Group, len(d.groups)),
 	}
+	gws := d.gateways.Snapshot()
 	for _, ws := range d.wans {
 		fams := make(map[string]state.Family, len(ws.families))
 		for fam, fs := range ws.families {
@@ -382,8 +371,8 @@ func (d *daemon) writeStateSnapshot() {
 			Operstate: ws.operstate.String(),
 			Healthy:   ws.healthy,
 			Gateways: state.Gateways{
-				V4: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV4),
-				V6: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV6),
+				V4: gws.String(ws.cfg.Interface, rtnl.RouteFamilyV4),
+				V6: gws.String(ws.cfg.Interface, rtnl.RouteFamilyV6),
 			},
 			Families: fams,
 		}
@@ -416,6 +405,7 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 
 	oldIface := ifaceFor(d.wans, old)
 	newIface := ifaceFor(d.wans, new_)
+	gws := d.gateways.Snapshot()
 	hookCtx := state.HookContext{
 		Event:    event,
 		Group:    g.cfg.Name,
@@ -427,10 +417,10 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 		// blank when (a) the iface has no cached default route yet,
 		// or (b) the route is scope-link (point-to-point) so there
 		// is no gateway to surface.
-		GwV4Old:  d.gateways.String(oldIface, rtnl.RouteFamilyV4),
-		GwV4New:  d.gateways.String(newIface, rtnl.RouteFamilyV4),
-		GwV6Old:  d.gateways.String(oldIface, rtnl.RouteFamilyV6),
-		GwV6New:  d.gateways.String(newIface, rtnl.RouteFamilyV6),
+		GwV4Old:  gws.String(oldIface, rtnl.RouteFamilyV4),
+		GwV4New:  gws.String(newIface, rtnl.RouteFamilyV4),
+		GwV6Old:  gws.String(oldIface, rtnl.RouteFamilyV6),
+		GwV6New:  gws.String(newIface, rtnl.RouteFamilyV6),
 		Families: probedFamiliesFor(d.wans, new_),
 		Table:    g.cfg.Table,
 		Mark:     g.cfg.Mark,

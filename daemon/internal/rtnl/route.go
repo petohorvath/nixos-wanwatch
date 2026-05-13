@@ -22,11 +22,6 @@ const routeUpdateBuffer = 256
 // routes installed in the main routing table on watched interfaces
 // and emits a `RouteEvent` for every add/del.
 //
-// The daemon uses this as the input to its gateway-discovery cache:
-// the kernel becomes the source of truth for "what is the current
-// next-hop on this WAN", replacing the operator-typed
-// `gateways.{v4,v6}` declaration.
-//
 // Concurrent calls to Run are not supported.
 type RouteSubscriber struct {
 	// Interfaces restricts emission to the named set. A nil map
@@ -36,8 +31,15 @@ type RouteSubscriber struct {
 
 	// ifaceLookup resolves a LinkIndex to its interface name. The
 	// production value is `interfaceNameByIndex` (calls
-	// netlink.LinkByIndex); tests inject a map-backed stub.
+	// net.InterfaceByIndex); tests inject a map-backed stub.
 	ifaceLookup func(int) (string, error)
+
+	// ifaceCache memoizes ifindex → name so the ListExisting
+	// startup dump doesn't pay a syscall per route message. An
+	// interface rename leaves a stale entry that surfaces a wrong
+	// name; the daemon drops events naming a wan it doesn't know
+	// about, so the worst case is one silently-skipped flap.
+	ifaceCache map[int]string
 }
 
 // Run subscribes to RTNLGRP_IPV4_ROUTE + RTNLGRP_IPV6_ROUTE and
@@ -118,8 +120,8 @@ func (s *RouteSubscriber) handleUpdate(upd netlink.RouteUpdate) (RouteEvent, boo
 	if !isDefaultRoute(upd.Route) {
 		return RouteEvent{}, false
 	}
-	name, err := s.ifaceLookup(upd.Route.LinkIndex)
-	if err != nil {
+	name, ok := s.resolveIface(upd.Route.LinkIndex)
+	if !ok {
 		return RouteEvent{}, false
 	}
 	if _, watch := s.Interfaces[name]; s.Interfaces != nil && !watch {
@@ -136,6 +138,25 @@ func (s *RouteSubscriber) handleUpdate(upd netlink.RouteUpdate) (RouteEvent, boo
 		Gateway: upd.Route.Gw,
 		Time:    time.Now().UTC(),
 	}, true
+}
+
+// resolveIface returns the interface name for `idx`, consulting
+// the per-subscriber cache before falling back to the lookup
+// function. Returns (_, false) if the lookup fails (idx not on a
+// live link).
+func (s *RouteSubscriber) resolveIface(idx int) (string, bool) {
+	if name, ok := s.ifaceCache[idx]; ok {
+		return name, true
+	}
+	name, err := s.ifaceLookup(idx)
+	if err != nil {
+		return "", false
+	}
+	if s.ifaceCache == nil {
+		s.ifaceCache = make(map[int]string)
+	}
+	s.ifaceCache[idx] = name
+	return name, true
 }
 
 // isDefaultRoute returns true iff `r` is the default route for its

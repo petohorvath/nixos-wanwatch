@@ -104,8 +104,8 @@ type LinkEvent struct {
 }
 
 // RouteFamily is the IP family of a route the route subscriber
-// observed. Independent of `apply.Family` so the rtnl package
-// stays self-contained.
+// observed. Iota-valued (not AF_INET) so consumers don't need a
+// `golang.org/x/sys/unix` import to compare against constants.
 type RouteFamily int
 
 const (

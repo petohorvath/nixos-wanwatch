@@ -253,6 +253,31 @@ func TestRouteHandleUpdateIgnoresUnknownMsgType(t *testing.T) {
 	}
 }
 
+func TestRouteHandleUpdateCachesIfaceLookup(t *testing.T) {
+	t.Parallel()
+	// Each lookup call increments `calls`. After two updates on
+	// the same ifindex, ifaceLookup must have been invoked once.
+	var calls int
+	s := &RouteSubscriber{
+		Interfaces: map[string]struct{}{"eth0": {}},
+		ifaceLookup: func(int) (string, error) {
+			calls++
+			return "eth0", nil
+		},
+	}
+	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil)
+
+	if _, ok := s.handleUpdate(upd); !ok {
+		t.Fatal("first update did not emit")
+	}
+	if _, ok := s.handleUpdate(upd); !ok {
+		t.Fatal("second update did not emit")
+	}
+	if calls != 1 {
+		t.Errorf("ifaceLookup called %d times, want 1 (cache miss only on first)", calls)
+	}
+}
+
 func TestRouteRunLoopForwardsEvent(t *testing.T) {
 	t.Parallel()
 	updates := make(chan netlink.RouteUpdate, 1)

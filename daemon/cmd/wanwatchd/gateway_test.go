@@ -75,20 +75,35 @@ func TestGatewayCacheClear(t *testing.T) {
 	}
 }
 
-func TestGatewayCacheStringFormats(t *testing.T) {
+func TestSnapshotStringFormats(t *testing.T) {
 	t.Parallel()
 	c := NewGatewayCache()
 	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 	c.Set("wg0", rtnl.RouteFamilyV4, nil) // scope-link
+	s := c.Snapshot()
 
-	if got := c.String("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
+	if got := s.String("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
 		t.Errorf("String(eth0/v4) = %q, want 192.0.2.1", got)
 	}
-	if got := c.String("wg0", rtnl.RouteFamilyV4); got != "" {
+	if got := s.String("wg0", rtnl.RouteFamilyV4); got != "" {
 		t.Errorf("String(wg0/v4 scope-link) = %q, want empty", got)
 	}
-	if got := c.String("missing", rtnl.RouteFamilyV4); got != "" {
+	if got := s.String("missing", rtnl.RouteFamilyV4); got != "" {
 		t.Errorf("String(missing) = %q, want empty", got)
+	}
+}
+
+func TestSnapshotIsolatedFromCacheMutation(t *testing.T) {
+	t.Parallel()
+	c := NewGatewayCache()
+	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	snap := c.Snapshot()
+
+	c.Clear("eth0", rtnl.RouteFamilyV4)
+	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
+
+	if got := snap.String("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
+		t.Errorf("snap reflects post-snapshot mutation: got %q", got)
 	}
 }
 
@@ -155,40 +170,5 @@ func TestHandleRouteEventIgnoresUnrelatedInterface(t *testing.T) {
 	})
 	if _, ok := d.gateways.Get("lo", rtnl.RouteFamilyV4); !ok {
 		t.Error("lo gateway not recorded")
-	}
-}
-
-func TestIPEqualBothNil(t *testing.T) {
-	t.Parallel()
-	if !ipEqual(nil, nil) {
-		t.Error("ipEqual(nil, nil) = false")
-	}
-}
-
-func TestIPEqualNilVsNonNil(t *testing.T) {
-	t.Parallel()
-	if ipEqual(nil, net.ParseIP("192.0.2.1")) {
-		t.Error("ipEqual(nil, 192.0.2.1) = true; should be false")
-	}
-	if ipEqual(net.ParseIP("192.0.2.1"), nil) {
-		t.Error("ipEqual(192.0.2.1, nil) = true; should be false")
-	}
-}
-
-func TestIPEqualEqual(t *testing.T) {
-	t.Parallel()
-	a := net.ParseIP("192.0.2.1")
-	b := net.ParseIP("192.0.2.1")
-	if !ipEqual(a, b) {
-		t.Errorf("ipEqual(%v, %v) = false", a, b)
-	}
-}
-
-func TestIPEqualDifferent(t *testing.T) {
-	t.Parallel()
-	a := net.ParseIP("192.0.2.1")
-	b := net.ParseIP("192.0.2.2")
-	if ipEqual(a, b) {
-		t.Errorf("ipEqual(%v, %v) = true", a, b)
 	}
 }

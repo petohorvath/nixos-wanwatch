@@ -216,7 +216,7 @@ that resolve to the operational modules.
 |---|---|
 | `lib/default.nix` | top-level entry; composes `internal` + `types`; exposes `probe` / `wan` aliases |
 | `lib/internal/default.nix` | three-tier composition (primitives → probe → wan) |
-| `lib/internal/primitives.nix` | generic helpers: `tryOk`/`tryErr`, `check`, `parseOptional`, `partitionTry`, `formatErrors`, `isValidName`, `isPositiveInt` |
+| `lib/internal/primitives.nix` | generic helpers: `tryOk`/`tryErr`, `check`, `partitionTry`, `formatErrors`, `isValidName`, `isPositiveInt` |
 | `lib/internal/probe.nix` | `probe` value type — `make`, `tryMake`, `isProbe`, accessors, `families`, full skeleton; owns `_type = "probe"` |
 | `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `toJSONValue`, `families` accessor; `pointToPoint` toggles scope-link vs gateway-discovery apply path |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
@@ -832,9 +832,9 @@ at HEAD.
 
 - `flake.nix` skeleton (inputs: nixpkgs, libnet, treefmt-nix;
   outputs: lib, formatter, empty checks)
-- `lib/internal/primitives.nix` — generic helpers (`hasTag`,
-  `tryOk`, `tryErr`, `check`, `parseOptional`, `partitionTry`,
-  `formatErrors`, `isValidName`, `isPositiveInt`)
+- `lib/internal/primitives.nix` — generic helpers (`tryOk`,
+  `tryErr`, `check`, `partitionTry`, `formatErrors`,
+  `isValidName`, `isPositiveInt`)
 - `lib/internal/default.nix` — three-tier composition
 - `lib/types/{default,primitives,probe,wan}.nix` — stubs for NixOS
   option types (real types in Pass 5)
