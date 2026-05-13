@@ -117,6 +117,7 @@ pkgs.testers.runNixOSTest {
 
     router.wait_for_unit("wanwatch.service")
     router.wait_for_unit("nftables.service")
+    router.wait_for_unit("systemd-networkd.service")
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set lan0 up")
 
