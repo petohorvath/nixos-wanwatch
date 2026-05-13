@@ -107,13 +107,19 @@ func TestSnapshotIsolatedFromCacheMutation(t *testing.T) {
 	}
 }
 
-func TestProbeFamilyToRoute(t *testing.T) {
+// TestProbeRouteFamilyValuesAgree pins the underlying contract
+// that lets the daemon convert probe.Family → rtnl.RouteFamily by
+// a plain cast: both types now use unix.AF_INET / AF_INET6 as
+// their values.
+func TestProbeRouteFamilyValuesAgree(t *testing.T) {
 	t.Parallel()
-	if probeFamilyToRoute(probe.FamilyV4) != rtnl.RouteFamilyV4 {
-		t.Error("probe.FamilyV4 did not map to rtnl.RouteFamilyV4")
+	if int(probe.FamilyV4) != int(rtnl.RouteFamilyV4) {
+		t.Errorf("probe.FamilyV4 (%d) != rtnl.RouteFamilyV4 (%d)",
+			int(probe.FamilyV4), int(rtnl.RouteFamilyV4))
 	}
-	if probeFamilyToRoute(probe.FamilyV6) != rtnl.RouteFamilyV6 {
-		t.Error("probe.FamilyV6 did not map to rtnl.RouteFamilyV6")
+	if int(probe.FamilyV6) != int(rtnl.RouteFamilyV6) {
+		t.Errorf("probe.FamilyV6 (%d) != rtnl.RouteFamilyV6 (%d)",
+			int(probe.FamilyV6), int(rtnl.RouteFamilyV6))
 	}
 }
 

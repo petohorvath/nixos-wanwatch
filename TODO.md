@@ -86,11 +86,37 @@ The `weight` field on Member is reserved for this.
 `docs/selector.md:18,73`, `docs/specs/failover.md:85`,
 `daemon/internal/selector/primarybackup.go:10`.
 
+### Multi-state Health: degraded / unknown
+
+v1 collapses Health to a boolean (`healthy` / `unhealthy`); the
+glossary used to list `up`/`down`/`degraded`/`unknown` but the
+code never modelled the latter two. The shape that would justify
+the churn:
+
+- `degraded` — loss-ratio between the up/down thresholds, or RTT
+  between RttMs{Up,Down}. Currently the band-pass holds the
+  previous verdict; a tri-state would expose "in-band" to consumers.
+- `unknown` — `cooked == false` (no probe sample yet) and carrier
+  unknown. Today this collapses into the cold-start "healthy".
+
+Would change `state.FamilyHealth.Healthy bool` → an enum, the
+state.json schema (bump on release), `wanwatch_wan_*_healthy`
+metric gauges (label-encode the enum instead), and selector
+inputs.
+
 ### MTU / link-speed-aware selection
 
 Prefer the higher-bandwidth WAN even at slightly higher latency.
 Out of scope for v1's pure-health-based selection.
 PLAN §12 OQ #9.
+
+### SIGHUP hot-reload
+
+Currently restart-only. Hot-reload adds complexity: re-allocating
+marks/tables would force kernel-state reconciliation. PLAN §12 OQ
+#7 marks it deliberately deferred. Lives in v2 because the right
+shape changes Selection / Apply semantics, not because the
+implementation is mechanical.
 
 ---
 
@@ -119,21 +145,8 @@ new CI workflow runs tests but doesn't enforce a coverage floor.
 
 ## cleanup — internal refactors
 
-Captured during the gateway-discovery review; deemed not worth
-blocking that series, but flagged for later.
-
-### Collapse `rtnl.RouteFamily` into `probe.Family`
-
-`probe.Family` and `apply.Family` were unified — apply now uses
-`probe.Family` directly and its values match `unix.AF_INET` /
-`unix.AF_INET6` so netlink passthrough is one cast.
-
-`rtnl.RouteFamily` is still its own enum and forces the
-`probeFamilyToRoute` shim plus the `routeFamilyFromAF` mapping
-inside `rtnl`. Either align its values with `unix.AF_INET*`
-(makes `routeFamilyFromAF` identity) or import `probe.Family`
-into `rtnl` and drop `RouteFamily` entirely. The latter creates
-sibling-to-sibling coupling but kills the converter.
+Captured during reviews; deemed not worth blocking the original
+work, but flagged for later.
 
 ### Per-family reapply on RouteEvent
 
@@ -144,33 +157,9 @@ state would halve the syscalls under flap.
 `daemon/cmd/wanwatchd/daemon.go:291` (applyRoutes loop),
 `daemon.go:343` (reapply driver).
 
-### Multi-state Health: degraded / unknown
-
-v1 collapses Health to a boolean (`healthy` / `unhealthy`); the
-glossary used to list `up`/`down`/`degraded`/`unknown` but the
-code never modelled the latter two. The shape that would justify
-the churn:
-
-- `degraded` — loss-ratio between the up/down thresholds, or RTT
-  between RttMs{Up,Down}. Currently the band-pass holds the
-  previous verdict; a tri-state would expose "in-band" to consumers.
-- `unknown` — `cooked == false` (no probe sample yet) and carrier
-  unknown. Today this collapses into the cold-start "healthy".
-
-Would change `state.FamilyHealth.Healthy bool` → an enum, the
-state.json schema (bump to v3), `wanwatch_wan_*_healthy` metric
-gauges (label-encode the enum instead), and selector inputs.
-Hold for v2.
-
 ### Split `rtnl` into `rtnl/link` + `rtnl/route`
 
 The two subscriber types share zero symbols. Splitting the package
 would let the test helpers (`mkUpdate`, `mkSub`) keep clean names
 without the `Route` prefix the route-side tests currently carry
 to dodge collision. `daemon/internal/rtnl/route_test.go`.
-
-### Optional: SIGHUP hot-reload
-
-Currently restart-only. Hot-reload adds complexity (re-allocating
-marks/tables → kernel-state reconciliation). PLAN §12 OQ #7 marks
-it deliberately deferred.

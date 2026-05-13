@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Carrier is the physical link state surfaced via rtnetlink
@@ -104,13 +106,14 @@ type LinkEvent struct {
 }
 
 // RouteFamily is the IP family of a route the route subscriber
-// observed. Iota-valued (not AF_INET) so consumers don't need a
-// `golang.org/x/sys/unix` import to compare against constants.
+// observed. Values match `unix.AF_INET` / `AF_INET6` so callers
+// holding a `probe.Family` (which uses the same encoding) can
+// convert by a plain cast — no converter shim needed.
 type RouteFamily int
 
 const (
-	RouteFamilyV4 RouteFamily = iota
-	RouteFamilyV6
+	RouteFamilyV4 RouteFamily = unix.AF_INET
+	RouteFamilyV6 RouteFamily = unix.AF_INET6
 )
 
 // String returns "v4" / "v6" — used in log fields and metrics

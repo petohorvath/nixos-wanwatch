@@ -308,7 +308,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 		case ws.cfg.PointToPoint:
 			route.PointToPoint = true
 		default:
-			gw, ok := d.gateways.Get(ws.cfg.Interface, probeFamilyToRoute(fam))
+			gw, ok := d.gateways.Get(ws.cfg.Interface, rtnl.RouteFamily(fam))
 			if !ok || gw == nil {
 				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
 					"group", g.cfg.Name, "wan", activeWan, "family", famLabel,

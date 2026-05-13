@@ -4,7 +4,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
 )
 
@@ -85,13 +84,3 @@ func (s Snapshot) String(iface string, fam rtnl.RouteFamily) string {
 	return gw.String()
 }
 
-// probeFamilyToRoute converts the daemon's internal probe.Family
-// enum to the rtnl.RouteFamily values the cache uses. Both are
-// "the family of an IPv4/IPv6 address" but they live in separate
-// packages to avoid an import cycle.
-func probeFamilyToRoute(f probe.Family) rtnl.RouteFamily {
-	if f == probe.FamilyV6 {
-		return rtnl.RouteFamilyV6
-	}
-	return rtnl.RouteFamilyV4
-}
