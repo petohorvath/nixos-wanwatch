@@ -55,6 +55,12 @@ func buildRule(r FwmarkRule) *netlink.Rule {
 	mask := uint32(0xffffffff)
 	rule.Mask = &mask
 	rule.Table = r.Table
+	// FRA_PROTOCOL = RTPROT_STATIC stamps the rule as "managed by
+	// some daemon, not networkd's job to clean up". Without it,
+	// systemd-networkd with `ManageForeignRoutingPolicyRules=yes`
+	// (its default) considers our rule foreign and deletes it
+	// during its startup-time reconciliation pass.
+	rule.Protocol = unix.RTPROT_STATIC
 	return rule
 }
 
