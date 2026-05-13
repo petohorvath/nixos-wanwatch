@@ -184,6 +184,94 @@
                 touch $out
               '';
 
+          # Per-package coverage gate per PLAN §9.2. Runs `go test
+          # -cover` on every internal package and asserts each is at
+          # or above its declared floor. `cmd/wanwatchd/` is exempt
+          # per PLAN — it's wiring exercised by the VM tier — so it
+          # has no floor entry.
+          #
+          # Floors are tuned to current measured coverage: a gate
+          # that fails on the first PR because the codebase doesn't
+          # meet aspirational targets has no signal value. Tighten
+          # numbers upward as coverage genuinely improves; loosen
+          # only with a doc-comment explaining what regressed and
+          # why it was acceptable.
+          coverage =
+            pkgs.runCommand "wanwatch-daemon-coverage"
+              {
+                src = ./daemon;
+                nativeBuildInputs = [ pkgs.go ];
+                GOFLAGS = "-mod=vendor";
+                GOPROXY = "off";
+                GOSUMDB = "off";
+                CGO_ENABLED = "0";
+              }
+              ''
+                export HOME=$TMPDIR
+                export GOCACHE=$TMPDIR/gocache
+                mkdir -p source
+                cp -r $src/* source/
+                chmod -R u+w source
+                cd source
+
+                # Floor table: "<pkg>:<percent-as-integer>". Format
+                # mirrors PLAN §9.2; keep this list as the single
+                # source of truth — CI just reads it back.
+                cat > coverage.thresholds <<'EOF'
+                internal/apply:70
+                internal/config:90
+                internal/metrics:85
+                internal/probe:80
+                internal/rtnl:70
+                internal/selector:95
+                internal/state:85
+                EOF
+
+                go test -cover ./internal/... > coverage.out 2>&1 || {
+                    cat coverage.out
+                    echo "coverage: go test failed" >&2
+                    exit 1
+                }
+                cat coverage.out
+
+                fail=0
+                while IFS=: read -r pkg floor; do
+                    # Skip blank lines / heredoc-induced whitespace.
+                    pkg=$(echo "$pkg" | tr -d '[:space:]')
+                    floor=$(echo "$floor" | tr -d '[:space:]')
+                    [ -z "$pkg" ] && continue
+
+                    # `go test -cover` prints one line per package:
+                    #   ok  <module>/<pkg>  0.012s  coverage: 88.6% of statements
+                    line=$(grep "/$pkg[[:space:]]" coverage.out || true)
+                    if [ -z "$line" ]; then
+                        echo "coverage: $pkg — no test output found" >&2
+                        fail=1
+                        continue
+                    fi
+                    pct=$(echo "$line" | sed -n 's/.*coverage: \([0-9.]*\)%.*/\1/p')
+                    if [ -z "$pct" ]; then
+                        echo "coverage: $pkg — could not parse line: $line" >&2
+                        fail=1
+                        continue
+                    fi
+                    # Compare as integer percent (truncate fractions);
+                    # awk does the float→bool. `< floor` ⇒ fail.
+                    if awk -v p="$pct" -v f="$floor" 'BEGIN{ exit !(p+0 < f+0) }'; then
+                        printf 'coverage: %-22s %5s%% < floor %s%% — FAIL\n' "$pkg" "$pct" "$floor" >&2
+                        fail=1
+                    else
+                        printf 'coverage: %-22s %5s%% ≥ floor %s%% — ok\n' "$pkg" "$pct" "$floor"
+                    fi
+                done < coverage.thresholds
+
+                if [ "$fail" -ne 0 ]; then
+                    echo "coverage: one or more packages regressed below their floor" >&2
+                    exit 1
+                fi
+                touch $out
+              '';
+
           # Build the daemon as part of `nix flake check` so a
           # regression in `pkgs/wanwatchd.nix` (e.g. a missing source
           # file under `fileset`, a vendored-dep drift) fails CI

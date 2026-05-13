@@ -25,6 +25,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 ### Internal
 
 - Unified `probe.Family` and `apply.Family` onto a single enum (values now match `unix.AF_INET` / `AF_INET6` so netlink passthrough is a single cast). Old `state.Family` struct renamed to `state.FamilyHealth` to free up the name. `rtnl.RouteFamily` values aligned with the same encoding; `probeFamilyToRoute` shim deleted (a plain `rtnl.RouteFamily(probeFam)` cast replaces it).
+- CI / tooling claims made good on: `.golangci.yml` now carries the curated check set referenced by `CLAUDE.md` §Lint (`bodyclose`, `errcheck`, `errorlint`, `goconst`, `gocritic`, `gosec`, `govet`, `prealloc`, `revive`, `staticcheck`, `unparam`, `unused`). `.github/workflows/audit.yml` runs `govulncheck` + `vulnix` weekly + on release tag. Per-package coverage gates from PLAN §9.2 land as `checks.<system>.coverage`; the CI's daemon job builds it.
 - `selector.Selection.Active` is now a comparable `Active{Wan string, Has bool}` struct (was `*string`). Removes the `equalStringPtr` / `strPtr` helpers and the loop-local pointer trick in `primaryBackup`.
 - `context.Context` propagated through `apply.WriteDefault` / `EnsureRule` / `FlushBySource` and the daemon's `bootstrap` / `handle*Event` / `recomputeGroup` / `applyRoutes` chain.
 - `state.Writer` now serializes `Write` calls with a `sync.Mutex` (was "serialize at the caller" documentation).

@@ -120,29 +120,6 @@ implementation is mechanical.
 
 ---
 
-## infra — CI / tooling
-
-### Vulnerability scan workflow
-
-`CLAUDE.md` line 184 promises `.github/workflows/audit.yml` running
-`govulncheck` + `vulnix` weekly + per-release. File doesn't exist.
-Either build it or soften the CLAUDE.md claim.
-
-### golangci-lint config
-
-`CLAUDE.md` line 175 references `.golangci.yml` with a curated
-check set (`errcheck`, `gosec`, `revive`, …). File doesn't exist;
-`golangci-lint run` in the devshell uses defaults. Either commit
-the curated config or soften the claim.
-
-### Coverage gates
-
-`CLAUDE.md` says "Coverage gates per PLAN §9.2 — CI fails on
-regression." No coverage-tracking infrastructure exists yet. The
-new CI workflow runs tests but doesn't enforce a coverage floor.
-
----
-
 ## cleanup — internal refactors
 
 Captured during reviews; deemed not worth blocking the original
