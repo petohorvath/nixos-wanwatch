@@ -319,3 +319,122 @@ func TestCombineFamiliesNilEntry(t *testing.T) {
 		t.Error("combineFamilies({nil,v6-healthy}, any) = false, want true (nil skipped, v6 wins)")
 	}
 }
+
+// TestCombineFamiliesPolicyMatrix is the exhaustive policy ×
+// (per-family health × cooked) table. Encodes the v1 contract
+// explicitly so a refactor that, say, accidentally inverts the
+// cold-start cooked-false-counts-as-healthy rule turns this red
+// in a way the per-package coverage % never could.
+//
+// Cold-start cooked=false counts as healthy (PLAN §8: "health
+// unknown but carrier known → trust carrier"). Both families
+// cooked=false with carrier-up is a healthy WAN under either
+// policy.
+func TestCombineFamiliesPolicyMatrix(t *testing.T) {
+	t.Parallel()
+	mkFam := func(cooked, healthy bool) *familyState {
+		return &familyState{cooked: cooked, healthy: healthy}
+	}
+	cases := []struct {
+		name   string
+		v4     *familyState
+		v6     *familyState
+		policy string
+		want   bool
+	}{
+		// Cold-start defaults: cooked=false counts as healthy.
+		{"cold v4, cold v6, all", mkFam(false, false), mkFam(false, false), "all", true},
+		{"cold v4, cold v6, any", mkFam(false, false), mkFam(false, false), "any", true},
+
+		// One cooked-healthy, one cold.
+		{"cooked-healthy v4, cold v6, all", mkFam(true, true), mkFam(false, false), "all", true},
+		{"cooked-healthy v4, cold v6, any", mkFam(true, true), mkFam(false, false), "any", true},
+
+		// One cooked-unhealthy: "all" → false; "any" → still true via cold v6.
+		{"cooked-unhealthy v4, cold v6, all", mkFam(true, false), mkFam(false, false), "all", false},
+		{"cooked-unhealthy v4, cold v6, any", mkFam(true, false), mkFam(false, false), "any", true},
+
+		// Both cooked.
+		{"v4 up + v6 up, all", mkFam(true, true), mkFam(true, true), "all", true},
+		{"v4 up + v6 up, any", mkFam(true, true), mkFam(true, true), "any", true},
+		{"v4 up + v6 down, all", mkFam(true, true), mkFam(true, false), "all", false},
+		{"v4 up + v6 down, any", mkFam(true, true), mkFam(true, false), "any", true},
+		{"v4 down + v6 down, all", mkFam(true, false), mkFam(true, false), "all", false},
+		{"v4 down + v6 down, any", mkFam(true, false), mkFam(true, false), "any", false},
+
+		// Unknown policy defaults to "all" (the conservative pick).
+		{"v4 up + v6 down, unknown policy", mkFam(true, true), mkFam(true, false), "", false},
+		{"v4 up + v6 down, garbage policy", mkFam(true, true), mkFam(true, false), "weird", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fams := map[probe.Family]*familyState{
+				probe.FamilyV4: tc.v4,
+				probe.FamilyV6: tc.v6,
+			}
+			if got := combineFamilies(fams, tc.policy); got != tc.want {
+				t.Errorf("combineFamilies(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildMemberHealthGatesByCarrier documents the load-bearing
+// `healthy = ok && w.carrierUp() && w.healthy` predicate: probes
+// reporting healthy do NOT count when carrier is down. This is
+// what makes carrier-down events drive failover instantly without
+// waiting for probe timeouts.
+func TestBuildMemberHealthGatesByCarrier(t *testing.T) {
+	t.Parallel()
+	wans := map[string]*wanState{
+		"primary": {
+			carrier:   rtnl.CarrierDown,
+			operstate: rtnl.OperstateDown,
+			healthy:   true, // probes say healthy
+		},
+		"backup": {
+			carrier:   rtnl.CarrierUp,
+			operstate: rtnl.OperstateUp,
+			healthy:   true,
+		},
+	}
+	g := selector.Group{
+		Members: []selector.Member{{Wan: "primary"}, {Wan: "backup"}},
+	}
+	got := buildMemberHealth(g, wans)
+	want := map[string]bool{"primary": false, "backup": true}
+	for _, m := range got {
+		if want[m.Member.Wan] != m.Healthy {
+			t.Errorf("member %q: healthy = %v, want %v (carrier+probe predicate broken)",
+				m.Member.Wan, m.Healthy, want[m.Member.Wan])
+		}
+	}
+}
+
+// TestBuildMemberHealthHandlesMissingWan: a Member references a
+// Wan absent from the runtime map. Members like this aren't
+// theoretical — the daemon-config validator should reject them
+// upstream, but the daemon doesn't trust its input. Missing WAN
+// → unhealthy, no panic, no map insertion.
+func TestBuildMemberHealthHandlesMissingWan(t *testing.T) {
+	t.Parallel()
+	g := selector.Group{
+		Members: []selector.Member{{Wan: "ghost"}, {Wan: "primary"}},
+	}
+	wans := map[string]*wanState{
+		"primary": {carrier: rtnl.CarrierUp, operstate: rtnl.OperstateUp, healthy: true},
+	}
+	got := buildMemberHealth(g, wans)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (ghost + primary)", len(got))
+	}
+	for _, m := range got {
+		if m.Member.Wan == "ghost" && m.Healthy {
+			t.Error("ghost member reported healthy despite missing wanState")
+		}
+	}
+	if _, leaked := wans["ghost"]; leaked {
+		t.Error("buildMemberHealth wrote a ghost entry into the wans map")
+	}
+}

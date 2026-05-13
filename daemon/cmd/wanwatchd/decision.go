@@ -28,11 +28,19 @@ func evaluateThresholds(prev bool, stats probe.FamilyStats, t config.Thresholds)
 	return false
 }
 
+// FamilyHealthPolicy values per PLAN §5.1. Strings (not an enum)
+// because they're a config wire-format contract; the Nix side
+// emits the same literals into the daemon-config JSON.
+const (
+	familyPolicyAll = "all"
+	familyPolicyAny = "any"
+)
+
 // combineFamilies aggregates per-family Healthy booleans into a
-// per-WAN verdict under `policy`. PLAN §5.1 fixes the two values:
+// per-WAN verdict under `policy`:
 //
-//   - "all" — every probed family must be healthy
-//   - "any" — at least one probed family must be healthy
+//   - familyPolicyAll — every probed family must be healthy
+//   - familyPolicyAny — at least one probed family must be healthy
 //
 // A family that hasn't received its first ProbeResult yet (`cooked
 // = false`) is treated as healthy — PLAN §8 cold-start says
@@ -53,10 +61,11 @@ func combineFamilies(families map[probe.Family]*familyState, policy string) bool
 		return false
 	}
 	switch policy {
-	case "any":
+	case familyPolicyAny:
 		return healthy > 0
 	default:
-		// "all" — also the conservative default for unknown policies.
+		// familyPolicyAll — also the conservative default for
+		// unknown / unset policy strings.
 		return healthy == probed
 	}
 }

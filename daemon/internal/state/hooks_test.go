@@ -224,6 +224,41 @@ func TestEventConstants(t *testing.T) {
 	}
 }
 
+// TestRunBoundsMultipleSlowHooks: N hooks each sleeping past the
+// per-hook timeout must still complete within roughly N × Timeout
+// — not N × sleep-duration. Pins the invariant that the per-hook
+// deadline caps total wall time so a single misbehaving script
+// can't pin the daemon's apply loop.
+func TestRunBoundsMultipleSlowHooks(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "switch.d")
+	// Three hooks, each sleeping 5s. Per-hook timeout 100ms; total
+	// should be ~300ms, not 15s.
+	for _, name := range []string{"a-slow.sh", "b-slow.sh", "c-slow.sh"} {
+		writeHook(t, eventDir, name, "sleep 5")
+	}
+
+	r := Runner{Dir: dir, Timeout: 100 * time.Millisecond}
+	start := time.Now()
+	results := r.Run(context.Background(), HookContext{Event: EventSwitch})
+	elapsed := time.Since(start)
+
+	if len(results) != 3 {
+		t.Errorf("len(results) = %d, want 3", len(results))
+	}
+	for _, r := range results {
+		if !r.TimedOut {
+			t.Errorf("hook %q did not time out", r.Path)
+		}
+	}
+	// 2 seconds is a generous upper bound — 3 × 100ms expected,
+	// but CI runners can be slow.
+	if elapsed > 2*time.Second {
+		t.Errorf("Run elapsed = %v; per-hook timeout did not cap total", elapsed)
+	}
+}
+
 // TestRunCapturesNonExitError: when the kernel refuses to exec the
 // script at all (missing interpreter), cmd.Run() returns a non-
 // `*exec.ExitError`. The runOne handler must still produce a
