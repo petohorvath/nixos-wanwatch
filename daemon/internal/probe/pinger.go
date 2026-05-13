@@ -57,7 +57,11 @@ func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- Prob
 	}
 	windows := make(map[string]*WindowStats, len(p.Targets))
 	for _, t := range p.Targets {
-		windows[t] = NewWindow(p.WindowSize)
+		w, err := NewWindow(p.WindowSize)
+		if err != nil {
+			return fmt.Errorf("probe: target %q: %w", t, err)
+		}
+		windows[t] = w
 	}
 
 	ticker := time.NewTicker(p.Interval)

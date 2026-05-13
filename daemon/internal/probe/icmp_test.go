@@ -69,8 +69,9 @@ func TestEchoRequestBytesV4ChecksumValid(t *testing.T) {
 }
 
 // TestEchoRequestBytesV6KernelChecksum: ICMPv6 leaves the checksum
-// field zero — the kernel fills it on send via SOCK_DGRAM, using the
-// IPv6 pseudo-header that userspace can't see.
+// field zero — the kernel fills it on send (Linux auto-enables
+// IPV6_CHECKSUM for raw ICMPv6 sockets), using the IPv6
+// pseudo-header that userspace can't see.
 func TestEchoRequestBytesV6KernelChecksum(t *testing.T) {
 	t.Parallel()
 	b := EchoRequestBytes(FamilyV6, 0xBEEF, 0x0001, []byte("wanwatch"))

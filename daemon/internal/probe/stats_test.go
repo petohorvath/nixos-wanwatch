@@ -11,24 +11,33 @@ func floatEq(a, b float64) bool {
 	return math.Abs(a-b) < 1e-9
 }
 
-func TestNewWindowPanicsOnNonPositiveCapacity(t *testing.T) {
+// mustNewWindow is a helper used across the probe-package test
+// files: NewWindow now returns (window, error) so happy-path tests
+// would otherwise drown in boilerplate.
+func mustNewWindow(t *testing.T, capacity int) *WindowStats {
+	t.Helper()
+	w, err := NewWindow(capacity)
+	if err != nil {
+		t.Fatalf("NewWindow(%d): %v", capacity, err)
+	}
+	return w
+}
+
+func TestNewWindowRejectsNonPositiveCapacity(t *testing.T) {
 	t.Parallel()
 	cases := []int{0, -1, -100}
 	for _, c := range cases {
 		t.Run("", func(t *testing.T) {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("NewWindow(%d) did not panic", c)
-				}
-			}()
-			_ = NewWindow(c)
+			if _, err := NewWindow(c); err == nil {
+				t.Errorf("NewWindow(%d) returned nil error", c)
+			}
 		})
 	}
 }
 
 func TestWindowEmpty(t *testing.T) {
 	t.Parallel()
-	w := NewWindow(5)
+	w := mustNewWindow(t, 5)
 	if got := w.Len(); got != 0 {
 		t.Errorf("Len() = %d, want 0", got)
 	}
@@ -185,7 +194,7 @@ func TestWindowScenarios(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			w := NewWindow(tc.capacity)
+			w := mustNewWindow(t, tc.capacity)
 			for _, s := range tc.pushes {
 				w.Push(s)
 			}
@@ -210,7 +219,7 @@ func TestWindowScenarios(t *testing.T) {
 // (capacity+1)th pushed, not the first.
 func TestPushOrderingPreservedAfterWrap(t *testing.T) {
 	t.Parallel()
-	w := NewWindow(3)
+	w := mustNewWindow(t, 3)
 	w.Push(Sample{RTTMicros: 1}) // dropped by the fourth push
 	w.Push(Sample{RTTMicros: 2})
 	w.Push(Sample{RTTMicros: 3})

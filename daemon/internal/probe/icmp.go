@@ -15,10 +15,13 @@
 //
 // ICMPv4 checksums are computed by this code (RFC 1071, the
 // standard one's-complement sum). ICMPv6 checksums are computed
-// by the kernel when sending via SOCK_DGRAM+IPPROTO_ICMPV6 — the
-// pseudo-header is unavailable to userspace at that level, so we
-// leave the checksum field zero in echoRequestBytes(FamilyV6, …)
-// and rely on the kernel to fill it on transmit.
+// by the kernel on transmit: Linux's `net/ipv6/raw.c` auto-enables
+// `IPV6_CHECKSUM` at offset 2 for IPPROTO_ICMPV6 raw sockets
+// (which is what `net.ListenPacket("ip6:ipv6-icmp", …)` opens),
+// so we leave the checksum field zero in
+// echoRequestBytes(FamilyV6, …) and rely on the kernel to fill it.
+// The IPv6 pseudo-header is not visible to userspace, so we could
+// not compute the checksum ourselves anyway.
 
 package probe
 

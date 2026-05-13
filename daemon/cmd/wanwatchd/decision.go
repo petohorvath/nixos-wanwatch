@@ -1,7 +1,8 @@
 package main
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
@@ -74,8 +75,8 @@ func buildMemberHealth(g selector.Group, wans map[string]*wanState) []selector.M
 	}
 	// Stable order so logs / hooks / state.json present members
 	// the same way every cycle.
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Member.Wan < out[j].Member.Wan
+	slices.SortFunc(out, func(a, b selector.MemberHealth) int {
+		return cmp.Compare(a.Member.Wan, b.Member.Wan)
 	})
 	return out
 }

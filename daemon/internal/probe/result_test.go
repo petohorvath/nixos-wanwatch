@@ -15,7 +15,7 @@ func TestAggregateEmptyTargets(t *testing.T) {
 
 func TestAggregateSingleTarget(t *testing.T) {
 	t.Parallel()
-	w := NewWindow(4)
+	w := mustNewWindow(t, 4)
 	w.Push(Sample{RTTMicros: 10000})
 	w.Push(Sample{RTTMicros: 20000})
 	w.Push(Sample{RTTMicros: 30000})
@@ -31,10 +31,10 @@ func TestAggregateSingleTarget(t *testing.T) {
 
 func TestAggregateMeanAcrossTargets(t *testing.T) {
 	t.Parallel()
-	a := NewWindow(2)
+	a := mustNewWindow(t, 2)
 	a.Push(Sample{RTTMicros: 10000})
 	a.Push(Sample{RTTMicros: 10000})
-	b := NewWindow(2)
+	b := mustNewWindow(t, 2)
 	b.Push(Sample{RTTMicros: 20000})
 	b.Push(Sample{RTTMicros: 20000})
 
@@ -49,10 +49,10 @@ func TestAggregateSkipsEmptyWindowsInMean(t *testing.T) {
 	// Empty windows still appear in PerTarget (zeros) so the
 	// scrape surface is stable, but they don't drag the aggregate
 	// loss/RTT toward zero during the daemon's ramp-up.
-	a := NewWindow(2)
+	a := mustNewWindow(t, 2)
 	a.Push(Sample{Lost: true})
 	a.Push(Sample{Lost: true})
-	b := NewWindow(2) // empty
+	b := mustNewWindow(t, 2) // empty
 
 	got := Aggregate(map[string]*WindowStats{"a": a, "b": b})
 	if got.LossRatio != 1.0 {
@@ -67,10 +67,10 @@ func TestAggregateLossRatioMeanIsBoundedByOne(t *testing.T) {
 	t.Parallel()
 	// 2 fully-lost targets → loss ratio 1.0, not 2.0. Catches a
 	// "sum" instead of "mean" implementation bug.
-	a := NewWindow(2)
+	a := mustNewWindow(t, 2)
 	a.Push(Sample{Lost: true})
 	a.Push(Sample{Lost: true})
-	b := NewWindow(2)
+	b := mustNewWindow(t, 2)
 	b.Push(Sample{Lost: true})
 	b.Push(Sample{Lost: true})
 

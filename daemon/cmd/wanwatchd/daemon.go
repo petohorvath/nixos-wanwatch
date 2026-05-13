@@ -114,16 +114,17 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 			healthy: true,
 		}
 		fams := familiesFromTargets(wan.Probe.Targets)
+		hyst := wan.Probe.Hysteresis
 		if fams.v4 {
 			ws.families[probe.FamilyV4] = &familyState{
 				family: probe.FamilyV4,
-				hyst:   selector.NewHysteresisState(),
+				hyst:   selector.NewHysteresisState(hyst.ConsecutiveUp, hyst.ConsecutiveDown),
 			}
 		}
 		if fams.v6 {
 			ws.families[probe.FamilyV6] = &familyState{
 				family: probe.FamilyV6,
-				hyst:   selector.NewHysteresisState(),
+				hyst:   selector.NewHysteresisState(hyst.ConsecutiveUp, hyst.ConsecutiveDown),
 			}
 		}
 		d.wans[name] = ws
@@ -176,10 +177,7 @@ func (d *daemon) handleProbeResult(r probe.ProbeResult) {
 
 	probeCfg := ws.cfg.Probe
 	raw := evaluateThresholds(fs.healthy, r.Stats, probeCfg.Thresholds)
-	stable := fs.hyst.Observe(raw,
-		probeCfg.Hysteresis.ConsecutiveUp,
-		probeCfg.Hysteresis.ConsecutiveDown,
-	)
+	stable := fs.hyst.Observe(raw)
 
 	d.recordProbeMetrics(r, stable)
 

@@ -1,6 +1,9 @@
 package selector
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 // primaryBackup picks the healthy Member with the lowest priority
 // (lower = preferred). Ties are broken by lexicographic WAN name
@@ -16,11 +19,11 @@ func primaryBackup(g Group, members []MemberHealth) Selection {
 		return Selection{Group: g.Name, Active: nil}
 	}
 
-	sort.Slice(healthy, func(i, j int) bool {
-		if healthy[i].Member.Priority != healthy[j].Member.Priority {
-			return healthy[i].Member.Priority < healthy[j].Member.Priority
+	slices.SortFunc(healthy, func(a, b MemberHealth) int {
+		if c := cmp.Compare(a.Member.Priority, b.Member.Priority); c != 0 {
+			return c
 		}
-		return healthy[i].Member.Wan < healthy[j].Member.Wan
+		return cmp.Compare(a.Member.Wan, b.Member.Wan)
 	})
 
 	wan := healthy[0].Member.Wan

@@ -11,7 +11,10 @@
 // interface binding) is in icmp.go (added in Pass 2 per PLAN §10).
 package probe
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 // Sample is one probe attempt's outcome.
 //
@@ -49,18 +52,19 @@ type WindowStats struct {
 	filled   bool // true once samples has wrapped at least once
 }
 
-// NewWindow returns a WindowStats with the given capacity. Panics
-// when capacity <= 0 — wanwatch's config validation rejects
-// non-positive window sizes upstream; reaching this path is a
-// programmer error.
-func NewWindow(capacity int) *WindowStats {
+// NewWindow returns a WindowStats with the given capacity. Returns
+// an error when capacity <= 0 — wanwatch's config validation
+// rejects non-positive window sizes upstream, but defending here
+// keeps tests and ad-hoc callers honest without resorting to a
+// package-level panic.
+func NewWindow(capacity int) (*WindowStats, error) {
 	if capacity <= 0 {
-		panic("probe: NewWindow: capacity must be positive")
+		return nil, fmt.Errorf("probe: NewWindow: capacity must be positive (got %d)", capacity)
 	}
 	return &WindowStats{
 		capacity: capacity,
 		samples:  make([]Sample, capacity),
-	}
+	}, nil
 }
 
 // Push records a Sample, discarding the oldest if the window is full.

@@ -102,7 +102,7 @@ func TestCycleRecordsRTTOnMatchedReply(t *testing.T) {
 	t.Parallel()
 	p := newPinger([]string{"1.1.1.1"})
 	addrs, _ := p.resolveTargets()
-	windows := map[string]*WindowStats{"1.1.1.1": NewWindow(p.WindowSize)}
+	windows := map[string]*WindowStats{"1.1.1.1": mustNewWindow(t, p.WindowSize)}
 	// Pre-load a reply at seq=0 (the first seq this cycle issues).
 	reply := echoReplyFor(p.Family, p.Ident, 0)
 	conn := &fakeConn{replies: [][]byte{reply}}
@@ -125,7 +125,7 @@ func TestCycleRecordsLossOnNoReply(t *testing.T) {
 	t.Parallel()
 	p := newPinger([]string{"1.1.1.1"})
 	addrs, _ := p.resolveTargets()
-	windows := map[string]*WindowStats{"1.1.1.1": NewWindow(p.WindowSize)}
+	windows := map[string]*WindowStats{"1.1.1.1": mustNewWindow(t, p.WindowSize)}
 	conn := &fakeConn{} // no replies queued
 
 	buf := make([]byte, 1500)
@@ -142,7 +142,7 @@ func TestCycleIgnoresWrongIdent(t *testing.T) {
 	// consumed as ours — would mis-attribute RTT.
 	p := newPinger([]string{"1.1.1.1"})
 	addrs, _ := p.resolveTargets()
-	windows := map[string]*WindowStats{"1.1.1.1": NewWindow(p.WindowSize)}
+	windows := map[string]*WindowStats{"1.1.1.1": mustNewWindow(t, p.WindowSize)}
 	stranger := echoReplyFor(p.Family, p.Ident^0xFFFF, 0)
 	conn := &fakeConn{replies: [][]byte{stranger}}
 
