@@ -11,6 +11,7 @@ package rtnl
 
 import (
 	"fmt"
+	"net"
 	"time"
 )
 
@@ -100,4 +101,56 @@ type LinkEvent struct {
 	Carrier   Carrier
 	Operstate Operstate
 	Time      time.Time
+}
+
+// RouteFamily is the IP family of a route the route subscriber
+// observed. Independent of `apply.Family` so the rtnl package
+// stays self-contained.
+type RouteFamily int
+
+const (
+	RouteFamilyV4 RouteFamily = iota
+	RouteFamilyV6
+)
+
+// String returns "v4" / "v6" — used in log fields and metrics
+// labels.
+func (f RouteFamily) String() string {
+	if f == RouteFamilyV6 {
+		return "v6"
+	}
+	return "v4"
+}
+
+// RouteEventOp tags a RouteEvent as the route appearing
+// (RouteEventAdd, RTM_NEWROUTE) or disappearing (RouteEventDel,
+// RTM_DELROUTE) on the main routing table.
+type RouteEventOp int
+
+const (
+	RouteEventAdd RouteEventOp = iota
+	RouteEventDel
+)
+
+// String returns "add" / "del" — used in log fields.
+func (o RouteEventOp) String() string {
+	if o == RouteEventDel {
+		return "del"
+	}
+	return "add"
+}
+
+// RouteEvent is a default-route lifecycle event observed on the
+// kernel's main RIB for a watched interface. Drives the daemon's
+// gateway-discovery cache: each Add carries the current next-hop
+// for the (iface, family) pair; each Del marks the pair unknown.
+//
+// Gateway is nil for point-to-point routes (kernel-installed
+// scope-link defaults out of PPP / WireGuard / tun / GRE links).
+type RouteEvent struct {
+	Op      RouteEventOp
+	Iface   string
+	Family  RouteFamily
+	Gateway net.IP
+	Time    time.Time
 }
