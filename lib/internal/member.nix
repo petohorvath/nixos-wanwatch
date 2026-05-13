@@ -115,12 +115,6 @@ let
     in
     if r.success then r.value else builtins.throw r.error;
 
-  # ===== Accessors =====
-
-  wan = m: m.wan;
-  weight = m: m.weight;
-  priority = m: m.priority;
-
   # ===== Serialization =====
 
   toJSONValue = m: {
@@ -136,7 +130,6 @@ in
     make
     tryMake
     toJSONValue
+    defaults
     ;
-  inherit wan weight priority;
-  inherit defaults;
 }

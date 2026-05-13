@@ -216,15 +216,8 @@ let
     in
     if r.success then r.value else builtins.throw r.error;
 
-  # ===== Accessors =====
-
-  name = w: w.name;
-  interface = w: w.interface;
-  gatewayV4 = w: w.gateways.v4;
-  gatewayV6 = w: w.gateways.v6;
-  probeOf = w: w.probe;
-  targets = w: probe.targets w.probe;
-
+  # ===== Derived accessors =====
+  #
   # `families` reflects which gateway families the WAN has *declared*.
   # Distinct from `probe.families`, which reflects what's *probed*.
   # The family-coupling invariant guarantees these agree at construction.
@@ -249,16 +242,6 @@ in
     make
     tryMake
     toJSONValue
-    ;
-  inherit
-    name
-    interface
-    gatewayV4
-    gatewayV6
     families
-    targets
     ;
-  # `probe` is renamed locally to avoid shadowing the module
-  # argument inside the let-binding; exported under the public name.
-  probe = probeOf;
 }

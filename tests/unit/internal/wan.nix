@@ -62,44 +62,44 @@ in
   };
 
   testMakeV4OnlyAccepted = {
-    expr = wan.gatewayV4 (wan.make v4OnlyInput) != null;
+    expr = (wan.make v4OnlyInput).gateways.v4 != null;
     expected = true;
   };
 
   testMakeV6OnlyAccepted = {
-    expr = wan.gatewayV6 (wan.make v6OnlyInput) != null;
+    expr = (wan.make v6OnlyInput).gateways.v6 != null;
     expected = true;
   };
 
   testMakeDualStackPreservesName = {
-    expr = wan.name (wan.make dualStackInput);
+    expr = (wan.make dualStackInput).name;
     expected = "primary";
   };
 
   testMakeDualStackPreservesInterface = {
-    expr = wan.interface (wan.make dualStackInput);
+    expr = (wan.make dualStackInput).interface;
     expected = "eth0";
   };
 
   # ===== Accessors =====
 
   testGatewayV4Parsed = {
-    expr = (wan.gatewayV4 (wan.make dualStackInput))._type;
+    expr = (wan.make dualStackInput).gateways.v4._type;
     expected = "ipv4";
   };
 
   testGatewayV6Parsed = {
-    expr = (wan.gatewayV6 (wan.make dualStackInput))._type;
+    expr = (wan.make dualStackInput).gateways.v6._type;
     expected = "ipv6";
   };
 
   testGatewayV4NullWhenV6Only = {
-    expr = wan.gatewayV4 (wan.make v6OnlyInput);
+    expr = (wan.make v6OnlyInput).gateways.v4;
     expected = null;
   };
 
   testGatewayV6NullWhenV4Only = {
-    expr = wan.gatewayV6 (wan.make v4OnlyInput);
+    expr = (wan.make v4OnlyInput).gateways.v6;
     expected = null;
   };
 
@@ -128,12 +128,12 @@ in
   };
 
   testProbeAccessorReturnsProbeValue = {
-    expr = builtins.isAttrs (wan.probe (wan.make dualStackInput));
+    expr = builtins.isAttrs (wan.make dualStackInput).probe;
     expected = true;
   };
 
   testTargetsForwardedFromProbe = {
-    expr = builtins.length (wan.targets (wan.make dualStackInput));
+    expr = builtins.length (wan.make dualStackInput).probe.targets;
     expected = 2;
   };
 

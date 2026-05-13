@@ -135,7 +135,7 @@ let
   detectDuplicateMembers =
     parsedMembers:
     let
-      wans = builtins.map member.wan parsedMembers;
+      wans = builtins.map (m: m.wan) parsedMembers;
       counts = lib.foldl' (acc: w: acc // { ${w} = (acc.${w} or 0) + 1; }) { } wans;
       dups = lib.filterAttrs (_: c: c > 1) counts;
     in
@@ -196,14 +196,9 @@ let
     in
     if r.success then r.value else builtins.throw r.error;
 
-  # ===== Accessors =====
+  # ===== Derived accessors =====
 
-  name = g: g.name;
-  members = g: g.members;
-  strategy = g: g.strategy;
-  table = g: g.table;
-  mark = g: g.mark;
-  wans = g: builtins.map member.wan g.members;
+  wans = g: builtins.map (m: m.wan) g.members;
 
   # ===== Serialization =====
 
@@ -222,16 +217,9 @@ in
     make
     tryMake
     toJSONValue
-    ;
-  inherit
-    name
-    members
-    strategy
-    table
-    mark
     wans
+    defaults
     ;
-  inherit defaults;
   # Exposed so `types/group.nix` can derive its `groupStrategy`
   # enum from the same list — single source of truth on the Nix side.
   inherit validStrategies;

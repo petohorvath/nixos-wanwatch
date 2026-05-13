@@ -39,17 +39,17 @@ in
   };
 
   testMakeMinimalUsesDefaultWeight = {
-    expr = member.weight (member.make minimalInput);
+    expr = (member.make minimalInput).weight;
     expected = 100;
   };
 
   testMakeMinimalUsesDefaultPriority = {
-    expr = member.priority (member.make minimalInput);
+    expr = (member.make minimalInput).priority;
     expected = 1;
   };
 
   testMakeMinimalPreservesWan = {
-    expr = member.wan (member.make minimalInput);
+    expr = (member.make minimalInput).wan;
     expected = "primary";
   };
 
@@ -57,9 +57,7 @@ in
 
   testMakeFullPreservesAllFields = {
     expr = {
-      wan = member.wan (member.make fullInput);
-      weight = member.weight (member.make fullInput);
-      priority = member.priority (member.make fullInput);
+      inherit (member.make fullInput) wan weight priority;
     };
     expected = {
       wan = "backup";

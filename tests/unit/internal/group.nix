@@ -58,28 +58,30 @@ in
   };
 
   testMakeMinimalUsesDefaultStrategy = {
-    expr = group.strategy (group.make minimalInput);
+    expr = (group.make minimalInput).strategy;
     expected = "primary-backup";
   };
 
   testMakeMinimalTableDefaultsNull = {
     # Null means "auto-allocated" — `internal.tables.allocate` fills
     # it in at a later phase.
-    expr = group.table (group.make minimalInput);
+    expr = (group.make minimalInput).table;
     expected = null;
   };
 
   testMakeMinimalMarkDefaultsNull = {
-    expr = group.mark (group.make minimalInput);
+    expr = (group.make minimalInput).mark;
     expected = null;
   };
 
   testMakeFullPreservesAllFields = {
     expr = {
-      name = group.name (group.make fullInput);
-      strategy = group.strategy (group.make fullInput);
-      table = group.table (group.make fullInput);
-      mark = group.mark (group.make fullInput);
+      inherit (group.make fullInput)
+        name
+        strategy
+        table
+        mark
+        ;
     };
     expected = {
       name = "guest-uplink";
@@ -90,7 +92,7 @@ in
   };
 
   testMembersParsedToMemberValues = {
-    expr = builtins.all builtins.isAttrs (group.members (group.make fullInput));
+    expr = builtins.all builtins.isAttrs (group.make fullInput).members;
     expected = true;
   };
 

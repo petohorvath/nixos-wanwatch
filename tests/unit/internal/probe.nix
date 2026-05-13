@@ -54,27 +54,27 @@ in
   };
 
   testMakeMinimalUsesDefaultMethod = {
-    expr = probe.method (probe.make minimalInput);
+    expr = (probe.make minimalInput).method;
     expected = "icmp";
   };
 
   testMakeMinimalUsesDefaultInterval = {
-    expr = probe.intervalMs (probe.make minimalInput);
+    expr = (probe.make minimalInput).intervalMs;
     expected = 500;
   };
 
   testMakeMinimalUsesDefaultTimeout = {
-    expr = probe.timeoutMs (probe.make minimalInput);
+    expr = (probe.make minimalInput).timeoutMs;
     expected = 1000;
   };
 
   testMakeMinimalUsesDefaultWindowSize = {
-    expr = probe.windowSize (probe.make minimalInput);
+    expr = (probe.make minimalInput).windowSize;
     expected = 10;
   };
 
   testMakeMinimalUsesDefaultThresholds = {
-    expr = probe.thresholds (probe.make minimalInput);
+    expr = (probe.make minimalInput).thresholds;
     expected = {
       lossPctDown = 30;
       lossPctUp = 10;
@@ -84,7 +84,7 @@ in
   };
 
   testMakeMinimalUsesDefaultHysteresis = {
-    expr = probe.hysteresis (probe.make minimalInput);
+    expr = (probe.make minimalInput).hysteresis;
     expected = {
       consecutiveDown = 3;
       consecutiveUp = 5;
@@ -92,24 +92,24 @@ in
   };
 
   testMakeMinimalUsesDefaultFamilyPolicy = {
-    expr = probe.familyHealthPolicy (probe.make minimalInput);
+    expr = (probe.make minimalInput).familyHealthPolicy;
     expected = "all";
   };
 
   # ===== Happy path — full input =====
 
   testMakeFullPreservesMethod = {
-    expr = probe.method (probe.make fullInput);
+    expr = (probe.make fullInput).method;
     expected = "icmp";
   };
 
   testMakeFullPreservesIntervalMs = {
-    expr = probe.intervalMs (probe.make fullInput);
+    expr = (probe.make fullInput).intervalMs;
     expected = 250;
   };
 
   testMakeFullPreservesThresholds = {
-    expr = probe.thresholds (probe.make fullInput);
+    expr = (probe.make fullInput).thresholds;
     expected = {
       lossPctDown = 25;
       lossPctUp = 5;
@@ -119,7 +119,7 @@ in
   };
 
   testMakeFullPreservesHysteresis = {
-    expr = probe.hysteresis (probe.make fullInput);
+    expr = (probe.make fullInput).hysteresis;
     expected = {
       consecutiveDown = 2;
       consecutiveUp = 4;
@@ -127,7 +127,7 @@ in
   };
 
   testMakeFullPreservesFamilyPolicy = {
-    expr = probe.familyHealthPolicy (probe.make fullInput);
+    expr = (probe.make fullInput).familyHealthPolicy;
     expected = "any";
   };
 
@@ -135,7 +135,7 @@ in
 
   testTargetsParsedToLibnetValues = {
     # Each target is stored as a libnet ip value carrying _type.
-    expr = builtins.map (t: t._type) (probe.targets (probe.make fullInput));
+    expr = builtins.map (t: t._type) (probe.make fullInput).targets;
     expected = [
       "ipv4"
       "ipv6"
@@ -191,14 +191,13 @@ in
 
   testPartialThresholdsMergeWithDefaults = {
     # Specifying only lossPctDown should leave the other three at their defaults.
-    expr = probe.thresholds (
-      probe.make {
+    expr =
+      (probe.make {
         targets = [ "1.1.1.1" ];
         thresholds = {
           lossPctDown = 50;
         };
-      }
-    );
+      }).thresholds;
     expected = {
       lossPctDown = 50;
       lossPctUp = 10;
@@ -208,14 +207,13 @@ in
   };
 
   testPartialHysteresisMergeWithDefaults = {
-    expr = probe.hysteresis (
-      probe.make {
+    expr =
+      (probe.make {
         targets = [ "1.1.1.1" ];
         hysteresis = {
           consecutiveUp = 8;
         };
-      }
-    );
+      }).hysteresis;
     expected = {
       consecutiveDown = 3;
       consecutiveUp = 8;

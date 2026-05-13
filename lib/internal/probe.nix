@@ -255,16 +255,7 @@ let
     in
     if r.success then r.value else builtins.throw r.error;
 
-  # ===== Accessors =====
-
-  method = p: p.method;
-  targets = p: p.targets;
-  intervalMs = p: p.intervalMs;
-  timeoutMs = p: p.timeoutMs;
-  windowSize = p: p.windowSize;
-  thresholds = p: p.thresholds;
-  hysteresis = p: p.hysteresis;
-  familyHealthPolicy = p: p.familyHealthPolicy;
+  # ===== Derived accessors =====
 
   # `families` returns an attrset {v4 = bool; v6 = bool;} reflecting
   # whether the probe's targets cover each family. Used by `wan.make`
@@ -297,16 +288,6 @@ in
     make
     tryMake
     toJSONValue
-    ;
-  inherit
-    method
-    targets
-    intervalMs
-    timeoutMs
-    windowSize
-    thresholds
-    hysteresis
-    familyHealthPolicy
     families
     ;
   # Exposed for tests / introspection / module-option defaults.
