@@ -72,7 +72,8 @@ jobs:
         run: nix build --print-build-logs .#wanwatchd
       - name: vulnix
         run: |
-          # -S = include source-derived findings (not just binary).
-          # readlink resolves the result symlink to the actual
-          # store path vulnix wants on stdin.
-          nix run nixpkgs#vulnix -- -S "$(readlink -f result)"
+          # readlink resolves the `./result` symlink to the actual
+          # store path so vulnix scans the daemon's runtime closure
+          # rather than the local NixOS profile (`-S`, which Ubuntu
+          # runners don't have).
+          nix run nixpkgs#vulnix -- "$(readlink -f result)"
