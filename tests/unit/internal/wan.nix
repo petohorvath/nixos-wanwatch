@@ -84,13 +84,13 @@ in
   # ===== Accessors =====
 
   testGatewayV4Parsed = {
-    expr = (wan.make dualStackInput).gateways.v4._type;
-    expected = "ipv4";
+    expr = libnet.ip.isIpv4 (wan.make dualStackInput).gateways.v4;
+    expected = true;
   };
 
   testGatewayV6Parsed = {
-    expr = (wan.make dualStackInput).gateways.v6._type;
-    expected = "ipv6";
+    expr = libnet.ip.isIpv6 (wan.make dualStackInput).gateways.v6;
+    expected = true;
   };
 
   testGatewayV4NullWhenV6Only = {

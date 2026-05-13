@@ -23,8 +23,7 @@
 
   Input:  attrset of fields (any subset of optionals; required
           fields must be present)
-  Output: tagged group value `{ _type = "group"; ... }` with each
-          member parsed into a member value
+  Output: group value with each member parsed into a member value
   Throws: aggregated error string if validation fails.
 
   ===== tryMake =====

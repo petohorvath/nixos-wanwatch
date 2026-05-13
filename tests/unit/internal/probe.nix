@@ -134,11 +134,20 @@ in
   # ===== Target parsing =====
 
   testTargetsParsedToLibnetValues = {
-    # Each target is stored as a libnet ip value carrying _type.
-    expr = builtins.map (t: t._type) (probe.make fullInput).targets;
+    # Each target is parsed into a libnet ip value — the libnet
+    # `isIpv4` / `isIpv6` predicates recognise them.
+    expr = builtins.map (
+      t:
+      if libnet.ip.isIpv4 t then
+        "v4"
+      else if libnet.ip.isIpv6 t then
+        "v6"
+      else
+        "other"
+    ) (probe.make fullInput).targets;
     expected = [
-      "ipv4"
-      "ipv6"
+      "v4"
+      "v6"
     ];
   };
 

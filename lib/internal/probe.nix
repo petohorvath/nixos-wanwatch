@@ -261,8 +261,8 @@ let
   # whether the probe's targets cover each family. Used by `wan.make`
   # to enforce the family-coupling invariant (PLAN §5.4).
   families = p: {
-    v4 = builtins.any (t: t._type == "ipv4") p.targets;
-    v6 = builtins.any (t: t._type == "ipv6") p.targets;
+    v4 = builtins.any libnet.ip.isIpv4 p.targets;
+    v6 = builtins.any libnet.ip.isIpv6 p.targets;
   };
 
   # ===== Serialization =====

@@ -23,7 +23,7 @@
   ===== make =====
 
   Input:  attrset of fields (any subset; missing fields take defaults)
-  Output: tagged member value `{ _type = "member"; ... }`
+  Output: member value
   Throws: aggregated error string if any field fails validation.
 
   ===== tryMake =====
