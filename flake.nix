@@ -164,6 +164,10 @@
             inherit pkgs;
             nixosModule = self.nixosModules.default;
           };
+          vm-gateway-discovery = import ./tests/vm/gateway-discovery.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
+          };
           vm-nftzones-integration = import ./tests/vm/nftzones-integration.nix {
             inherit pkgs;
             nixosModule = self.nixosModules.default;
