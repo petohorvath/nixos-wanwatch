@@ -156,4 +156,35 @@ func TestBuildRouteEmitsScopeLinkForPointToPoint(t *testing.T) {
 	if int(got.Scope) != unix.RT_SCOPE_LINK {
 		t.Errorf("Scope = %d, want RT_SCOPE_LINK (%d)", got.Scope, unix.RT_SCOPE_LINK)
 	}
+	// vishvananda/netlink refuses to send RTM_NEWROUTE when none
+	// of Dst/Gw/Src/MPLSDst is set. For scope-link we have no Gw,
+	// so Dst must carry the family-zero CIDR explicitly.
+	if got.Dst == nil {
+		t.Fatal("Dst = nil under pointToPoint; want 0.0.0.0/0 so netlink accepts the message")
+	}
+	if !got.Dst.IP.Equal(net.IPv4zero) {
+		t.Errorf("Dst.IP = %v, want IPv4 zero", got.Dst.IP)
+	}
+	ones, _ := got.Dst.Mask.Size()
+	if ones != 0 {
+		t.Errorf("Dst prefix = %d, want 0 (default route)", ones)
+	}
+}
+
+func TestBuildRouteEmitsScopeLinkForPointToPointV6(t *testing.T) {
+	t.Parallel()
+	d := DefaultRoute{
+		Family:       FamilyV6,
+		Table:        100,
+		IfIndex:      3,
+		PointToPoint: true,
+	}
+	got := buildRoute(d)
+	if got.Dst == nil || !got.Dst.IP.Equal(net.IPv6zero) {
+		t.Errorf("Dst = %v, want ::/0 under v6 pointToPoint", got.Dst)
+	}
+	ones, bits := got.Dst.Mask.Size()
+	if ones != 0 || bits != 128 {
+		t.Errorf("Dst mask = %d/%d, want 0/128", ones, bits)
+	}
 }

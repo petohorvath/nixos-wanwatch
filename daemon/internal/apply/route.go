@@ -44,22 +44,39 @@ func WriteDefault(d DefaultRoute) error {
 }
 
 // buildRoute is the pure DefaultRoute → netlink.Route conversion.
-// `Dst == nil` is netlink's convention for "default route".
-// For point-to-point links, `Scope = link` and no Gw is set — the
-// kernel forwards out the interface without resolving a next-hop.
+//
+// For a normal default route the kernel treats `Dst == nil` as
+// "default for this family"; with `Gw` set, the library accepts
+// it.
+//
+// For point-to-point links there is no `Gw` to set — `Dst == nil`
+// + `Gw == nil` would leave the netlink message with no addresses
+// at all, which `vishvananda/netlink` rejects ("either Dst.IP,
+// Src.IP or Gw must be set"). Set `Dst` to the family's all-zero
+// CIDR explicitly; the kernel still installs it as the default
+// route for the family, scoped to the interface link.
 func buildRoute(d DefaultRoute) *netlink.Route {
 	r := &netlink.Route{
 		Family:    int(d.Family),
 		Table:     d.Table,
-		Dst:       nil,
 		LinkIndex: d.IfIndex,
 	}
 	if d.PointToPoint {
 		r.Scope = unix.RT_SCOPE_LINK
+		r.Dst = defaultDestination(d.Family)
 	} else {
 		r.Gw = d.Gateway
 	}
 	return r
+}
+
+// defaultDestination returns the all-zero CIDR for `f`. The kernel
+// treats `0.0.0.0/0` / `::/0` as the default-route destination.
+func defaultDestination(f Family) *net.IPNet {
+	if f == FamilyV6 {
+		return &net.IPNet{IP: net.IPv6zero, Mask: net.CIDRMask(0, 128)}
+	}
+	return &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
 }
 
 func validateDefaultRoute(d DefaultRoute) error {
