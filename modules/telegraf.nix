@@ -65,7 +65,12 @@ in
 
     services.telegraf.extraConfig.inputs.prometheus = [
       {
-        urls = [ "unix://${cfg.global.metricsSocket}:/metrics" ];
+        # `unix://SOCK:/metrics` worked on older Telegraf releases
+        # but newer ones parse the `:/metrics` suffix as part of
+        # the socket path. The current syntax is bare
+        # `unix://SOCK` with `/metrics` implied as the HTTP path
+        # (Telegraf's documented default).
+        urls = [ "unix://${cfg.global.metricsSocket}" ];
         interval = tcfg.interval;
         namepass = [ "wanwatch_*" ];
       }

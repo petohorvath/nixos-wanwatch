@@ -129,7 +129,7 @@ pkgs.runCommand "wanwatch-integration"
     # 7. Telegraf scrape integration: prometheus input points at
     # the daemon's metrics socket, filters to wanwatch_* only,
     # and the telegraf account joins the wanwatch group.
-    test "${builtins.head promInput.urls}" = "unix:///run/wanwatch/metrics.sock:/metrics"
+    test "${builtins.head promInput.urls}" = "unix:///run/wanwatch/metrics.sock"
     test "${builtins.head promInput.namepass}" = "wanwatch_*"
     test "${promInput.interval}" = "10s"
     case " ${lib.concatStringsSep " " telegrafGroups} " in
