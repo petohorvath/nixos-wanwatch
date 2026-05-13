@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
@@ -635,6 +637,76 @@ func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) 
 		// the load-bearing assertion.
 		t.Logf("state.json modtime didn't advance (within FS granularity?)")
 	}
+}
+
+// TestEventLoopEndToEndFiresUpHook is a small but full-fat
+// integration of the event loop: a real eventLoop goroutine, a
+// real hook script, real channels. Sending a carrier-up event
+// for the primary WAN must:
+//
+//  1. flow through eventLoop → handleLinkEvent
+//  2. trigger recomputeAffectedGroups → recomputeGroup
+//  3. produce a Selection with primary active (cold-start
+//     `healthy = true` makes this work without a probe sample)
+//  4. invoke runHooks with EventUp
+//  5. execute the hook script and write the expected env vars
+//
+// If any of those stops happening — e.g. a refactor accidentally
+// short-circuits the link → Decision plumbing — the hook never
+// produces its output file and this test times out.
+func TestEventLoopEndToEndFiresUpHook(t *testing.T) {
+	t.Parallel()
+	cfg := testCfgWithGroup()
+	d := testDaemon(t, cfg)
+
+	outFile := filepath.Join(d.cfg.Global.HooksDir, "e2e.txt")
+	writeHook(t, filepath.Join(d.cfg.Global.HooksDir, "up.d"), "notify.sh",
+		`echo "$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_EVENT" > `+outFile)
+
+	probeResults := make(chan probe.ProbeResult, 1)
+	linkEvents := make(chan rtnl.LinkEvent, 1)
+	routeEvents := make(chan rtnl.RouteEvent, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	loopDone := make(chan struct{})
+	go func() {
+		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
+		close(loopDone)
+	}()
+
+	// Send the carrier-up event for primary. Aggregate health stays
+	// healthy via cold-start, so primary becomes the active member
+	// → up event fires → hook runs.
+	linkEvents <- rtnl.LinkEvent{Name: "eth0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp}
+
+	// Poll for the hook's output file. The hook timeout cap is
+	// `DefaultHookTimeout * maxHooksPerEvent` (5s × 8 = 40s); we
+	// bound at 5s here — that's enough for a single shell script
+	// to fork+write on any sane runner.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(outFile); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("hook did not run within 5s; outFile %s missing", outFile)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("ReadFile(outFile): %v", err)
+	}
+	got := strings.TrimSpace(string(data))
+	want := "home|primary|up"
+	if got != want {
+		t.Errorf("hook payload = %q, want %q", got, want)
+	}
+
+	cancel()
+	<-loopDone
 }
 
 // TestRecordProbeMetricsEmptyPerTarget: cold start emits a

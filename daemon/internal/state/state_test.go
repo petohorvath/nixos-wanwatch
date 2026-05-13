@@ -279,6 +279,88 @@ func TestWriteFailsOnUnmarshalableState(t *testing.T) {
 	}
 }
 
+// TestWireShapeMatchesGolden pins the on-disk state.json byte-
+// for-byte against testdata/state.golden.json. It guards against
+// accidental field renames before the first tagged release locks
+// schema-1 down: an unintended rename (RTTSeconds → RTTMs, say)
+// turns this test red instead of slipping past code review.
+//
+// `updatedAt` is normalized because Writer.Write stamps it with
+// time.Now() — comparing the stamp would be flaky.
+func TestWireShapeMatchesGolden(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	w := Writer{Path: path}
+	active := "primary"
+	s := State{
+		Wans: map[string]Wan{
+			"primary": {
+				Interface: "eth0",
+				Carrier:   "up",
+				Operstate: "up",
+				Healthy:   true,
+				Gateways:  Gateways{V4: "192.0.2.1", V6: "2001:db8::1"},
+				Families: map[string]FamilyHealth{
+					"v4": {
+						Healthy:       true,
+						RTTSeconds:    0.0124,
+						JitterSeconds: 0.0012,
+						LossRatio:     0.05,
+						Targets:       []string{"1.1.1.1"},
+					},
+				},
+			},
+		},
+		Groups: map[string]Group{
+			"home": {
+				Active:         &active,
+				DecisionsTotal: 3,
+				Strategy:       "primary-backup",
+			},
+		},
+	}
+	if err := w.Write(s); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	golden, err := os.ReadFile("testdata/state.golden.json")
+	if err != nil {
+		t.Fatalf("ReadFile golden: %v", err)
+	}
+
+	// Normalize `updatedAt` to a fixed placeholder in both so the
+	// comparison is on shape, not timestamp. The pattern only
+	// appears once in either file.
+	gotNorm := normalizeUpdatedAt(t, got)
+	wantNorm := strings.TrimSpace(string(golden))
+
+	if gotNorm != wantNorm {
+		t.Errorf("state.json drifted from testdata/state.golden.json.\n--- want\n%s\n--- got\n%s",
+			wantNorm, gotNorm)
+	}
+}
+
+func normalizeUpdatedAt(t *testing.T, b []byte) string {
+	t.Helper()
+	s := strings.TrimSpace(string(b))
+	// Match `"updatedAt": "<anything>"` and replace the value.
+	const key = `"updatedAt": "`
+	i := strings.Index(s, key)
+	if i < 0 {
+		t.Fatalf("input lacks `updatedAt` field; cannot normalize:\n%s", s)
+	}
+	rest := s[i+len(key):]
+	j := strings.Index(rest, `"`)
+	if j < 0 {
+		t.Fatalf("input has malformed `updatedAt`:\n%s", s)
+	}
+	return s[:i+len(key)] + "__REPLACED__" + rest[j:]
+}
+
 // TestWriteRenameFailsWhenPathIsADirectory: a Path that names an
 // existing directory turns os.Rename(tmpfile, dir) into an EISDIR
 // (or similar) — exercising the last error branch of the

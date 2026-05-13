@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "updatedAt": "__REPLACED__",
+  "wans": {
+    "primary": {
+      "interface": "eth0",
+      "carrier": "up",
+      "operstate": "up",
+      "healthy": true,
+      "gateways": {
+        "v4": "192.0.2.1",
+        "v6": "2001:db8::1"
+      },
+      "families": {
+        "v4": {
+          "healthy": true,
+          "rttSeconds": 0.0124,
+          "jitterSeconds": 0.0012,
+          "lossRatio": 0.05,
+          "targets": [
+            "1.1.1.1"
+          ]
+        }
+      }
+    }
+  },
+  "groups": {
+    "home": {
+      "active": "primary",
+      "activeSince": null,
+      "decisionsTotal": 3,
+      "strategy": "primary-backup"
+    }
+  }
+}
