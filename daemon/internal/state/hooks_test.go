@@ -129,7 +129,7 @@ func TestRunIgnoresNonExecutableFiles(t *testing.T) {
 
 	r := Runner{Dir: dir}
 	results := r.Run(context.Background(), HookContext{Event: EventUp})
-	if results != nil && len(results) != 0 {
+	if len(results) != 0 {
 		t.Errorf("Run with only non-executable files = %v, want empty", results)
 	}
 }

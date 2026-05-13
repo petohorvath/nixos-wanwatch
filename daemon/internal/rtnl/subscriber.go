@@ -82,7 +82,7 @@ func (s *Subscriber) runLoop(ctx context.Context, updates <-chan netlink.LinkUpd
 // state entry is removed either way so the map stays bounded as
 // transient interfaces (veth, dummy, …) come and go.
 func (s *Subscriber) handleUpdate(state map[string]LinkState, upd netlink.LinkUpdate) (LinkEvent, bool) {
-	attrs := upd.Link.Attrs()
+	attrs := upd.Attrs()
 	name := attrs.Name
 	if _, watch := s.Interfaces[name]; s.Interfaces != nil && !watch {
 		return LinkEvent{}, false
@@ -92,7 +92,7 @@ func (s *Subscriber) handleUpdate(state map[string]LinkState, upd netlink.LinkUp
 	carrier := CarrierDown
 	operstate := OperstateNotPresent
 	if !deleted {
-		carrier = carrierFromFlags(upd.IfInfomsg.Flags)
+		carrier = carrierFromFlags(upd.Flags)
 		operstate = Operstate(attrs.OperState)
 	}
 

@@ -151,13 +151,13 @@ func (s *RouteSubscriber) handleUpdate(upd netlink.RouteUpdate) (RouteEvent, boo
 	if upd.Type != unix.RTM_NEWROUTE && upd.Type != unix.RTM_DELROUTE {
 		return RouteEvent{}, false
 	}
-	if upd.Route.Table != unix.RT_TABLE_MAIN {
+	if upd.Table != unix.RT_TABLE_MAIN {
 		return RouteEvent{}, false
 	}
 	if !isDefaultRoute(upd.Route) {
 		return RouteEvent{}, false
 	}
-	name, ok := s.resolveIface(upd.Route.LinkIndex)
+	name, ok := s.resolveIface(upd.LinkIndex)
 	if !ok {
 		return RouteEvent{}, false
 	}
@@ -171,8 +171,8 @@ func (s *RouteSubscriber) handleUpdate(upd netlink.RouteUpdate) (RouteEvent, boo
 	return RouteEvent{
 		Op:      op,
 		Iface:   name,
-		Family:  routeFamilyFromAF(upd.Route.Family),
-		Gateway: upd.Route.Gw,
+		Family:  routeFamilyFromAF(upd.Family),
+		Gateway: upd.Gw,
 		Time:    time.Now().UTC(),
 	}, true
 }

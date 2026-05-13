@@ -44,7 +44,7 @@ func (p *Pinger) Run(ctx context.Context, out chan<- ProbeResult) error {
 	if err != nil {
 		return fmt.Errorf("probe: open icmp %s on %s: %w", p.Family, p.Interface, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return p.runWithConn(ctx, conn, out)
 }
 
