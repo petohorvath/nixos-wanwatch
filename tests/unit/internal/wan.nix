@@ -405,114 +405,30 @@ in
     expected = true;
   };
 
-  # ===== Equality =====
+  # ===== toJSONValue =====
 
-  testEqSameInput = {
-    expr = wan.eq (wan.make dualStackInput) (wan.make dualStackInput);
-    expected = true;
+  testToJSONValueIncludesTypeTag = {
+    expr = (wan.toJSONValue (wan.make dualStackInput))._type;
+    expected = "wan";
   };
 
-  testEqDifferentName = {
-    expr = wan.eq (wan.make dualStackInput) (wan.make (dualStackInput // { name = "backup"; }));
-    expected = false;
+  testToJSONValueIncludesName = {
+    expr = (wan.toJSONValue (wan.make dualStackInput)).name;
+    expected = "primary";
   };
 
-  testEqDifferentInterface = {
-    expr = wan.eq (wan.make dualStackInput) (wan.make (dualStackInput // { interface = "wwan0"; }));
-    expected = false;
+  testToJSONValueStringifiesGatewayV4 = {
+    expr = (wan.toJSONValue (wan.make dualStackInput)).gateways.v4;
+    expected = "192.0.2.1";
   };
 
-  # ===== Comparison =====
-
-  testCompareEqualReturnsZero = {
-    expr = wan.compare (wan.make dualStackInput) (wan.make dualStackInput);
-    expected = 0;
+  testToJSONValueEmitsNullForMissingFamily = {
+    expr = (wan.toJSONValue (wan.make v4OnlyInput)).gateways.v6;
+    expected = null;
   };
 
-  testCompareTrichotomy = {
-    expr =
-      let
-        a = wan.make dualStackInput;
-        b = wan.make (dualStackInput // { name = "backup"; });
-        c = wan.compare a b;
-      in
-      c == -1 || c == 1;
-    expected = true;
-  };
-
-  testCompareAntisymmetry = {
-    expr =
-      let
-        a = wan.make dualStackInput;
-        b = wan.make (dualStackInput // { name = "backup"; });
-      in
-      wan.compare a b == -(wan.compare b a);
-    expected = true;
-  };
-
-  # ===== Derived ordering =====
-
-  testLtDerived = {
-    expr =
-      let
-        a = wan.make dualStackInput;
-        b = wan.make (dualStackInput // { name = "zzz"; });
-      in
-      wan.lt a b == (wan.compare a b == -1);
-    expected = true;
-  };
-
-  testMinReturnsLesser = {
-    expr =
-      let
-        a = wan.make dualStackInput;
-        b = wan.make (dualStackInput // { name = "zzz"; });
-      in
-      wan.min a b == (if wan.lt a b then a else b);
-    expected = true;
-  };
-
-  testMaxReturnsGreater = {
-    expr =
-      let
-        a = wan.make dualStackInput;
-        b = wan.make (dualStackInput // { name = "zzz"; });
-      in
-      wan.max a b == (if wan.lt a b then b else a);
-    expected = true;
-  };
-
-  # ===== toJSON =====
-
-  testToJSONReturnsString = {
-    expr = builtins.isString (wan.toJSON (wan.make dualStackInput));
-    expected = true;
-  };
-
-  testToJSONIncludesTypeTag = {
-    expr = pkgs.lib.hasInfix "\"_type\":\"wan\"" (wan.toJSON (wan.make dualStackInput));
-    expected = true;
-  };
-
-  testToJSONIncludesName = {
-    expr = pkgs.lib.hasInfix "\"name\":\"primary\"" (wan.toJSON (wan.make dualStackInput));
-    expected = true;
-  };
-
-  testToJSONStringifiesGatewayV4 = {
-    expr = pkgs.lib.hasInfix "\"v4\":\"192.0.2.1\"" (wan.toJSON (wan.make dualStackInput));
-    expected = true;
-  };
-
-  testToJSONEmitsNullForMissingFamily = {
-    expr = pkgs.lib.hasInfix "\"v6\":null" (wan.toJSON (wan.make v4OnlyInput));
-    expected = true;
-  };
-
-  testToJSONEmbedsProbeAsNestedObject = {
-    # Probe should appear as a JSON object, not a JSON string. The
-    # leading sequence `"probe":{` confirms a nested object opens.
-    expr = pkgs.lib.hasInfix "\"probe\":{" (wan.toJSON (wan.make dualStackInput));
+  testToJSONValueEmbedsProbeAsNestedAttrset = {
+    expr = builtins.isAttrs (wan.toJSONValue (wan.make dualStackInput)).probe;
     expected = true;
   };
 

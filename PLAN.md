@@ -184,28 +184,26 @@ This table lives in `docs/glossary.md` and is referenced from
 
 ### 5.1 Nix lib
 
-Every value type implements the same skeleton (matches `nix-libnet`
-convention):
+Every value type implements the same minimal skeleton:
 
 ```
 For value type T ∈ { wan, probe, group, member }:
   make        : attrs → T              throws on invalid input
   tryMake     : attrs → tryResult T    { success; value; error; }
   is<T>       : any → bool             type predicate (e.g. isWan)
-  eq          : T → T → bool
-  compare     : T → T → -1 | 0 | 1
-  lt/le/gt/ge : T → T → bool           derived from compare
-  min/max     : T → T → T              derived from compare
-  toJSON      : T → string             daemon-consumable canonical form
+  toJSONValue : T → attrset            canonical attrset embedded by config.render
   _type       : string                 runtime tag — "wan", "probe", …
 ```
 
 A unit test asserts that every value type exports the full skeleton;
-catches "I added a type and forgot `compare`" regressions.
+catches "I added a type and forgot `toJSONValue`" regressions.
 
 Pure-function modules (`selector`, `marks`, `tables`, `config`) get a
 different, explicitly-documented skeleton (`compute` / `allocate` /
-`render` + helpers), not a value-type skeleton.
+`render` + helpers), not a value-type skeleton. `config.toJSON` is
+the only top-level "render to JSON string" — value types compose
+through `toJSONValue` (attrset), and the daemon-config renderer
+hands the final assembled attrset to `builtins.toJSON` once.
 
 Module-level layout:
 
@@ -220,7 +218,7 @@ that resolve to the operational modules.
 |---|---|
 | `lib/default.nix` | top-level entry; composes `internal` + `types`; exposes `probe` / `wan` aliases |
 | `lib/internal/default.nix` | three-tier composition (primitives → probe → wan) |
-| `lib/internal/primitives.nix` | generic helpers: `hasTag`, `ensureTag`, `tryOk`/`tryErr`, `check`, `parseOptional`, `formatErrors`, `isValidName`, `mkOrdering`, `compareByString`, `orderingByString` |
+| `lib/internal/primitives.nix` | generic helpers: `hasTag`, `ensureTag`, `tryOk`/`tryErr`, `check`, `tagError`, `parseOptional`, `partitionTry`, `formatErrors`, `isValidName`, `isPositiveInt` |
 | `lib/internal/probe.nix` | `probe` value type — `make`, `tryMake`, `isProbe`, accessors, `families`, full skeleton; owns `_type = "probe"` |
 | `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `isWan`, accessors, family-coupling, full skeleton; owns `_type = "wan"` |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
@@ -843,8 +841,8 @@ at HEAD.
 - `flake.nix` skeleton (inputs: nixpkgs, libnet, treefmt-nix;
   outputs: lib, formatter, empty checks)
 - `lib/internal/primitives.nix` — generic helpers (`hasTag`,
-  `tryOk`, `tryErr`, `check`, `parseOptional`, `formatErrors`,
-  `isValidName`, `mkOrdering`, `compareByString`, `orderingByString`)
+  `tryOk`, `tryErr`, `check`, `parseOptional`, `partitionTry`,
+  `formatErrors`, `isValidName`, `isPositiveInt`)
 - `lib/internal/default.nix` — three-tier composition
 - `lib/types/{default,primitives,probe,wan}.nix` — stubs for NixOS
   option types (real types in Pass 5)

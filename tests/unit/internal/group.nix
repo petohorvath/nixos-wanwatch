@@ -363,115 +363,21 @@ in
     expected = null;
   };
 
-  # ===== Equality =====
+  # ===== toJSONValue =====
 
-  testEqSameInput = {
-    expr = group.eq (group.make minimalInput) (group.make minimalInput);
+  testToJSONValueIncludesTypeTag = {
+    expr = (group.toJSONValue (group.make minimalInput))._type;
+    expected = "group";
+  };
+
+  testToJSONValueEmbedsMembersAsAttrsets = {
+    expr = builtins.isAttrs (builtins.head (group.toJSONValue (group.make minimalInput)).members);
     expected = true;
   };
 
-  testEqDifferentName = {
-    expr = group.eq (group.make minimalInput) (group.make (minimalInput // { name = "other"; }));
-    expected = false;
-  };
-
-  testEqDifferentMembers = {
-    expr = group.eq (group.make minimalInput) (
-      group.make (
-        minimalInput
-        // {
-          members = [
-            {
-              wan = "backup";
-              priority = 1;
-            }
-          ];
-        }
-      )
-    );
-    expected = false;
-  };
-
-  # ===== Comparison =====
-
-  testCompareEqualReturnsZero = {
-    expr = group.compare (group.make minimalInput) (group.make minimalInput);
-    expected = 0;
-  };
-
-  testCompareTrichotomy = {
-    expr =
-      let
-        a = group.make minimalInput;
-        b = group.make (minimalInput // { name = "zzz"; });
-        c = group.compare a b;
-      in
-      c == -1 || c == 1;
-    expected = true;
-  };
-
-  testCompareAntisymmetry = {
-    expr =
-      let
-        a = group.make minimalInput;
-        b = group.make (minimalInput // { name = "zzz"; });
-      in
-      group.compare a b == -(group.compare b a);
-    expected = true;
-  };
-
-  # ===== Derived ordering =====
-
-  testLtDerived = {
-    expr =
-      let
-        a = group.make minimalInput;
-        b = group.make (minimalInput // { name = "zzz"; });
-      in
-      group.lt a b;
-    expected = true;
-  };
-
-  testMinReturnsLesser = {
-    expr =
-      let
-        a = group.make minimalInput;
-        b = group.make (minimalInput // { name = "zzz"; });
-      in
-      group.min a b == a;
-    expected = true;
-  };
-
-  testMaxReturnsGreater = {
-    expr =
-      let
-        a = group.make minimalInput;
-        b = group.make (minimalInput // { name = "zzz"; });
-      in
-      group.max a b == b;
-    expected = true;
-  };
-
-  # ===== toJSON =====
-
-  testToJSONReturnsString = {
-    expr = builtins.isString (group.toJSON (group.make minimalInput));
-    expected = true;
-  };
-
-  testToJSONIncludesTypeTag = {
-    expr = pkgs.lib.hasInfix "\"_type\":\"group\"" (group.toJSON (group.make minimalInput));
-    expected = true;
-  };
-
-  testToJSONEmbedsMembersAsObjects = {
-    expr = pkgs.lib.hasInfix "\"members\":[{" (group.toJSON (group.make minimalInput));
-    expected = true;
-  };
-
-  testToJSONEmitsNullTable = {
-    expr = pkgs.lib.hasInfix "\"table\":null" (group.toJSON (group.make minimalInput));
-    expected = true;
+  testToJSONValueEmitsNullTable = {
+    expr = (group.toJSONValue (group.make minimalInput)).table;
+    expected = null;
   };
 
   # ===== Defaults exposed =====

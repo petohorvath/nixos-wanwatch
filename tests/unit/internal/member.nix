@@ -201,103 +201,16 @@ in
     expected = null;
   };
 
-  # ===== Equality =====
+  # ===== toJSONValue =====
 
-  testEqSameInput = {
-    expr = member.eq (member.make minimalInput) (member.make minimalInput);
-    expected = true;
+  testToJSONValueIncludesTypeTag = {
+    expr = (member.toJSONValue (member.make minimalInput))._type;
+    expected = "member";
   };
 
-  testEqEquivalentInputs = {
-    expr = member.eq (member.make minimalInput) (member.make (minimalInput // member.defaults));
-    expected = true;
-  };
-
-  testEqDifferentWan = {
-    expr = member.eq (member.make { wan = "a"; }) (member.make { wan = "b"; });
-    expected = false;
-  };
-
-  testEqDifferentPriority = {
-    expr = member.eq (member.make minimalInput) (member.make (minimalInput // { priority = 2; }));
-    expected = false;
-  };
-
-  # ===== Comparison =====
-
-  testCompareEqualReturnsZero = {
-    expr = member.compare (member.make minimalInput) (member.make minimalInput);
-    expected = 0;
-  };
-
-  testCompareTrichotomy = {
-    expr =
-      let
-        a = member.make { wan = "aaa"; };
-        b = member.make { wan = "zzz"; };
-        c = member.compare a b;
-      in
-      c == -1 || c == 1;
-    expected = true;
-  };
-
-  testCompareAntisymmetry = {
-    expr =
-      let
-        a = member.make { wan = "aaa"; };
-        b = member.make { wan = "zzz"; };
-      in
-      member.compare a b == -(member.compare b a);
-    expected = true;
-  };
-
-  # ===== Derived ordering =====
-
-  testLtDerived = {
-    expr =
-      let
-        a = member.make { wan = "aaa"; };
-        b = member.make { wan = "zzz"; };
-      in
-      member.lt a b;
-    expected = true;
-  };
-
-  testMinReturnsLesser = {
-    expr =
-      let
-        a = member.make { wan = "aaa"; };
-        b = member.make { wan = "zzz"; };
-      in
-      member.min a b == a;
-    expected = true;
-  };
-
-  testMaxReturnsGreater = {
-    expr =
-      let
-        a = member.make { wan = "aaa"; };
-        b = member.make { wan = "zzz"; };
-      in
-      member.max a b == b;
-    expected = true;
-  };
-
-  # ===== toJSON =====
-
-  testToJSONReturnsString = {
-    expr = builtins.isString (member.toJSON (member.make minimalInput));
-    expected = true;
-  };
-
-  testToJSONIncludesTypeTag = {
-    expr = pkgs.lib.hasInfix "\"_type\":\"member\"" (member.toJSON (member.make minimalInput));
-    expected = true;
-  };
-
-  testToJSONIncludesWan = {
-    expr = pkgs.lib.hasInfix "\"wan\":\"primary\"" (member.toJSON (member.make minimalInput));
-    expected = true;
+  testToJSONValueIncludesWan = {
+    expr = (member.toJSONValue (member.make minimalInput)).wan;
+    expected = "primary";
   };
 
   # ===== Defaults exposed =====

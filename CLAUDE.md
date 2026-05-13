@@ -78,11 +78,11 @@ script).
 
 ### API skeleton (pure-Nix lib)
 
-Every value type (`wan`, `probe`, `group`, `member`) implements the
-same skeleton — matches `nix-libnet`:
+Every value type (`wan`, `probe`, `group`, `member`) implements
+the same minimal skeleton:
 
 ```
-make / tryMake / is<T> / eq / compare / lt/le/gt/ge / min/max / toJSON / _type
+make / tryMake / is<T> / toJSONValue / _type
 ```
 
 Pure-function modules (`selector`, `marks`, `tables`, `config`,

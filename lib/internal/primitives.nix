@@ -5,10 +5,9 @@
   Sections:
     - Tagging       — `hasTag`, `ensureTag`
     - tryResult     — `tryOk`, `tryErr`
-    - Validation    — `check`, `parseOptional`, `isValidName`,
-                      `formatErrors`
-    - Ordering      — `mkOrdering`, `compareByString`,
-                      `orderingByString`
+    - Validation    — `check`, `tagError`, `parseOptional`,
+                      `partitionTry`, `isValidName`,
+                      `isPositiveInt`, `formatErrors`
 
   This module owns nothing type-specific. Each value type
   (probe, wan, …) owns its own `is<Type>` predicate and its
@@ -95,31 +94,6 @@
   error records into the canonical aggregated string
     `<ctx>: [<kind>] <msg>; [<kind2>] <msg2>; …`
   used by every `tryMake` failure path.
-
-  ===== mkOrdering =====
-
-  `mkOrdering compare`: derives `{lt; le; gt; ge; min; max;}` from
-  a `compare : T → T → -1|0|1` function. Returns the input
-  `compare` alongside the derived predicates. Eliminates the
-  per-type ordering-boilerplate block.
-
-  Note: `eq` is intentionally not derived — it's structural
-  equality (`==`), not order-based equivalence. The two agree for
-  value types with canonical `toJSON`, but conflating them blurs
-  intent.
-
-  ===== compareByString =====
-
-  `compareByString toString a b`: lex-compare via the supplied
-  stringifier. Useful for value types without a natural ordering —
-  JSON canonical form gives a stable, deterministic, round-trippable
-  total order.
-
-  ===== orderingByString =====
-
-  Convenience composition: `orderingByString toString = mkOrdering
-  (compareByString toString)` — what every value-type module calls
-  to get its ordering machinery in one line.
 */
 { lib }:
 let
@@ -170,31 +144,6 @@ let
   isValidName = s: builtins.isString s && builtins.match "[a-zA-Z][a-zA-Z0-9-]*" s != null;
 
   isPositiveInt = x: builtins.isInt x && x > 0;
-
-  mkOrdering = compare: {
-    inherit compare;
-    lt = a: b: compare a b == -1;
-    le = a: b: compare a b <= 0;
-    gt = a: b: compare a b == 1;
-    ge = a: b: compare a b >= 0;
-    min = a: b: if compare a b <= 0 then a else b;
-    max = a: b: if compare a b >= 0 then a else b;
-  };
-
-  compareByString =
-    toString: a: b:
-    let
-      sa = toString a;
-      sb = toString b;
-    in
-    if sa < sb then
-      -1
-    else if sa > sb then
-      1
-    else
-      0;
-
-  orderingByString = toString: mkOrdering (compareByString toString);
 in
 {
   inherit
@@ -209,8 +158,5 @@ in
     partitionTry
     isValidName
     isPositiveInt
-    mkOrdering
-    compareByString
-    orderingByString
     ;
 }

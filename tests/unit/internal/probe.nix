@@ -244,157 +244,17 @@ in
     expected = false;
   };
 
-  # ===== Equality =====
+  # ===== toJSONValue =====
 
-  testEqSameInput = {
-    expr = probe.eq (probe.make minimalInput) (probe.make minimalInput);
-    expected = true;
+  testToJSONValueIncludesTypeTag = {
+    expr = (probe.toJSONValue (probe.make minimalInput))._type;
+    expected = "probe";
   };
 
-  testEqEquivalentInputs = {
-    # Specifying all-defaults explicitly must equal the default-implied value.
-    expr = probe.eq (probe.make minimalInput) (probe.make (minimalInput // probe.defaults));
-    expected = true;
-  };
-
-  testEqDifferentTargets = {
-    expr = probe.eq (probe.make { targets = [ "1.1.1.1" ]; }) (probe.make { targets = [ "8.8.8.8" ]; });
-    expected = false;
-  };
-
-  testEqDifferentInterval = {
-    expr = probe.eq (probe.make minimalInput) (probe.make (minimalInput // { intervalMs = 250; }));
-    expected = false;
-  };
-
-  # ===== Comparison =====
-
-  testCompareEqualReturnsZero = {
-    expr = probe.compare (probe.make minimalInput) (probe.make minimalInput);
-    expected = 0;
-  };
-
-  testCompareIsDeterministic = {
-    # Same inputs → same compare result. Tests that toJSON is canonical.
-    expr =
-      let
-        a = probe.make minimalInput;
-        b = probe.make minimalInput;
-      in
-      [
-        (probe.compare a b)
-        (probe.compare a b)
-        (probe.compare a b)
-      ];
-    expected = [
-      0
-      0
-      0
-    ];
-  };
-
-  testCompareTotalOrderTrichotomy = {
-    # For distinct values, exactly one of {-1, 1} holds; never 0.
-    expr =
-      let
-        a = probe.make {
-          targets = [ "1.1.1.1" ];
-        };
-        b = probe.make {
-          targets = [ "8.8.8.8" ];
-        };
-        c = probe.compare a b;
-      in
-      c == -1 || c == 1;
-    expected = true;
-  };
-
-  testCompareAntisymmetry = {
-    expr =
-      let
-        a = probe.make {
-          targets = [ "1.1.1.1" ];
-        };
-        b = probe.make {
-          targets = [ "8.8.8.8" ];
-        };
-      in
-      probe.compare a b == -(probe.compare b a);
-    expected = true;
-  };
-
-  # ===== Derived ordering =====
-
-  testLtDerived = {
-    expr =
-      let
-        a = probe.make {
-          targets = [ "1.1.1.1" ];
-        };
-        b = probe.make {
-          targets = [ "8.8.8.8" ];
-        };
-      in
-      probe.lt a b == (probe.compare a b == -1);
-    expected = true;
-  };
-
-  testMinReturnsLesser = {
-    expr =
-      let
-        a = probe.make {
-          targets = [ "1.1.1.1" ];
-        };
-        b = probe.make {
-          targets = [ "8.8.8.8" ];
-        };
-      in
-      probe.min a b == (if probe.lt a b then a else b);
-    expected = true;
-  };
-
-  testMaxReturnsGreater = {
-    expr =
-      let
-        a = probe.make {
-          targets = [ "1.1.1.1" ];
-        };
-        b = probe.make {
-          targets = [ "8.8.8.8" ];
-        };
-      in
-      probe.max a b == (if probe.lt a b then b else a);
-    expected = true;
-  };
-
-  # ===== toJSON =====
-
-  testToJSONReturnsString = {
-    expr = builtins.isString (probe.toJSON (probe.make minimalInput));
-    expected = true;
-  };
-
-  testToJSONIncludesTypeTag = {
-    expr = pkgs.lib.hasInfix "\"_type\":\"probe\"" (probe.toJSON (probe.make minimalInput));
-    expected = true;
-  };
-
-  testToJSONStringifiesTargets = {
-    # Targets in JSON output are strings, not nested libnet structures.
-    expr = pkgs.lib.hasInfix "\"targets\":[\"1.1.1.1\"]" (
-      probe.toJSON (probe.make { targets = [ "1.1.1.1" ]; })
-    );
-    expected = true;
-  };
-
-  testToJSONDeterministic = {
-    expr =
-      let
-        a = probe.toJSON (probe.make minimalInput);
-        b = probe.toJSON (probe.make minimalInput);
-      in
-      a == b;
-    expected = true;
+  testToJSONValueStringifiesTargets = {
+    # Targets render as strings, not nested libnet structures.
+    expr = (probe.toJSONValue (probe.make { targets = [ "1.1.1.1" ]; })).targets;
+    expected = [ "1.1.1.1" ];
   };
 
   # ===== Error: probeNoTargets =====

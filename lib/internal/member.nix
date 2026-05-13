@@ -41,16 +41,10 @@
 
   `wan`, `weight`, `priority`.
 
-  ===== Equality and ordering =====
+  ===== Serialization =====
 
-  `eq` is structural attrset equality. `compare` derives from the
-  canonical JSON form via `primitives.orderingByString`.
-  `lt`/`le`/`gt`/`ge`/`min`/`max` derive from `compare`.
-
-  ===== toJSON =====
-
-  Returns a JSON string suitable for the daemon config. Keys are
-  sorted alphabetically by `builtins.toJSON`.
+  `toJSONValue` is the canonical attrset form embedded in
+  `group.toJSONValue` and through it in the daemon-config render.
 */
 {
   lib,
@@ -65,7 +59,6 @@ let
     check
     isValidName
     isPositiveInt
-    orderingByString
     ;
   formatErrors = internal.primitives.formatErrors "member.make";
 
@@ -143,40 +136,14 @@ let
       priority
       ;
   };
-
-  toJSON = m: builtins.toJSON (toJSONValue m);
-
-  # ===== Equality and ordering =====
-
-  eq = a: b: a == b;
-  inherit (orderingByString toJSON)
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
-    ;
 in
 {
   inherit
     make
     tryMake
     isMember
-    toJSON
     toJSONValue
     ;
   inherit wan weight priority;
-  inherit
-    eq
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
-    ;
   inherit defaults;
 }

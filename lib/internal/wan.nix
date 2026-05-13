@@ -60,12 +60,11 @@
   `{ v4 = true; v6 = false; }`), `probe` (the embedded probe
   value), `targets` (forwarded through the probe's accessor).
 
-  ===== Equality, ordering, toJSON =====
+  ===== Serialization =====
 
-  Same skeleton as probe: `eq` is structural; `compare` derives
-  from canonical JSON via `internal.types.orderingByString`;
-  `lt`/`le`/`gt`/`ge`/`min`/`max` derive from `compare`; `toJSON`
-  produces a daemon-consumable string.
+  `toJSONValue` is the canonical attrset form embedded in the
+  daemon-config JSON. Nested submodules embed via their own
+  `toJSONValue` rather than as nested JSON strings.
 */
 {
   lib,
@@ -80,7 +79,6 @@ let
     check
     parseOptional
     isValidName
-    orderingByString
     ;
   formatErrors = internal.primitives.formatErrors "wan.make";
   probe = internal.probe;
@@ -252,32 +250,14 @@ let
       v4 = if w.gateways.v4 == null then null else libnet.ipv4.toString w.gateways.v4;
       v6 = if w.gateways.v6 == null then null else libnet.ipv6.toString w.gateways.v6;
     };
-    # Embed the probe as a nested attrset, not a nested JSON string —
-    # `probe.toJSONValue` is exposed for exactly this case.
     probe = probe.toJSONValue w.probe;
   };
-
-  toJSON = w: builtins.toJSON (toJSONValue w);
-
-  # ===== Equality and ordering =====
-
-  eq = a: b: a == b;
-  inherit (orderingByString toJSON)
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
-    ;
 in
 {
   inherit
     make
     tryMake
     isWan
-    toJSON
     toJSONValue
     ;
   inherit
@@ -291,14 +271,4 @@ in
   # `probe` is renamed locally to avoid shadowing the module
   # argument inside the let-binding; exported under the public name.
   probe = probeOf;
-  inherit
-    eq
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
-    ;
 }

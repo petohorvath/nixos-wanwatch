@@ -18,6 +18,50 @@
         "url": "file:///home/dev/projects/nix-libnet"
       }
     },
+    "nftypes": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1778155077,
+        "narHash": "sha256-2N7V3u60WXYr+66PuNziUrbCifikHgaqBhyq3OTH+vk=",
+        "ref": "refs/heads/main",
+        "rev": "1fd7ab9619473fc4fb3dce0bbc94b0fc62a3ca0d",
+        "revCount": 45,
+        "type": "git",
+        "url": "file:///home/dev/projects/nix-nftypes"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/dev/projects/nix-nftypes"
+      }
+    },
+    "nftzones": {
+      "inputs": {
+        "libnet": [
+          "libnet"
+        ],
+        "nftypes": "nftypes",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1778586525,
+        "narHash": "sha256-Ggp+O3LPoY6/qf2gI3AKcxAC6ja5z+gDNU+S54YldVA=",
+        "ref": "refs/heads/main",
+        "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
+        "revCount": 100,
+        "type": "git",
+        "url": "file:///home/dev/projects/nix-nftzones"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///home/dev/projects/nix-nftzones"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1776169885,
@@ -53,6 +97,7 @@
     "root": {
       "inputs": {
         "libnet": "libnet",
+        "nftzones": "nftzones",
         "nixpkgs": "nixpkgs_2",
         "treefmt-nix": "treefmt-nix"
       }

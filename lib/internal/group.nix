@@ -49,16 +49,11 @@
   `mark`, `wans` (derived: list of WAN-name strings referenced by
   the group's members).
 
-  ===== Equality and ordering =====
+  ===== Serialization =====
 
-  `eq` is structural attrset equality. `compare` derives from the
-  canonical JSON form. `lt`/`le`/`gt`/`ge`/`min`/`max` derive from
-  `compare`.
-
-  ===== toJSON =====
-
-  Returns a JSON string. Members are embedded as nested objects via
-  `member.toJSONValue` rather than as nested JSON strings.
+  `toJSONValue` is the canonical attrset form embedded by
+  `config.render`. Members are nested via `member.toJSONValue`
+  rather than as nested JSON strings.
 */
 {
   lib,
@@ -75,7 +70,6 @@ let
     partitionTry
     isValidName
     isPositiveInt
-    orderingByString
     ;
   formatErrors = internal.primitives.formatErrors "group.make";
   inherit (internal) member;
@@ -228,28 +222,12 @@ let
       ;
     members = builtins.map member.toJSONValue g.members;
   };
-
-  toJSON = g: builtins.toJSON (toJSONValue g);
-
-  # ===== Equality and ordering =====
-
-  eq = a: b: a == b;
-  inherit (orderingByString toJSON)
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
-    ;
 in
 {
   inherit
     make
     tryMake
     isGroup
-    toJSON
     toJSONValue
     ;
   inherit
@@ -259,16 +237,6 @@ in
     table
     mark
     wans
-    ;
-  inherit
-    eq
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
     ;
   inherit defaults;
   # Exposed so `types/group.nix` can derive its `groupStrategy`

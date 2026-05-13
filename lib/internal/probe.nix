@@ -59,20 +59,11 @@
   (derived: set of family flags present in targets, e.g.
   `{ v4 = true; v6 = true; }`).
 
-  ===== Equality and ordering =====
+  ===== Serialization =====
 
-  `eq` is structural attrset equality. `compare` (and the derived
-  `lt`/`le`/`gt`/`ge`/`min`/`max`) is built from the canonical
-  JSON form via `internal.types.orderingByString` — there is no
-  natural ordering on Probes, so we pick one that's stable,
-  deterministic, and round-trippable.
-
-  ===== toJSON =====
-
-  Returns a JSON *string* (per PLAN §5.1 contract) suitable for the
-  daemon-config file. Targets are stringified back to their canonical
-  text form. Keys are sorted alphabetically by `builtins.toJSON`,
-  which makes the output content-addressable.
+  `toJSONValue` returns the canonical attrset form embedded in
+  `lib/internal/config.nix`'s daemon-config render. Targets are
+  stringified back to their canonical text form.
 */
 {
   lib,
@@ -88,7 +79,6 @@ let
     tagError
     partitionTry
     isPositiveInt
-    orderingByString
     ;
   formatErrors = internal.primitives.formatErrors "probe.make";
 
@@ -295,9 +285,9 @@ let
 
   # ===== Serialization =====
 
-  # Exposed for callers that need the JSON-shape attrset before
-  # serialization — e.g. `wan.toJSON` embeds the probe as a nested
-  # object rather than a nested JSON string.
+  # The JSON-shape attrset embedded by `wan.toJSONValue` and by
+  # `config.render`. Strings are libnet's canonical form so the
+  # rendered config is byte-stable across builds.
   toJSONValue = p: {
     inherit (p)
       _type
@@ -311,28 +301,12 @@ let
       ;
     targets = builtins.map libnet.ip.toString p.targets;
   };
-
-  toJSON = p: builtins.toJSON (toJSONValue p);
-
-  # ===== Equality and ordering =====
-
-  eq = a: b: a == b;
-  inherit (orderingByString toJSON)
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
-    ;
 in
 {
   inherit
     make
     tryMake
     isProbe
-    toJSON
     toJSONValue
     ;
   inherit
@@ -345,16 +319,6 @@ in
     hysteresis
     familyHealthPolicy
     families
-    ;
-  inherit
-    eq
-    compare
-    lt
-    le
-    gt
-    ge
-    min
-    max
     ;
   # Exposed for tests / introspection / module-option defaults.
   inherit defaults;

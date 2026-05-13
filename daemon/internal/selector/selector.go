@@ -27,8 +27,8 @@ import (
 var ErrUnknownStrategy = errors.New("selector: unknown strategy")
 
 // Group is the daemon-side view of a Group value. It mirrors the
-// JSON shape produced by `wanwatch.group.toJSON` so the daemon can
-// deserialize directly into this struct.
+// JSON shape produced by `wanwatch.group.toJSONValue` so the daemon
+// can deserialize directly into this struct.
 type Group struct {
 	Name     string   `json:"name"`
 	Strategy string   `json:"strategy"`
