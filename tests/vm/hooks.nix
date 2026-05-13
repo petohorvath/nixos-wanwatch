@@ -4,6 +4,9 @@
   hook saw the PLAN §5.5 env vars (WANWATCH_EVENT, _GROUP,
   _WAN_OLD/_NEW, _IFACE_OLD/_NEW, _GATEWAY_V4_OLD/_NEW,
   _GATEWAY_V6_OLD/_NEW, _FAMILIES, _TABLE, _MARK, _TS).
+
+  GATEWAY_V4/V6 env vars are emitted blank for now — they get
+  populated once the daemon's gateway-discovery cache lands.
 */
 {
   pkgs,
@@ -83,10 +86,7 @@ pkgs.testers.runNixOSTest {
         wans = {
           primary = {
             interface = "wan0";
-            gateways = {
-              v4 = "192.0.2.1";
-              v6 = "2001:db8::1";
-            };
+            pointToPoint = true;
             probe = {
               targets = [
                 "192.0.2.1"
@@ -102,10 +102,7 @@ pkgs.testers.runNixOSTest {
           };
           backup = {
             interface = "wan1";
-            gateways = {
-              v4 = "100.64.0.1";
-              v6 = "2001:db8:1::1";
-            };
+            pointToPoint = true;
             probe = {
               targets = [
                 "100.64.0.1"
@@ -182,15 +179,26 @@ pkgs.testers.runNixOSTest {
         "WANWATCH_WAN_NEW": "backup",
         "WANWATCH_IFACE_OLD": "wan0",
         "WANWATCH_IFACE_NEW": "wan1",
-        "WANWATCH_GATEWAY_V4_OLD": "192.0.2.1",
-        "WANWATCH_GATEWAY_V4_NEW": "100.64.0.1",
-        "WANWATCH_GATEWAY_V6_OLD": "2001:db8::1",
-        "WANWATCH_GATEWAY_V6_NEW": "2001:db8:1::1",
     }
     for key, want in expectations.items():
         assert env_dict.get(key) == want, (
             f"{key} = {env_dict.get(key)!r}, want {want!r}\n"
             f"full env:\n{captured}"
+        )
+
+    # GATEWAY_V4/V6 env vars are emitted, but are blank under
+    # pointToPoint (no gateway) and remain blank for non-PtP WANs
+    # until the discovery cache wires them up.
+    gateway_keys = [
+        "WANWATCH_GATEWAY_V4_OLD",
+        "WANWATCH_GATEWAY_V4_NEW",
+        "WANWATCH_GATEWAY_V6_OLD",
+        "WANWATCH_GATEWAY_V6_NEW",
+    ]
+    for key in gateway_keys:
+        assert key in env_dict, f"{key} not emitted; full env:\n{captured}"
+        assert env_dict[key] == "", (
+            f"{key} = {env_dict[key]!r}, want empty (gateway discovery pending)"
         )
 
     # WANWATCH_FAMILIES is set-valued (comma-joined), not pinned

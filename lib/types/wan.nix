@@ -8,18 +8,18 @@
                     derived read-only from the attribute key.
     wanInterface  — `libnet.types.interfaceName` (kernel-`dev_valid_name`
                     parity)
-    wanGateways   — submodule { v4 = nullOr libnet.types.ipv4;
-                                v6 = nullOr libnet.types.ipv6; }
     wan           — top-level submodule composing probe
 
-  The "at least one gateway" and family-coupling invariants from
-  PLAN §5.4 are cross-field — they can't be expressed at this level
-  and are enforced by `internal.wan.tryMake` at value-construction
-  time.
+  The WAN serves whichever families its `probe.targets` cover —
+  there is no separate gateway / family declaration. The daemon
+  discovers the gateway at runtime from the kernel's main routing
+  table (`pointToPoint = false`), or installs a scope-link default
+  route (`pointToPoint = true`) for PPP / WireGuard / tun-style
+  interfaces with no broadcast next-hop.
 
   Takes `probeTypes` (the result of `import ./probe.nix { … }`) so
   the wan submodule can embed `probeTypes.probe` for the nested
-  `probe` field. Avoids re-importing probe.nix internally.
+  `probe` field.
 */
 {
   lib,
@@ -33,29 +33,6 @@ let
 
   wanName = primitives.identifier;
   wanInterface = libnet.types.interfaceName;
-
-  wanGateways = types.submodule {
-    options = {
-      v4 = mkOption {
-        type = types.nullOr libnet.types.ipv4;
-        default = null;
-        example = "192.0.2.1";
-        description = ''
-          Optional IPv4 gateway. Null means no v4 default route is
-          managed for this WAN.
-        '';
-      };
-      v6 = mkOption {
-        type = types.nullOr libnet.types.ipv6;
-        default = null;
-        example = "2001:db8::1";
-        description = ''
-          Optional IPv6 gateway. Null means no v6 default route is
-          managed for this WAN.
-        '';
-      };
-    };
-  };
 
   wan = types.submodule (
     { name, ... }:
@@ -79,21 +56,26 @@ let
             whitespace).
           '';
         };
-        gateways = mkOption {
-          type = wanGateways;
-          default = { };
+        pointToPoint = mkOption {
+          type = types.bool;
+          default = false;
+          example = true;
           description = ''
-            Per-family gateways. At least one of `v4` / `v6` must
-            be non-null — enforced by `internal.wan.tryMake` at
-            value-construction time, not at the type level.
+            When true the daemon installs scope-link default routes
+            for this WAN — appropriate for PPP, WireGuard, GRE,
+            tun, and any other link with no broadcast next-hop.
+            When false (default) the daemon discovers the
+            interface's current default-route gateway via netlink
+            from the kernel's main routing table.
           '';
         };
         probe = mkOption {
           type = probeTypes.probe;
           description = ''
-            Probe configuration for this WAN. Family-coupling
-            (every declared gateway family has at least one matching
-            target) is enforced by `internal.wan.tryMake`.
+            Probe configuration for this WAN. The families the
+            WAN handles are derived from `probe.targets`: a v4
+            literal means v4 is served; a v6 literal means v6 is
+            served.
           '';
         };
       };
@@ -104,7 +86,6 @@ in
   inherit
     wanName
     wanInterface
-    wanGateways
     wan
     ;
 }

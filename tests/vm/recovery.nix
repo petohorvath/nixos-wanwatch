@@ -57,7 +57,7 @@ pkgs.testers.runNixOSTest {
         wans = {
           primary = {
             interface = "wan0";
-            gateways.v4 = "192.0.2.1";
+            pointToPoint = true;
             probe = {
               targets = [ "192.0.2.1" ];
               intervalMs = 600000;
@@ -70,7 +70,7 @@ pkgs.testers.runNixOSTest {
           };
           backup = {
             interface = "wan1";
-            gateways.v4 = "100.64.0.1";
+            pointToPoint = true;
             probe = {
               targets = [ "100.64.0.1" ];
               intervalMs = 600000;

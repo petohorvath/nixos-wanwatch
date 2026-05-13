@@ -47,14 +47,12 @@ let
   primaryWan = wan.make {
     name = "primary";
     interface = "eth0";
-    gateways.v4 = "192.0.2.1";
     probe.targets = [ "1.1.1.1" ];
   };
 
   backupWan = wan.make {
     name = "backup";
     interface = "wwan0";
-    gateways.v4 = "100.64.0.1";
     probe.targets = [ "8.8.8.8" ];
   };
 

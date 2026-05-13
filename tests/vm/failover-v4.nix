@@ -69,7 +69,7 @@ pkgs.testers.runNixOSTest {
         wans = {
           primary = {
             interface = "wan0";
-            gateways.v4 = "192.0.2.1";
+            pointToPoint = true;
             probe = {
               targets = [ "192.0.2.1" ];
               # Stretch the probe loop so cooked verdicts don't
@@ -85,7 +85,7 @@ pkgs.testers.runNixOSTest {
           };
           backup = {
             interface = "wan1";
-            gateways.v4 = "100.64.0.1";
+            pointToPoint = true;
             probe = {
               targets = [ "100.64.0.1" ];
               intervalMs = 600000;
@@ -139,14 +139,14 @@ pkgs.testers.runNixOSTest {
     #    carrier-up members). Cold-start health is carrier-only.
     wait_for_active(router, "primary")
 
-    # 2. Default route in the group's table points at primary's
-    #    gateway out of wan0.
+    # 2. Default route in the group's table is a scope-link route
+    #    out of wan0 (point-to-point: no gateway, no `via`).
     table = router.succeed(
         "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
     ).strip()
     route = router.succeed(f"ip -4 route show table {table}")
-    assert "192.0.2.1" in route and "wan0" in route, (
-        f"initial table {table} route mismatch:\n{route}"
+    assert "wan0" in route and "via" not in route, (
+        f"initial table {table} route mismatch (want scope-link via wan0):\n{route}"
     )
 
     # 3. Induce carrier-down on the primary. ip link set <if>
@@ -160,10 +160,10 @@ pkgs.testers.runNixOSTest {
     #    apply latency — single-digit seconds.
     wait_for_active(router, "backup")
 
-    # 5. New default route points at backup's gateway out of wan1.
+    # 5. New default route is a scope-link route out of wan1.
     route = router.succeed(f"ip -4 route show table {table}")
-    assert "100.64.0.1" in route and "wan1" in route, (
-        f"failover-table {table} route mismatch:\n{route}"
+    assert "wan1" in route and "via" not in route, (
+        f"failover-table {table} route mismatch (want scope-link via wan1):\n{route}"
     )
 
     # 6. wanwatch_group_decisions_total has incremented for the

@@ -23,27 +23,29 @@ func testDaemon(t *testing.T, cfg *config.Config) *daemon {
 	return newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-func sptr(s string) *string { return &s }
-
 func testCfg() *config.Config {
 	return &config.Config{
 		Wans: map[string]config.Wan{
 			"primary": {
 				Name:      "primary",
 				Interface: "eth0",
-				Gateways:  config.Gateways{V4: sptr("192.0.2.1"), V6: sptr("2001:db8::1")},
+				Probe: config.Probe{
+					Targets: []string{"1.1.1.1", "2606:4700:4700::1111"},
+				},
 			},
 			"backup": {
 				Name:      "backup",
 				Interface: "wwan0",
-				// v4-only WAN — no v6 gateway, so no v6 prober.
-				Gateways: config.Gateways{V4: sptr("100.64.0.1")},
+				// v4-only WAN — only a v4 probe target.
+				Probe: config.Probe{
+					Targets: []string{"8.8.8.8"},
+				},
 			},
 		},
 	}
 }
 
-func TestIdentKeysForOnlyEmitsFamiliesWithGateway(t *testing.T) {
+func TestIdentKeysForFromProbeTargets(t *testing.T) {
 	t.Parallel()
 	keys := identKeysFor(testCfg())
 	// Sorted by wan name: backup (v4) < primary (v4, v6) ⇒ 3 keys.

@@ -60,7 +60,7 @@ pkgs.testers.runNixOSTest {
         wans = {
           primary = {
             interface = "wan0";
-            gateways.v6 = "2001:db8::1";
+            pointToPoint = true;
             probe = {
               targets = [ "2001:db8::1" ];
               intervalMs = 600000;
@@ -73,7 +73,7 @@ pkgs.testers.runNixOSTest {
           };
           backup = {
             interface = "wan1";
-            gateways.v6 = "2001:db8:1::1";
+            pointToPoint = true;
             probe = {
               targets = [ "2001:db8:1::1" ];
               intervalMs = 600000;
@@ -126,8 +126,8 @@ pkgs.testers.runNixOSTest {
         "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
     ).strip()
     route = router.succeed(f"ip -6 route show table {table}")
-    assert "2001:db8::1" in route and "wan0" in route, (
-        f"initial v6 table {table} route mismatch:\n{route}"
+    assert "wan0" in route and "via" not in route, (
+        f"initial v6 table {table} route mismatch (want scope-link via wan0):\n{route}"
     )
 
     if router.execute("ip link set wan0 carrier off")[0] != 0:
@@ -136,8 +136,8 @@ pkgs.testers.runNixOSTest {
     wait_for_active(router, "backup")
 
     route = router.succeed(f"ip -6 route show table {table}")
-    assert "2001:db8:1::1" in route and "wan1" in route, (
-        f"failover v6 table {table} route mismatch:\n{route}"
+    assert "wan1" in route and "via" not in route, (
+        f"failover v6 table {table} route mismatch (want scope-link via wan1):\n{route}"
     )
   '';
 }

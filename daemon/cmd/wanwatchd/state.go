@@ -97,13 +97,14 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 			// probe loop.
 			healthy: true,
 		}
-		if wan.Gateways.V4 != nil {
+		fams := familiesFromTargets(wan.Probe.Targets)
+		if fams.v4 {
 			ws.families[probe.FamilyV4] = &familyState{
 				family: probe.FamilyV4,
 				hyst:   selector.NewHysteresisState(),
 			}
 		}
-		if wan.Gateways.V6 != nil {
+		if fams.v6 {
 			ws.families[probe.FamilyV6] = &familyState{
 				family: probe.FamilyV6,
 				hyst:   selector.NewHysteresisState(),
@@ -257,10 +258,11 @@ func (d *daemon) recomputeGroup(g *groupState, reason decisionReason) {
 	d.runHooks(g, old, sel.Active)
 }
 
-// applyRoutes writes the default route in each family the new
-// active member has a gateway in. Families it doesn't have a
-// gateway in are left untouched per PLAN §5.5 (retain vs clear is
-// a v0.2 knob).
+// applyRoutes writes the default route per probed family of the
+// new active WAN. PointToPoint WANs get scope-link routes (no
+// gateway needed). Non-PtP WANs require a gateway discovered from
+// the kernel's main routing table — until that lookup is wired
+// (commit 3), the non-PtP path logs and skips.
 func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 	ws, ok := d.wans[activeWan]
 	if !ok {
@@ -272,19 +274,23 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "rule_install").Inc()
 		return
 	}
-	for _, fam := range probe.AllFamilies {
-		gw := gatewayFor(ws.cfg, fam)
-		if gw == nil {
-			continue
-		}
+	for fam := range ws.families {
 		famLabel := fam.String()
-		started := time.Now()
-		err := apply.WriteDefault(apply.DefaultRoute{
+		route := apply.DefaultRoute{
 			Family:  toApplyFamily(fam),
 			Table:   g.cfg.Table,
-			Gateway: gw,
 			IfIndex: ifindex,
-		})
+		}
+		switch {
+		case ws.cfg.PointToPoint:
+			route.PointToPoint = true
+		default:
+			d.logger.Warn("gateway discovery not yet wired; skipping non-pointToPoint route",
+				"group", g.cfg.Name, "wan", activeWan, "family", famLabel)
+			continue
+		}
+		started := time.Now()
+		err := apply.WriteDefault(route)
 		d.metrics.ApplyRouteDuration.WithLabelValues(g.cfg.Name, famLabel).Observe(time.Since(started).Seconds())
 		if err != nil {
 			d.logger.Error("route write", "group", g.cfg.Name, "family", famLabel, "err", err)
@@ -353,10 +359,9 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 		WanNew:   strPtr(new_),
 		IfaceOld: ifaceFor(d.wans, old),
 		IfaceNew: ifaceFor(d.wans, new_),
-		GwV4Old:  gwStr(d.wans, old, probe.FamilyV4),
-		GwV4New:  gwStr(d.wans, new_, probe.FamilyV4),
-		GwV6Old:  gwStr(d.wans, old, probe.FamilyV6),
-		GwV6New:  gwStr(d.wans, new_, probe.FamilyV6),
+		// Gateway env vars are populated by the discovery cache —
+		// left blank until commit 3 wires it. PointToPoint WANs
+		// will always have these blank.
 		Families: probedFamiliesFor(d.wans, new_),
 		Table:    g.cfg.Table,
 		Mark:     g.cfg.Mark,
@@ -393,32 +398,6 @@ func toApplyFamily(f probe.Family) apply.Family {
 	return apply.FamilyV4
 }
 
-// gatewayString returns the textual gateway for `w` in `fam`, or
-// the empty string when the WAN has no gateway in that family. The
-// config stores gateways as strings, so this is the canonical form;
-// gatewayFor parses it into net.IP for the routing-table writer.
-func gatewayString(w config.Wan, fam probe.Family) string {
-	switch fam {
-	case probe.FamilyV4:
-		if w.Gateways.V4 != nil {
-			return *w.Gateways.V4
-		}
-	case probe.FamilyV6:
-		if w.Gateways.V6 != nil {
-			return *w.Gateways.V6
-		}
-	}
-	return ""
-}
-
-func gatewayFor(w config.Wan, fam probe.Family) net.IP {
-	s := gatewayString(w, fam)
-	if s == "" {
-		return nil
-	}
-	return net.ParseIP(s)
-}
-
 func interfaceIndex(name string) (int, error) {
 	iface, err := net.InterfaceByName(name)
 	if err != nil {
@@ -435,17 +414,6 @@ func ifaceFor(wans map[string]*wanState, name *string) string {
 		return w.cfg.Interface
 	}
 	return ""
-}
-
-func gwStr(wans map[string]*wanState, name *string, fam probe.Family) string {
-	if name == nil {
-		return ""
-	}
-	w, ok := wans[*name]
-	if !ok {
-		return ""
-	}
-	return gatewayString(w.cfg, fam)
 }
 
 func probedFamiliesFor(wans map[string]*wanState, name *string) []string {

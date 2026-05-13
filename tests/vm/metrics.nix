@@ -48,7 +48,7 @@ pkgs.testers.runNixOSTest {
         enable = true;
         wans.primary = {
           interface = "wan0";
-          gateways.v4 = "192.0.2.1";
+          pointToPoint = true;
           probe = {
             targets = [ "192.0.2.1" ];
             intervalMs = 600000;

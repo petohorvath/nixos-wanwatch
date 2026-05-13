@@ -25,7 +25,9 @@ pkgs.testers.runNixOSTest {
   # nodes = { isp; router; } sorted alphabetically:
   #   isp    → 192.168.1.1
   #   router → 192.168.1.2
-  # Pinning the daemon's gateway to 192.168.1.1 matches that.
+  # The router probes 192.168.1.1 (isp) over the on-link /24; no
+  # default-route gateway is needed because pointToPoint installs
+  # a scope-link route out of eth1.
   nodes.isp =
     { lib, ... }:
     {
@@ -46,10 +48,7 @@ pkgs.testers.runNixOSTest {
         enable = true;
         wans.uplink = {
           interface = "eth1";
-          gateways = {
-            v4 = "192.168.1.1";
-            v6 = "fc00::1";
-          };
+          pointToPoint = true;
           probe = {
             targets = [
               "192.168.1.1"

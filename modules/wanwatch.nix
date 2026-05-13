@@ -12,7 +12,6 @@
       enable = true;
       wans.primary = {
         interface = "eth0";
-        gateways.v4 = "192.0.2.1";
         probe.targets = [ "1.1.1.1" ];
       };
       groups.home-uplink.members = [

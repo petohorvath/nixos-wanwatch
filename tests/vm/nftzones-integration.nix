@@ -75,7 +75,7 @@ pkgs.testers.runNixOSTest {
         enable = true;
         wans.primary = {
           interface = "wan0";
-          gateways.v4 = "192.0.2.1";
+          pointToPoint = true;
           probe = {
             targets = [ "192.0.2.1" ];
             intervalMs = 600000;
@@ -141,10 +141,10 @@ pkgs.testers.runNixOSTest {
     assert v6_rules.strip(), f"v6 ip rule for fwmark {mark} missing"
 
     # 3. The daemon wrote the default route into the group's table
-    # via primary's gateway (cold-start carrier-driven Selection).
+    # — a scope-link route out of wan0 (point-to-point, no gateway).
     route = router.succeed(f"ip -4 route show table {table}")
-    assert "192.0.2.1" in route and "wan0" in route, (
-        f"table {table} default route mismatch:\n{route}"
+    assert "wan0" in route and "via" not in route, (
+        f"table {table} default route mismatch (want scope-link via wan0):\n{route}"
     )
   '';
 }

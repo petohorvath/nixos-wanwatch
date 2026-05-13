@@ -51,21 +51,17 @@ type Global struct {
 // Wan is the daemon-side view of a WAN, mirroring
 // `wanwatch.wan.toJSONValue`. The selector consumes only the wan
 // *name* (via Member.Wan); this struct's other fields drive the
-// probe and apply layers in Pass 4+.
+// probe and apply layers.
+//
+// PointToPoint = true selects scope-link routes for this WAN
+// (PPP / WireGuard / GRE / tun-style links with no broadcast
+// next-hop). PointToPoint = false leaves the daemon to discover
+// the gateway via netlink from the kernel's main routing table.
 type Wan struct {
-	Name      string   `json:"name"`
-	Interface string   `json:"interface"`
-	Gateways  Gateways `json:"gateways"`
-	Probe     Probe    `json:"probe"`
-}
-
-// Gateways carries the per-family gateway IPs, as strings (Nix
-// libnet convention — option values stay as strings; parsing into
-// `net.IP` happens at the apply layer, where the family is
-// needed by `netlink`).
-type Gateways struct {
-	V4 *string `json:"v4"`
-	V6 *string `json:"v6"`
+	Name         string `json:"name"`
+	Interface    string `json:"interface"`
+	PointToPoint bool   `json:"pointToPoint"`
+	Probe        Probe  `json:"probe"`
 }
 
 // Probe mirrors `wanwatch.probe.toJSONValue`.
@@ -148,8 +144,8 @@ func (c *Config) Validate() error {
 		if wan.Interface == "" {
 			return invalidf("wans[%q].interface is empty", key)
 		}
-		if wan.Gateways.V4 == nil && wan.Gateways.V6 == nil {
-			return invalidf("wans[%q] has no gateways", key)
+		if len(wan.Probe.Targets) == 0 {
+			return invalidf("wans[%q].probe.targets is empty", key)
 		}
 	}
 

@@ -45,8 +45,8 @@
 
   `parseOptional parser input`: null-passthrough adapter. When
   `input` is null, returns `tryOk null`. Otherwise delegates to
-  `parser input`. Designed for optional fields like
-  `gateways.{v4,v6}` where either may be absent.
+  `parser input`. Used by parsers wrapping optional fields where
+  the absence of a value is itself a valid state.
 
   ===== isValidName =====
 

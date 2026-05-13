@@ -6,9 +6,9 @@
   isolation; at least one multi-violation case for aggregated reporting;
   the §5.1 API skeleton (`make` / `tryMake` / `toJSONValue`) exercised.
 
-  Family-coupling invariant (PLAN §5.4) gets its own block of tests:
-  each of the five error kinds in isolation plus positive cases for
-  every topology (v4-only / v6-only / dual-stack).
+  Family derivation: `wan.families` now reflects the embedded probe's
+  families (derived from `probe.targets`). There is no separate family
+  declaration on the WAN — see lib/internal/wan.nix header.
 */
 { pkgs, libnet, ... }:
 let
@@ -22,15 +22,12 @@ let
   inherit (helpers) evalThrows errorMatches;
   tryError = helpers.tryError wan;
 
-  # Valid baselines for each topology.
+  # Valid baselines. Topology is now determined entirely by
+  # probe.targets — no separate gateway declaration.
 
   dualStackInput = {
     name = "primary";
     interface = "eth0";
-    gateways = {
-      v4 = "192.0.2.1";
-      v6 = "2001:db8::1";
-    };
     probe = {
       targets = [
         "1.1.1.1"
@@ -42,15 +39,20 @@ let
   v4OnlyInput = {
     name = "primary";
     interface = "eth0";
-    gateways.v4 = "192.0.2.1";
     probe.targets = [ "1.1.1.1" ];
   };
 
   v6OnlyInput = {
     name = "primary";
     interface = "eth0";
-    gateways.v6 = "2001:db8::1";
     probe.targets = [ "2606:4700:4700::1111" ];
+  };
+
+  ptpInput = {
+    name = "vpn";
+    interface = "wg0";
+    pointToPoint = true;
+    probe.targets = [ "1.1.1.1" ];
   };
 in
 {
@@ -62,12 +64,12 @@ in
   };
 
   testMakeV4OnlyAccepted = {
-    expr = (wan.make v4OnlyInput).gateways.v4 != null;
+    expr = (wan.tryMake v4OnlyInput).success;
     expected = true;
   };
 
   testMakeV6OnlyAccepted = {
-    expr = (wan.make v6OnlyInput).gateways.v6 != null;
+    expr = (wan.tryMake v6OnlyInput).success;
     expected = true;
   };
 
@@ -81,27 +83,19 @@ in
     expected = "eth0";
   };
 
-  # ===== Accessors =====
+  # ===== pointToPoint field =====
 
-  testGatewayV4Parsed = {
-    expr = libnet.ip.isIpv4 (wan.make dualStackInput).gateways.v4;
+  testPointToPointDefaultsToFalse = {
+    expr = (wan.make dualStackInput).pointToPoint;
+    expected = false;
+  };
+
+  testPointToPointAcceptsTrue = {
+    expr = (wan.make ptpInput).pointToPoint;
     expected = true;
   };
 
-  testGatewayV6Parsed = {
-    expr = libnet.ip.isIpv6 (wan.make dualStackInput).gateways.v6;
-    expected = true;
-  };
-
-  testGatewayV4NullWhenV6Only = {
-    expr = (wan.make v6OnlyInput).gateways.v4;
-    expected = null;
-  };
-
-  testGatewayV6NullWhenV4Only = {
-    expr = (wan.make v4OnlyInput).gateways.v6;
-    expected = null;
-  };
+  # ===== families accessor — derived from probe.targets =====
 
   testFamiliesDualStack = {
     expr = wan.families (wan.make dualStackInput);
@@ -189,153 +183,26 @@ in
     expected = true;
   };
 
-  # ===== Error: wanInvalidGatewayV4 =====
+  # ===== Error: wanInvalidPointToPoint =====
 
-  testRejectsInvalidV4Gateway = {
-    expr = errorMatches "wanInvalidGatewayV4" (
-      tryError (
-        dualStackInput
-        // {
-          gateways = dualStackInput.gateways // {
-            v4 = "not.an.ip.addr";
-          };
-        }
-      )
+  testRejectsNonBoolPointToPoint = {
+    expr = errorMatches "wanInvalidPointToPoint" (
+      tryError (dualStackInput // { pointToPoint = "yes"; })
     );
     expected = true;
   };
 
-  testRejectsV6AddressAsV4Gateway = {
-    expr = errorMatches "wanInvalidGatewayV4" (
-      tryError (
-        dualStackInput
-        // {
-          gateways = dualStackInput.gateways // {
-            v4 = "2001:db8::1";
-          };
-        }
-      )
+  testRejectsNullPointToPoint = {
+    expr = errorMatches "wanInvalidPointToPoint" (
+      tryError (dualStackInput // { pointToPoint = null; })
     );
     expected = true;
   };
 
-  # ===== Error: wanInvalidGatewayV6 =====
-
-  testRejectsInvalidV6Gateway = {
-    expr = errorMatches "wanInvalidGatewayV6" (
-      tryError (
-        dualStackInput
-        // {
-          gateways = dualStackInput.gateways // {
-            v6 = "not::an::ip";
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  testRejectsV4AddressAsV6Gateway = {
-    expr = errorMatches "wanInvalidGatewayV6" (
-      tryError (
-        dualStackInput
-        // {
-          gateways = dualStackInput.gateways // {
-            v6 = "192.0.2.1";
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Error: wanInvalidProbe =====
+  # ===== Error: wanInvalidProbe (forwarded from probe.tryMake) =====
 
   testForwardsProbeError = {
     expr = errorMatches "wanInvalidProbe" (tryError (dualStackInput // { probe.targets = [ ]; }));
-    expected = true;
-  };
-
-  # ===== Error: wanNoGateways =====
-
-  testRejectsBothGatewaysNull = {
-    expr = errorMatches "wanNoGateways" (
-      tryError (
-        dualStackInput
-        // {
-          gateways = { };
-          probe.targets = [ "1.1.1.1" ];
-        }
-      )
-    );
-    expected = true;
-  };
-
-  testRejectsBothGatewaysExplicitlyNull = {
-    expr = errorMatches "wanNoGateways" (
-      tryError (
-        dualStackInput
-        // {
-          gateways = {
-            v4 = null;
-            v6 = null;
-          };
-          probe.targets = [ "1.1.1.1" ];
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Family-coupling: wanV4GatewayNoTargets =====
-
-  testRejectsV4GatewayWithoutV4Target = {
-    expr = errorMatches "wanV4GatewayNoTargets" (
-      tryError (dualStackInput // { probe.targets = [ "2606:4700:4700::1111" ]; })
-    );
-    expected = true;
-  };
-
-  # ===== Family-coupling: wanV6GatewayNoTargets =====
-
-  testRejectsV6GatewayWithoutV6Target = {
-    expr = errorMatches "wanV6GatewayNoTargets" (
-      tryError (dualStackInput // { probe.targets = [ "1.1.1.1" ]; })
-    );
-    expected = true;
-  };
-
-  # ===== Family-coupling: wanV4TargetNoGateway =====
-
-  testRejectsV4TargetWithoutV4Gateway = {
-    expr = errorMatches "wanV4TargetNoGateway" (
-      tryError (
-        v6OnlyInput
-        // {
-          probe.targets = [
-            "1.1.1.1"
-            "2606:4700:4700::1111"
-          ];
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Family-coupling: wanV6TargetNoGateway =====
-
-  testRejectsV6TargetWithoutV6Gateway = {
-    expr = errorMatches "wanV6TargetNoGateway" (
-      tryError (
-        v4OnlyInput
-        // {
-          probe.targets = [
-            "1.1.1.1"
-            "2606:4700:4700::1111"
-          ];
-        }
-      )
-    );
     expected = true;
   };
 
@@ -348,37 +215,16 @@ in
         err = tryError {
           name = "1bad"; # wanInvalidName
           interface = "eth 0"; # wanInvalidInterface
-          gateways.v4 = "not-an-ip"; # wanInvalidGatewayV4
+          pointToPoint = "yes"; # wanInvalidPointToPoint
           probe.targets = [ "1.1.1.1" ]; # otherwise valid probe
         };
         kinds = [
           "wanInvalidName"
           "wanInvalidInterface"
-          "wanInvalidGatewayV4"
+          "wanInvalidPointToPoint"
         ];
       in
       builtins.all (k: errorMatches k err) kinds;
-    expected = true;
-  };
-
-  testFamilyCouplingSkippedWhenGatewayInvalid = {
-    # When the v4 gateway fails to parse, the family-coupling check
-    # is skipped — we can't reason about a malformed input. The
-    # only error reported should be wanInvalidGatewayV4.
-    expr =
-      let
-        err = tryError (
-          dualStackInput
-          // {
-            gateways = {
-              v4 = "not-an-ip";
-              v6 = "2001:db8::1";
-            };
-            probe.targets = [ "2606:4700:4700::1111" ]; # no v4 target
-          }
-        );
-      in
-      errorMatches "wanInvalidGatewayV4" err && !(errorMatches "wanV4GatewayNoTargets" err);
     expected = true;
   };
 
@@ -389,19 +235,31 @@ in
     expected = "primary";
   };
 
-  testToJSONValueStringifiesGatewayV4 = {
-    expr = (wan.toJSONValue (wan.make dualStackInput)).gateways.v4;
-    expected = "192.0.2.1";
+  testToJSONValueIncludesInterface = {
+    expr = (wan.toJSONValue (wan.make dualStackInput)).interface;
+    expected = "eth0";
   };
 
-  testToJSONValueEmitsNullForMissingFamily = {
-    expr = (wan.toJSONValue (wan.make v4OnlyInput)).gateways.v6;
-    expected = null;
+  testToJSONValueIncludesPointToPointFalse = {
+    expr = (wan.toJSONValue (wan.make dualStackInput)).pointToPoint;
+    expected = false;
+  };
+
+  testToJSONValueIncludesPointToPointTrue = {
+    expr = (wan.toJSONValue (wan.make ptpInput)).pointToPoint;
+    expected = true;
   };
 
   testToJSONValueEmbedsProbeAsNestedAttrset = {
     expr = builtins.isAttrs (wan.toJSONValue (wan.make dualStackInput)).probe;
     expected = true;
+  };
+
+  testToJSONValueOmitsGatewaysField = {
+    # API break: gateway info no longer lives in config — it's
+    # discovered by the daemon at runtime via netlink.
+    expr = (wan.toJSONValue (wan.make dualStackInput)) ? gateways;
+    expected = false;
   };
 
   # ===== tryMake contract =====

@@ -4,6 +4,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // validRoute is the canonical happy-path input — tests mutate
@@ -101,6 +103,14 @@ func TestValidateDefaultRouteRejects(t *testing.T) {
 			},
 			wantSub: "is v4 but family=v6",
 		},
+		{
+			name: "pointToPoint with gateway",
+			mutate: func(d *DefaultRoute) {
+				d.PointToPoint = true
+				// Gateway still set from validRoute() — should reject.
+			},
+			wantSub: "pointToPoint route must have nil Gateway",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,5 +125,35 @@ func TestValidateDefaultRouteRejects(t *testing.T) {
 				t.Errorf("err = %q, want substring %q", err.Error(), tc.wantSub)
 			}
 		})
+	}
+}
+
+func TestValidateDefaultRouteAcceptsPointToPoint(t *testing.T) {
+	t.Parallel()
+	d := DefaultRoute{
+		Family:       FamilyV4,
+		Table:        100,
+		IfIndex:      3,
+		PointToPoint: true,
+	}
+	if err := validateDefaultRoute(d); err != nil {
+		t.Errorf("validateDefaultRoute(ptp) = %v, want nil", err)
+	}
+}
+
+func TestBuildRouteEmitsScopeLinkForPointToPoint(t *testing.T) {
+	t.Parallel()
+	d := DefaultRoute{
+		Family:       FamilyV4,
+		Table:        100,
+		IfIndex:      3,
+		PointToPoint: true,
+	}
+	got := buildRoute(d)
+	if got.Gw != nil {
+		t.Errorf("Gw = %v, want nil under pointToPoint", got.Gw)
+	}
+	if int(got.Scope) != unix.RT_SCOPE_LINK {
+		t.Errorf("Scope = %d, want RT_SCOPE_LINK (%d)", got.Scope, unix.RT_SCOPE_LINK)
 	}
 }

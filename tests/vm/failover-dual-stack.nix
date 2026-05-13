@@ -1,7 +1,8 @@
 /*
-  failover-dual-stack — both v4 and v6 gateways per WAN. Carrier
-  down on primary triggers the switch; both family routes in the
-  group's table update atomically (one Decision, two route writes).
+  failover-dual-stack — each WAN serves both families (v4 and v6
+  probe targets). Carrier down on primary triggers the switch; both
+  family routes in the group's table update atomically (one Decision,
+  two route writes).
 */
 {
   pkgs,
@@ -66,10 +67,7 @@ pkgs.testers.runNixOSTest {
         wans = {
           primary = {
             interface = "wan0";
-            gateways = {
-              v4 = "192.0.2.1";
-              v6 = "2001:db8::1";
-            };
+            pointToPoint = true;
             probe = {
               targets = [
                 "192.0.2.1"
@@ -85,10 +83,7 @@ pkgs.testers.runNixOSTest {
           };
           backup = {
             interface = "wan1";
-            gateways = {
-              v4 = "100.64.0.1";
-              v6 = "2001:db8:1::1";
-            };
+            pointToPoint = true;
             probe = {
               targets = [
                 "100.64.0.1"
@@ -145,8 +140,8 @@ pkgs.testers.runNixOSTest {
     ).strip()
     v4 = router.succeed(f"ip -4 route show table {table}")
     v6 = router.succeed(f"ip -6 route show table {table}")
-    assert "192.0.2.1" in v4 and "wan0" in v4, f"initial v4 table:\n{v4}"
-    assert "2001:db8::1" in v6 and "wan0" in v6, f"initial v6 table:\n{v6}"
+    assert "wan0" in v4 and "via" not in v4, f"initial v4 table (want scope-link via wan0):\n{v4}"
+    assert "wan0" in v6 and "via" not in v6, f"initial v6 table (want scope-link via wan0):\n{v6}"
 
     if router.execute("ip link set wan0 carrier off")[0] != 0:
         router.succeed("ip link set wan0 down")
@@ -155,7 +150,7 @@ pkgs.testers.runNixOSTest {
 
     v4 = router.succeed(f"ip -4 route show table {table}")
     v6 = router.succeed(f"ip -6 route show table {table}")
-    assert "100.64.0.1" in v4 and "wan1" in v4, f"failover v4 table:\n{v4}"
-    assert "2001:db8:1::1" in v6 and "wan1" in v6, f"failover v6 table:\n{v6}"
+    assert "wan1" in v4 and "via" not in v4, f"failover v4 table (want scope-link via wan1):\n{v4}"
+    assert "wan1" in v6 and "via" not in v6, f"failover v6 table (want scope-link via wan1):\n{v6}"
   '';
 }

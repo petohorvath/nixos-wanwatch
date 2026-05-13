@@ -21,7 +21,7 @@ const validConfig = `{
     "primary": {
       "name": "primary",
       "interface": "eth0",
-      "gateways": { "v4": "192.0.2.1", "v6": null },
+      "pointToPoint": false,
       "probe": {
         "method": "icmp",
         "targets": ["1.1.1.1"],
@@ -86,11 +86,8 @@ func TestParsePopulatesNestedFields(t *testing.T) {
 	if w.Probe.Thresholds.LossPctDown != 30 {
 		t.Errorf("LossPctDown = %d, want 30", w.Probe.Thresholds.LossPctDown)
 	}
-	if w.Gateways.V4 == nil || *w.Gateways.V4 != "192.0.2.1" {
-		t.Errorf("Gateways.V4 = %v, want pointer to %q", w.Gateways.V4, "192.0.2.1")
-	}
-	if w.Gateways.V6 != nil {
-		t.Errorf("Gateways.V6 = %v, want nil", w.Gateways.V6)
+	if w.PointToPoint {
+		t.Errorf("PointToPoint = true, want false")
 	}
 }
 
@@ -152,12 +149,11 @@ func TestValidateRejectsWanNameKeyMismatch(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsWanWithoutGateways(t *testing.T) {
+func TestValidateRejectsWanWithoutProbeTargets(t *testing.T) {
 	t.Parallel()
 	cfg := mustParse(t, validConfig)
 	w := cfg.Wans["primary"]
-	w.Gateways.V4 = nil
-	w.Gateways.V6 = nil
+	w.Probe.Targets = nil
 	cfg.Wans["primary"] = w
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("err = %v, want wrap of ErrInvalidConfig", err)

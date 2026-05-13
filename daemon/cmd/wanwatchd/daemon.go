@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"slices"
 	"time"
 
@@ -55,21 +56,43 @@ func startProbers(ctx context.Context, cfg *config.Config, logger *slog.Logger) 
 }
 
 // identKeysFor enumerates (WAN, family) pairs the daemon needs a
-// Pinger for — i.e. families the WAN has a gateway in. Iteration
-// is sorted by WAN name so the ident assignment is reproducible.
+// Pinger for — derived from probe.targets, the sole declaration of
+// which families a WAN serves. Iteration is sorted by WAN name so
+// the ident assignment is reproducible.
 func identKeysFor(cfg *config.Config) []probe.IdentKey {
 	names := slices.Sorted(maps.Keys(cfg.Wans))
 	keys := make([]probe.IdentKey, 0, 2*len(names))
 	for _, name := range names {
 		wan := cfg.Wans[name]
-		if wan.Gateways.V4 != nil {
+		fams := familiesFromTargets(wan.Probe.Targets)
+		if fams.v4 {
 			keys = append(keys, probe.IdentKey{Wan: name, Family: probe.FamilyV4})
 		}
-		if wan.Gateways.V6 != nil {
+		if fams.v6 {
 			keys = append(keys, probe.IdentKey{Wan: name, Family: probe.FamilyV6})
 		}
 	}
 	return keys
+}
+
+// familiesFromTargets walks a probe-targets list and reports which
+// IP families appear. Mirrors `wanwatch.probe.families` on the Nix
+// side — both use libnet's predicates conceptually; here we use
+// net.ParseIP since the daemon receives targets as strings.
+func familiesFromTargets(targets []string) struct{ v4, v6 bool } {
+	var out struct{ v4, v6 bool }
+	for _, t := range targets {
+		ip := net.ParseIP(t)
+		if ip == nil {
+			continue
+		}
+		if ip.To4() != nil {
+			out.v4 = true
+		} else {
+			out.v6 = true
+		}
+	}
+	return out
 }
 
 // targetsFor selects the targets to probe for `wan` in `family`.
