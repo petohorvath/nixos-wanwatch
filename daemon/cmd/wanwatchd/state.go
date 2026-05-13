@@ -144,7 +144,7 @@ func (d *daemon) bootstrap() error {
 	for _, g := range d.cfg.Groups {
 		for _, fam := range probe.AllFamilies {
 			if err := apply.EnsureRule(apply.FwmarkRule{
-				Family: toApplyFamily(fam),
+				Family: fam,
 				Mark:   g.Mark,
 				Table:  g.Table,
 			}); err != nil {
@@ -304,7 +304,7 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 	for fam := range ws.families {
 		famLabel := fam.String()
 		route := apply.DefaultRoute{
-			Family:  toApplyFamily(fam),
+			Family:  fam,
 			Table:   g.cfg.Table,
 			IfIndex: ifindex,
 		}
@@ -378,9 +378,9 @@ func (d *daemon) writeStateSnapshot() {
 	}
 	gws := d.gateways.Snapshot()
 	for _, ws := range d.wans {
-		fams := make(map[string]state.Family, len(ws.families))
+		fams := make(map[string]state.FamilyHealth, len(ws.families))
 		for fam, fs := range ws.families {
-			fams[fam.String()] = state.Family{
+			fams[fam.String()] = state.FamilyHealth{
 				Healthy:  fs.healthy,
 				RTTMs:    float64(fs.stats.RTTMicros) / 1000,
 				JitterMs: float64(fs.stats.JitterMicros) / 1000,
@@ -471,13 +471,6 @@ func boolToFloat(b bool) float64 {
 		return 1
 	}
 	return 0
-}
-
-func toApplyFamily(f probe.Family) apply.Family {
-	if f == probe.FamilyV6 {
-		return apply.FamilyV6
-	}
-	return apply.FamilyV4
 }
 
 func interfaceIndex(name string) (int, error) {

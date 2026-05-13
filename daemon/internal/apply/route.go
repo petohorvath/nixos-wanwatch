@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -22,7 +23,7 @@ import (
 // Exactly one of (Gateway != nil) and PointToPoint must hold; the
 // validator rejects both-or-neither.
 type DefaultRoute struct {
-	Family       Family
+	Family       probe.Family
 	Table        int
 	Gateway      net.IP
 	IfIndex      int
@@ -72,8 +73,8 @@ func buildRoute(d DefaultRoute) *netlink.Route {
 
 // defaultDestination returns the all-zero CIDR for `f`. The kernel
 // treats `0.0.0.0/0` / `::/0` as the default-route destination.
-func defaultDestination(f Family) *net.IPNet {
-	if f == FamilyV6 {
+func defaultDestination(f probe.Family) *net.IPNet {
+	if f == probe.FamilyV6 {
 		return &net.IPNet{IP: net.IPv6zero, Mask: net.CIDRMask(0, 128)}
 	}
 	return &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
@@ -90,7 +91,7 @@ func validateDefaultRoute(d DefaultRoute) error {
 		if d.Gateway != nil {
 			return fmt.Errorf("apply: pointToPoint route must have nil Gateway; got %s", d.Gateway)
 		}
-		if d.Family != FamilyV4 && d.Family != FamilyV6 {
+		if !validFamily(d.Family) {
 			return fmt.Errorf("apply: invalid family %d (want AF_INET or AF_INET6)", int(d.Family))
 		}
 		return nil

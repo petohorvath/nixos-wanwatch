@@ -34,12 +34,12 @@ type State struct {
 
 // Wan is the per-WAN state slice.
 type Wan struct {
-	Interface string            `json:"interface"`
-	Carrier   string            `json:"carrier"`   // "up" | "down" | "unknown"
-	Operstate string            `json:"operstate"` // IFLA_OPERSTATE textual
-	Healthy   bool              `json:"healthy"`
-	Gateways  Gateways          `json:"gateways"`
-	Families  map[string]Family `json:"families"`
+	Interface string                  `json:"interface"`
+	Carrier   string                  `json:"carrier"`   // "up" | "down" | "unknown"
+	Operstate string                  `json:"operstate"` // IFLA_OPERSTATE textual
+	Healthy   bool                    `json:"healthy"`
+	Gateways  Gateways                `json:"gateways"`
+	Families  map[string]FamilyHealth `json:"families"`
 }
 
 // Gateways is the per-WAN snapshot of the kernel's main-table
@@ -55,8 +55,11 @@ type Gateways struct {
 	V6 string `json:"v6"`
 }
 
-// Family is the per-(WAN, family) probe-summary slice.
-type Family struct {
+// FamilyHealth is the per-(WAN, family) probe-summary slice
+// surfaced in state.json. JSON shape is unchanged; the type was
+// renamed from `Family` to avoid colliding with `probe.Family`
+// (the IP-family enum used everywhere else).
+type FamilyHealth struct {
 	Healthy  bool     `json:"healthy"`
 	RTTMs    float64  `json:"rttMs"`
 	JitterMs float64  `json:"jitterMs"`

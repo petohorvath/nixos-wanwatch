@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
 func validFwmarkRule() FwmarkRule {
 	return FwmarkRule{
-		Family: FamilyV4,
+		Family: probe.FamilyV4,
 		Mark:   0x100,
 		Table:  100,
 	}
@@ -39,7 +40,7 @@ func TestValidateRuleAcceptsHappyPath(t *testing.T) {
 		t.Errorf("validateRule(happy) = %v, want nil", err)
 	}
 	v6 := validFwmarkRule()
-	v6.Family = FamilyV6
+	v6.Family = probe.FamilyV6
 	if err := validateRule(v6); err != nil {
 		t.Errorf("validateRule(v6) = %v, want nil", err)
 	}
@@ -77,7 +78,7 @@ func TestValidateRuleRejects(t *testing.T) {
 		mutate  func(*FwmarkRule)
 		wantSub string
 	}{
-		{"invalid family", func(r *FwmarkRule) { r.Family = Family(99) }, "invalid family"},
+		{"invalid family", func(r *FwmarkRule) { r.Family = probe.Family(99) }, "invalid family"},
 		{"mark zero", func(r *FwmarkRule) { r.Mark = 0 }, "invalid mark"},
 		{"mark negative", func(r *FwmarkRule) { r.Mark = -1 }, "invalid mark"},
 		{"table zero", func(r *FwmarkRule) { r.Table = 0 }, "invalid table"},

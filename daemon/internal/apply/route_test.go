@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"golang.org/x/sys/unix"
 )
 
@@ -12,7 +13,7 @@ import (
 // individual fields to exercise each validation branch.
 func validRoute() DefaultRoute {
 	return DefaultRoute{
-		Family:  FamilyV4,
+		Family:  probe.FamilyV4,
 		Table:   100,
 		Gateway: net.ParseIP("192.0.2.1"),
 		IfIndex: 3,
@@ -48,7 +49,7 @@ func TestValidateDefaultRouteAcceptsHappyPath(t *testing.T) {
 		t.Errorf("validateDefaultRoute(happy) = %v, want nil", err)
 	}
 	v6 := validRoute()
-	v6.Family = FamilyV6
+	v6.Family = probe.FamilyV6
 	v6.Gateway = net.ParseIP("2001:db8::1")
 	if err := validateDefaultRoute(v6); err != nil {
 		t.Errorf("validateDefaultRoute(v6) = %v, want nil", err)
@@ -64,7 +65,7 @@ func TestValidateDefaultRouteRejects(t *testing.T) {
 	}{
 		{
 			name:    "invalid family",
-			mutate:  func(d *DefaultRoute) { d.Family = Family(99) },
+			mutate:  func(d *DefaultRoute) { d.Family = probe.Family(99) },
 			wantSub: "invalid family",
 		},
 		{
@@ -90,7 +91,7 @@ func TestValidateDefaultRouteRejects(t *testing.T) {
 		{
 			name: "v6 gateway with family=v4",
 			mutate: func(d *DefaultRoute) {
-				d.Family = FamilyV4
+				d.Family = probe.FamilyV4
 				d.Gateway = net.ParseIP("2001:db8::1")
 			},
 			wantSub: "not v4",
@@ -98,7 +99,7 @@ func TestValidateDefaultRouteRejects(t *testing.T) {
 		{
 			name: "v4 gateway with family=v6",
 			mutate: func(d *DefaultRoute) {
-				d.Family = FamilyV6
+				d.Family = probe.FamilyV6
 				d.Gateway = net.ParseIP("192.0.2.1")
 			},
 			wantSub: "is v4 but family=v6",
@@ -131,7 +132,7 @@ func TestValidateDefaultRouteRejects(t *testing.T) {
 func TestValidateDefaultRouteAcceptsPointToPoint(t *testing.T) {
 	t.Parallel()
 	d := DefaultRoute{
-		Family:       FamilyV4,
+		Family:       probe.FamilyV4,
 		Table:        100,
 		IfIndex:      3,
 		PointToPoint: true,
@@ -144,7 +145,7 @@ func TestValidateDefaultRouteAcceptsPointToPoint(t *testing.T) {
 func TestBuildRouteEmitsScopeLinkForPointToPoint(t *testing.T) {
 	t.Parallel()
 	d := DefaultRoute{
-		Family:       FamilyV4,
+		Family:       probe.FamilyV4,
 		Table:        100,
 		IfIndex:      3,
 		PointToPoint: true,
@@ -174,7 +175,7 @@ func TestBuildRouteEmitsScopeLinkForPointToPoint(t *testing.T) {
 func TestBuildRouteEmitsScopeLinkForPointToPointV6(t *testing.T) {
 	t.Parallel()
 	d := DefaultRoute{
-		Family:       FamilyV6,
+		Family:       probe.FamilyV6,
 		Table:        100,
 		IfIndex:      3,
 		PointToPoint: true,

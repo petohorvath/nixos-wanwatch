@@ -26,16 +26,20 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"golang.org/x/sys/unix"
 )
 
-// Family is the IP family the probe operates in.
+// Family is the IP family the probe operates in. Values match the
+// kernel's AF_INET / AF_INET6 constants so the same value flows
+// through to netlink (in `internal/apply`) without conversion.
 type Family int
 
 const (
 	// FamilyV4 selects ICMP over IPv4 (type 8 / 0).
-	FamilyV4 Family = iota
+	FamilyV4 Family = unix.AF_INET
 	// FamilyV6 selects ICMPv6 (type 128 / 129).
-	FamilyV6
+	FamilyV6 Family = unix.AF_INET6
 )
 
 // AllFamilies enumerates every Family the daemon supports. Use it

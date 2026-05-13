@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/vishvananda/netlink"
 )
 
@@ -17,7 +18,7 @@ import (
 // PLAN §5.5 marks conntrack flush as best-effort — the caller
 // (orchestrator) logs failures but does not fail the apply step.
 // Returns the number of entries deleted.
-func FlushBySource(family Family, ip net.IP) (uint, error) {
+func FlushBySource(family probe.Family, ip net.IP) (uint, error) {
 	if err := validateFlush(family, ip); err != nil {
 		return 0, err
 	}
@@ -55,6 +56,6 @@ func buildSourceFilter(tp netlink.ConntrackFilterType, ip net.IP) (*netlink.Conn
 	return f, nil
 }
 
-func validateFlush(family Family, ip net.IP) error {
+func validateFlush(family probe.Family, ip net.IP) error {
 	return validateFamilyIP(family, ip, "ip")
 }

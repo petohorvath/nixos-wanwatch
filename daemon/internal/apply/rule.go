@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -12,7 +13,7 @@ import (
 // `Mark` in its fwmark slot." Installed once per (group, family)
 // at daemon start — see PLAN §6.1 step 2.
 type FwmarkRule struct {
-	Family Family
+	Family probe.Family
 	Mark   int
 	Table  int
 }
@@ -65,7 +66,7 @@ func buildRule(r FwmarkRule) *netlink.Rule {
 }
 
 func validateRule(r FwmarkRule) error {
-	if r.Family != FamilyV4 && r.Family != FamilyV6 {
+	if !validFamily(r.Family) {
 		return fmt.Errorf("apply: invalid family %d", int(r.Family))
 	}
 	if r.Mark <= 0 {

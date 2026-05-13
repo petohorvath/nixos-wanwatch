@@ -122,17 +122,18 @@ new CI workflow runs tests but doesn't enforce a coverage floor.
 Captured during the gateway-discovery review; deemed not worth
 blocking that series, but flagged for later.
 
-### Collapse the three Family enums
+### Collapse `rtnl.RouteFamily` into `probe.Family`
 
-`probe.Family`, `apply.Family`, `rtnl.RouteFamily` are three flavors
-of the same two-value enum. Two converters exist (`toApplyFamily`,
-`probeFamilyToRoute`) plus one AF→enum mapping in `rtnl`. Either:
+`probe.Family` and `apply.Family` were unified — apply now uses
+`probe.Family` directly and its values match `unix.AF_INET` /
+`unix.AF_INET6` so netlink passthrough is one cast.
 
-1. Define a single `family` package both depend on; or
-2. Align `rtnl.RouteFamily` values with `unix.AF_INET` /
-   `unix.AF_INET6` so `routeFamilyFromAF` becomes identity.
-
-Option 2 is mechanical; option 1 needs an import-graph rework.
+`rtnl.RouteFamily` is still its own enum and forces the
+`probeFamilyToRoute` shim plus the `routeFamilyFromAF` mapping
+inside `rtnl`. Either align its values with `unix.AF_INET*`
+(makes `routeFamilyFromAF` identity) or import `probe.Family`
+into `rtnl` and drop `RouteFamily` entirely. The latter creates
+sibling-to-sibling coupling but kills the converter.
 
 ### Per-family reapply on RouteEvent
 

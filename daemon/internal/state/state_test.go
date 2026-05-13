@@ -159,7 +159,7 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 				Carrier:   "up",
 				Operstate: "up",
 				Healthy:   true,
-				Families: map[string]Family{
+				Families: map[string]FamilyHealth{
 					"v4": {Healthy: true, RTTMs: 12.4, JitterMs: 1.2, LossPct: 0.0, Targets: []string{"1.1.1.1"}},
 				},
 			},
