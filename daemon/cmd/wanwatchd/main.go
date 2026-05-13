@@ -5,10 +5,16 @@
 // externalized state.json.
 //
 // File layout:
-//   - main.go     — process lifecycle (flags, logging, signals)
-//   - daemon.go   — startProbers/startSubscriber + eventLoop
-//   - decision.go — pure helpers (thresholds, family policy, sort)
-//   - state.go    — daemon struct + Decision pipeline
+//   - main.go         — process lifecycle (flags, logging, signals)
+//   - daemon.go       — daemon struct + Decision pipeline (handlers,
+//     recompute, applyRoutes, writeStateSnapshot, runHooks)
+//   - subscribers.go  — startProbers / startSubscriber /
+//     startRouteSubscriber + eventLoop
+//   - decision.go     — pure helpers (thresholds, family policy,
+//     sort, hookEventFor) and the decisionReason enum
+//   - gateway.go      — GatewayCache (kernel default-route mirror)
+//   - helpers.go      — small free utilities (boolToFloat, …)
+//   - buildinfo.go    — version / commit / goVersion (ldflags)
 package main
 
 import (

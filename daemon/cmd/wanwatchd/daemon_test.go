@@ -1,194 +1,153 @@
 package main
 
 import (
-	"context"
-	"io"
-	"log/slog"
+	"encoding/json"
 	"net"
-	"path/filepath"
+	"os"
 	"testing"
-	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 )
 
-// testDaemon builds a daemon wired against `cfg` without invoking
-// bootstrap() — netlink rule install isn't available in unit tests.
-func testDaemon(t *testing.T, cfg *config.Config) *daemon {
-	t.Helper()
-	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
-	cfg.Global.HooksDir = t.TempDir()
-	return newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-}
-
-func testCfg() *config.Config {
-	return &config.Config{
-		Wans: map[string]config.Wan{
-			"primary": {
-				Name:      "primary",
-				Interface: "eth0",
-				Probe: config.Probe{
-					Targets: []string{"1.1.1.1", "2606:4700:4700::1111"},
-				},
-			},
-			"backup": {
-				Name:      "backup",
-				Interface: "wwan0",
-				// v4-only WAN — only a v4 probe target.
-				Probe: config.Probe{
-					Targets: []string{"8.8.8.8"},
-				},
-			},
+// TestWriteStateSnapshotHappyPath proves the round-trip: the
+// daemon's in-memory state maps to a state.State and survives
+// JSON serialization with the expected schema and per-WAN /
+// per-Group fields.
+func TestWriteStateSnapshotHappyPath(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	cfg.Groups = map[string]selector.Group{
+		"home": {
+			Name:     "home",
+			Strategy: "primary-backup",
+			Table:    100,
+			Mark:     0x100,
 		},
 	}
+	d := testDaemon(t, cfg)
+	d.wans["primary"].healthy = true
+	d.wans["primary"].carrier = rtnl.CarrierUp
+	d.wans["primary"].operstate = rtnl.OperstateUp
+	d.wans["primary"].families[probe.FamilyV4].healthy = true
+	d.wans["primary"].families[probe.FamilyV4].stats = probe.FamilyStats{
+		RTTMicros:    12_500,
+		JitterMicros: 800,
+		LossRatio:    0.05,
+	}
+	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+
+	d.writeStateSnapshot()
+
+	data, err := os.ReadFile(cfg.Global.StatePath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var got state.State
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.Schema != state.SchemaVersion {
+		t.Errorf("Schema = %d, want %d", got.Schema, state.SchemaVersion)
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt is zero — Writer.Write should stamp it")
+	}
+	wan, ok := got.Wans["primary"]
+	if !ok {
+		t.Fatalf("Wans[primary] missing")
+	}
+	if !wan.Healthy {
+		t.Error("Wans[primary].Healthy = false, want true")
+	}
+	if wan.Gateways.V4 != "192.0.2.1" {
+		t.Errorf("Wans[primary].Gateways.V4 = %q, want 192.0.2.1", wan.Gateways.V4)
+	}
+	fh, ok := wan.Families["v4"]
+	if !ok {
+		t.Fatalf("Wans[primary].Families[v4] missing")
+	}
+	if fh.RTTMs != 12.5 || fh.JitterMs != 0.8 || fh.LossPct != 5 {
+		t.Errorf("FamilyHealth = %+v, want RTTMs=12.5 JitterMs=0.8 LossPct=5", fh)
+	}
+	if _, ok := got.Groups["home"]; !ok {
+		t.Fatalf("Groups[home] missing")
+	}
 }
 
-func TestIdentKeysForFromProbeTargets(t *testing.T) {
+// TestHandleProbeResultDrivesUnhealthy: a high-loss probe result
+// for a healthy WAN should drive the family verdict to unhealthy
+// once hysteresis settles, and the aggregate WAN.Healthy flips.
+//
+// Uses a 1-cycle hysteresis (consecutiveDown=1) so one bad sample
+// is enough — the slow-default 3-of-3 would need a loop.
+func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 	t.Parallel()
-	keys := identKeysFor(testCfg())
-	// Sorted by wan name: backup (v4) < primary (v4, v6) ⇒ 3 keys.
-	want := []probe.IdentKey{
-		{Wan: "backup", Family: probe.FamilyV4},
-		{Wan: "primary", Family: probe.FamilyV4},
-		{Wan: "primary", Family: probe.FamilyV6},
+	cfg := testCfg()
+	cfg.Wans["primary"] = config.Wan{
+		Name:      "primary",
+		Interface: "eth0",
+		Probe: config.Probe{
+			Targets: []string{"1.1.1.1"},
+			Thresholds: config.Thresholds{
+				LossPctUp: 10, LossPctDown: 20,
+				RttMsUp: 100, RttMsDown: 200,
+			},
+			Hysteresis: config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
+		},
 	}
-	if len(keys) != len(want) {
-		t.Fatalf("len = %d, want %d (keys=%+v)", len(keys), len(want), keys)
+	d := testDaemon(t, cfg)
+	// Cold-start defaults `healthy = true`; assert we're starting there.
+	if !d.wans["primary"].healthy {
+		t.Fatalf("precondition: primary.healthy = false, want true at cold-start")
 	}
-	for i, w := range want {
-		if keys[i] != w {
-			t.Errorf("keys[%d] = %+v, want %+v", i, keys[i], w)
-		}
-	}
-}
 
-func TestIdentKeysForIsDeterministic(t *testing.T) {
-	t.Parallel()
-	// Map iteration is randomized but identKeysFor must produce a
-	// stable order so the ident allocation is reproducible across
-	// restarts (PLAN §8).
-	a := identKeysFor(testCfg())
-	b := identKeysFor(testCfg())
-	if len(a) != len(b) {
-		t.Fatalf("len mismatch: %d vs %d", len(a), len(b))
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			t.Errorf("a[%d]=%+v b[%d]=%+v", i, a[i], i, b[i])
-		}
-	}
-}
-
-func TestEventLoopRoutesProbeResultToDaemon(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfg())
-
-	probeResults := make(chan probe.ProbeResult, 1)
-	linkEvents := make(chan rtnl.LinkEvent, 1)
-	routeEvents := make(chan rtnl.RouteEvent, 1)
-	probeResults <- probe.ProbeResult{
+	d.handleProbeResult(probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
-		Stats:  probe.FamilyStats{LossRatio: 0.5, RTTMicros: 12000},
+		Stats:  probe.FamilyStats{LossRatio: 0.95, RTTMicros: 50_000},
+	})
+
+	if d.wans["primary"].families[probe.FamilyV4].healthy {
+		t.Error("primary/v4 still healthy after high-loss probe")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
-		close(done)
-	}()
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-	<-done
-
-	if got := d.wans["primary"].families[probe.FamilyV4].stats.LossRatio; got != 0.5 {
-		t.Errorf("primary v4 LossRatio = %v, want 0.5", got)
+	if d.wans["primary"].healthy {
+		t.Error("primary aggregate still healthy after high-loss probe")
 	}
 }
 
-func TestEventLoopRoutesLinkEventToDaemon(t *testing.T) {
+// TestHandleRouteEventPopulatesGatewayCache: an Add RouteEvent
+// populates the cache so subsequent applyRoutes can find a gw.
+func TestHandleRouteEventPopulatesGatewayCache(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
-
-	probeResults := make(chan probe.ProbeResult, 1)
-	linkEvents := make(chan rtnl.LinkEvent, 1)
-	routeEvents := make(chan rtnl.RouteEvent, 1)
-	linkEvents <- rtnl.LinkEvent{
-		Name:      "eth0",
-		Carrier:   rtnl.CarrierUp,
-		Operstate: rtnl.OperstateUp,
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
-		close(done)
-	}()
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-	<-done
-
-	if d.wans["primary"].carrier != rtnl.CarrierUp {
-		t.Errorf("primary carrier = %v, want up", d.wans["primary"].carrier)
-	}
-}
-
-func TestEventLoopRoutesRouteEventToDaemon(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfg())
-
-	probeResults := make(chan probe.ProbeResult, 1)
-	linkEvents := make(chan rtnl.LinkEvent, 1)
-	routeEvents := make(chan rtnl.RouteEvent, 1)
-	routeEvents <- rtnl.RouteEvent{
+	d.handleRouteEvent(rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "eth0",
 		Family:  rtnl.RouteFamilyV4,
-		Gateway: net.ParseIP("192.0.2.1"),
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
-		close(done)
-	}()
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-	<-done
-
+		Gateway: net.ParseIP("198.51.100.1"),
+	})
 	gw, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4)
-	if !ok {
-		t.Fatal("eth0/v4 gateway not in cache after RouteEvent")
-	}
-	if gw.String() != "192.0.2.1" {
-		t.Errorf("cache eth0/v4 = %v, want 192.0.2.1", gw)
+	if !ok || gw.String() != "198.51.100.1" {
+		t.Errorf("eth0/v4 = (%v, %v), want (198.51.100.1, true)", gw, ok)
 	}
 }
 
-func TestEventLoopReturnsOnCtxCancel(t *testing.T) {
+// TestHandleRouteEventDelClearsCache: a Del clears the entry.
+func TestHandleRouteEventDelClearsCache(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	probeResults := make(chan probe.ProbeResult)
-	linkEvents := make(chan rtnl.LinkEvent)
-	routeEvents := make(chan rtnl.RouteEvent)
-
-	done := make(chan struct{})
-	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
-		close(done)
-	}()
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("eventLoop did not return within 1s of ctx cancel")
+	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
+	d.handleRouteEvent(rtnl.RouteEvent{
+		Op:     rtnl.RouteEventDel,
+		Iface:  "eth0",
+		Family: rtnl.RouteFamilyV4,
+	})
+	if _, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4); ok {
+		t.Error("cache still has eth0/v4 after Del event")
 	}
 }
