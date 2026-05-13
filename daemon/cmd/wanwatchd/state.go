@@ -381,7 +381,11 @@ func (d *daemon) writeStateSnapshot() {
 			Carrier:   ws.carrier.String(),
 			Operstate: ws.operstate.String(),
 			Healthy:   ws.healthy,
-			Families:  fams,
+			Gateways: state.Gateways{
+				V4: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV4),
+				V6: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV6),
+			},
+			Families: fams,
 		}
 	}
 	for _, g := range d.groups {

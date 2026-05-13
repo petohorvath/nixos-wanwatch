@@ -20,8 +20,16 @@ import (
 
 // SchemaVersion is the state-file schema version. Bumped on
 // incompatible shape changes. Pairs with the `schema` key in the
-// rendered JSON and with the Nix-side `config.schemaVersion`.
-const SchemaVersion = 1
+// rendered JSON.
+//
+// History:
+//
+//	1 — initial v1 shape.
+//	2 — added per-WAN `gateways.{v4,v6}` reflecting the
+//	    daemon-discovered default-route next-hops. Replaces the
+//	    pre-bump config-time `gateways` declaration; consumers
+//	    that need the *current* next-hop should read from state.
+const SchemaVersion = 2
 
 // State is the daemon's externalized snapshot, written atomically
 // on every Decision.
@@ -38,7 +46,23 @@ type Wan struct {
 	Carrier   string            `json:"carrier"`   // "up" | "down" | "unknown"
 	Operstate string            `json:"operstate"` // IFLA_OPERSTATE textual
 	Healthy   bool              `json:"healthy"`
+	Gateways  Gateways          `json:"gateways"`
 	Families  map[string]Family `json:"families"`
+}
+
+// Gateways is the per-WAN snapshot of the kernel's main-table
+// default-route next-hops, one per family. Schema-2 addition:
+// surfaced so state-readers (status pages, integration tests,
+// nftzones diagnostics) can see what the daemon learned.
+//
+// Empty string for a family means either (a) the daemon has not
+// yet observed a default route on that interface, or (b) the
+// route is scope-link (point-to-point) and has no next-hop IP.
+// Consumers needing to distinguish the two should consult the
+// wan's `pointToPoint` configuration.
+type Gateways struct {
+	V4 string `json:"v4"`
+	V6 string `json:"v6"`
 }
 
 // Family is the per-(WAN, family) probe-summary slice.

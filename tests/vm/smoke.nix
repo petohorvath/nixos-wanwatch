@@ -101,7 +101,7 @@ pkgs.testers.runNixOSTest {
     #    even before any probe sample.
     router.wait_for_file("/run/wanwatch/state.json")
     schema = router.succeed("jq -r .schema /run/wanwatch/state.json").strip()
-    assert schema == "1", f"state.json schema = {schema!r}, want '1'"
+    assert schema == "2", f"state.json schema = {schema!r}, want '2'"
 
     # 3. Metrics socket present and group-readable.
     router.wait_for_file("/run/wanwatch/metrics.sock")

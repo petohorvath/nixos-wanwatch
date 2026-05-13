@@ -195,8 +195,49 @@ func TestSchemaVersionConstantStable(t *testing.T) {
 	// The SchemaVersion constant pairs with the schema bump
 	// procedure in PLAN §12 OQ #1. A change here is a load-bearing
 	// decision.
-	if SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1 (Pass 4 boundary)", SchemaVersion)
+	//
+	// Schema 2 added the per-WAN `gateways.{v4,v6}` field.
+	if SchemaVersion != 2 {
+		t.Errorf("SchemaVersion = %d, want 2 (gateways field landed)", SchemaVersion)
+	}
+}
+
+func TestWriteEmitsPerWanGateways(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	w := Writer{Path: path}
+
+	s := State{
+		Wans: map[string]Wan{
+			"primary": {
+				Interface: "eth0",
+				Gateways:  Gateways{V4: "192.0.2.1", V6: "2001:db8::1"},
+			},
+			"ptp": {
+				Interface: "wg0",
+				// Scope-link / point-to-point: both empty.
+				Gateways: Gateways{},
+			},
+		},
+	}
+
+	if err := w.Write(s); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	var out State
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got := out.Wans["primary"].Gateways.V4; got != "192.0.2.1" {
+		t.Errorf("primary.gateways.v4 = %q, want 192.0.2.1", got)
+	}
+	if got := out.Wans["primary"].Gateways.V6; got != "2001:db8::1" {
+		t.Errorf("primary.gateways.v6 = %q, want 2001:db8::1", got)
+	}
+	if got := out.Wans["ptp"].Gateways.V4; got != "" {
+		t.Errorf("ptp.gateways.v4 = %q, want empty", got)
 	}
 }
 
