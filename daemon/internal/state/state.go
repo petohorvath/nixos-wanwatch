@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -76,10 +77,14 @@ type Group struct {
 }
 
 // Writer holds the destination path. One Writer per daemon
-// instance; not safe for concurrent Write calls — serialize at
-// the caller (the daemon's apply loop, which already serializes).
+// instance; `mu` serializes concurrent Write calls so the
+// tmpfile + rename pattern can't be raced into a corrupted
+// snapshot. The daemon's apply loop is single-goroutine today
+// and would be safe without the mutex, but contract-enforcing
+// is cheap and survives future refactors.
 type Writer struct {
 	Path string
+	mu   sync.Mutex
 }
 
 // Write serializes `s` to JSON and writes it atomically to
@@ -93,6 +98,8 @@ type Writer struct {
 // `UpdatedAt` is overwritten with `time.Now().UTC()` at write
 // time — caller-provided values are ignored.
 func (w *Writer) Write(s State) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	s.UpdatedAt = time.Now().UTC()
 	s.Schema = SchemaVersion
 
