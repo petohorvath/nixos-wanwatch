@@ -86,6 +86,10 @@
           inherit pkgs;
           nixosModule = self.nixosModules.default;
         };
+        failover-probe-loss = import ./tests/vm/failover-probe-loss.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
         recovery = import ./tests/vm/recovery.nix {
           inherit pkgs;
           nixosModule = self.nixosModules.default;
