@@ -1,0 +1,78 @@
+name: audit
+
+# Weekly vulnerability scan promised by PLAN §11.10 and CLAUDE.md
+# §Audits. Two independent jobs:
+#
+#   - govulncheck — scans the Go module's source + module graph for
+#     calls into functions with known CVEs (golang.org/x/vuln).
+#   - vulnix — scans the daemon's Nix closure against the NixOS
+#     vulnerability database (nix-community/vulnix).
+#
+# A job failure means "something flagged" — the run goes red and
+# the failure surfaces in GitHub's notification stream. We
+# intentionally do not auto-file issues yet; PLAN §11.10 mentions
+# that as a follow-up, but the simpler "fail loudly" shape is
+# enough to get attention while we're early-release.
+
+on:
+  # Mondays at 06:00 UTC — pick a slot when the GitHub-hosted
+  # runner pool is least contended. Manual dispatch lets us re-run
+  # on demand without waiting a week.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # govulncheck runs against the daemon's vendored Go sources.
+  # `-mode=source` walks the call graph from the binary entry
+  # point, so a CVE in a vendored package only reports if our code
+  # actually reaches the affected function. That cuts noise vs.
+  # blanket "you have package X" listings.
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: govulncheck
+        # Run the tool from the same devshell the project's other
+        # CI jobs use; pins the Go version + tool version against
+        # `flake.lock` rather than pulling whatever `nixpkgs#go`
+        # the runner happens to fetch.
+        run: |
+          nix develop --command bash -c '
+            set -euo pipefail
+            cd daemon
+            go install golang.org/x/vuln/cmd/govulncheck@latest
+            "$HOME/go/bin/govulncheck" -mode=source ./...
+          '
+
+  # vulnix scans the wanwatchd derivation closure (every store path
+  # in the build) against the NVD/cvelist mirror nix-community
+  # maintains. Finds vulnerable runtime deps the Go-side scanner
+  # can't see (e.g. a libc the daemon is dynamically linked
+  # against — though CGO_ENABLED=0 makes that ~empty for us).
+  vulnix:
+    name: vulnix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Build daemon closure
+        run: nix build --print-build-logs .#wanwatchd
+      - name: vulnix
+        run: |
+          # -S = include source-derived findings (not just binary).
+          # readlink resolves the result symlink to the actual
+          # store path vulnix wants on stdin.
+          nix run nixpkgs#vulnix -- -S "$(readlink -f result)"
