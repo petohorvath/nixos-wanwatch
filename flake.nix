@@ -218,7 +218,7 @@
                 # mirrors PLAN §9.2; keep this list as the single
                 # source of truth — CI just reads it back.
                 cat > coverage.thresholds <<'EOF'
-                internal/apply:70
+                internal/apply:85
                 internal/config:90
                 internal/metrics:85
                 internal/probe:80

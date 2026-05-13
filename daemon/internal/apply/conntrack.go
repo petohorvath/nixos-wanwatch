@@ -21,6 +21,25 @@ import (
 // Returns the number of entries deleted. ctx is checked at entry —
 // see WriteDefault for the cancellation contract.
 func FlushBySource(ctx context.Context, family probe.Family, ip net.IP) (uint, error) {
+	return flushBySourceVia(ctx, netlink.ConntrackDeleteFilters, family, ip)
+}
+
+// conntrackDeleter is the netlink.ConntrackDeleteFilters shape,
+// extracted so tests can substitute a stub. The variadic uses the
+// netlink-side interface (`CustomConntrackFilter`) rather than the
+// concrete `*ConntrackFilter` we always pass — exactly mirroring
+// the upstream signature lets `netlink.ConntrackDeleteFilters` be
+// assigned to a `conntrackDeleter` directly.
+type conntrackDeleter func(
+	table netlink.ConntrackTableType,
+	family netlink.InetFamily,
+	filters ...netlink.CustomConntrackFilter,
+) (uint, error)
+
+// flushBySourceVia is FlushBySource parameterized on the conntrack
+// deleter so tests can exercise the validation, filter-building,
+// and error-wrapping branches without netlink + root.
+func flushBySourceVia(ctx context.Context, del conntrackDeleter, family probe.Family, ip net.IP) (uint, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -35,7 +54,7 @@ func FlushBySource(ctx context.Context, family probe.Family, ip net.IP) (uint, e
 	if err != nil {
 		return 0, err
 	}
-	n, err := netlink.ConntrackDeleteFilters(
+	n, err := del(
 		netlink.ConntrackTable,
 		//nolint:gosec // family is probe.FamilyV4 (=AF_INET=2) or FamilyV6 (=AF_INET6=10); both fit uint8
 		netlink.InetFamily(family),

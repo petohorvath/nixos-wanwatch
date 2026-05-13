@@ -39,13 +39,21 @@ type DefaultRoute struct {
 // synchronous and not cancellable, but a cancelled ctx aborts the
 // op before any kernel state changes.
 func WriteDefault(ctx context.Context, d DefaultRoute) error {
+	return writeDefaultVia(ctx, netlink.RouteReplace, d)
+}
+
+// writeDefaultVia is WriteDefault parameterized on the
+// route-replacer so tests can exercise the validation and
+// error-wrapping branches without opening a netlink socket. The
+// production seam is `netlink.RouteReplace`.
+func writeDefaultVia(ctx context.Context, replaceFn func(*netlink.Route) error, d DefaultRoute) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := validateDefaultRoute(d); err != nil {
 		return err
 	}
-	if err := netlink.RouteReplace(buildRoute(d)); err != nil {
+	if err := replaceFn(buildRoute(d)); err != nil {
 		return fmt.Errorf("apply: route replace %s table=%d dev=%d ptp=%v gw=%s: %w",
 			d.Family, d.Table, d.IfIndex, d.PointToPoint, d.Gateway, err)
 	}

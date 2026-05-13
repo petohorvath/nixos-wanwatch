@@ -1,11 +1,14 @@
 package apply
 
 import (
+	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
+	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -187,5 +190,73 @@ func TestBuildRouteEmitsScopeLinkForPointToPointV6(t *testing.T) {
 	ones, bits := got.Dst.Mask.Size()
 	if ones != 0 || bits != 128 {
 		t.Errorf("Dst mask = %d/%d, want 0/128", ones, bits)
+	}
+}
+
+func TestWriteDefaultViaHappyPath(t *testing.T) {
+	t.Parallel()
+	var got *netlink.Route
+	replace := func(r *netlink.Route) error {
+		got = r
+		return nil
+	}
+
+	d := validRoute()
+	if err := writeDefaultVia(context.Background(), replace, d); err != nil {
+		t.Fatalf("writeDefaultVia(happy) = %v, want nil", err)
+	}
+	if got == nil {
+		t.Fatal("replace stub was not called")
+	}
+	if got.Family != int(d.Family) || got.Table != d.Table {
+		t.Errorf("netlink.Route passthrough mismatch: got %+v from %+v", got, d)
+	}
+}
+
+func TestWriteDefaultViaWrapsReplaceError(t *testing.T) {
+	t.Parallel()
+	replace := func(*netlink.Route) error { return errors.New("boom") }
+
+	err := writeDefaultVia(context.Background(), replace, validRoute())
+	if err == nil {
+		t.Fatal("writeDefaultVia(error) = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %q, want to contain underlying %q", err.Error(), "boom")
+	}
+	if !strings.Contains(err.Error(), "apply: route replace") {
+		t.Errorf("err = %q, want to carry the apply context prefix", err.Error())
+	}
+}
+
+func TestWriteDefaultViaContextCancelled(t *testing.T) {
+	t.Parallel()
+	// A pre-cancelled ctx must short-circuit before any validation
+	// or netlink work. We assert by having the replace stub fail
+	// loudly if it's ever called.
+	replace := func(*netlink.Route) error {
+		t.Fatal("replace stub called after ctx cancel")
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := writeDefaultVia(ctx, replace, validRoute())
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("writeDefaultVia(cancelled) = %v, want context.Canceled", err)
+	}
+}
+
+func TestWriteDefaultViaSkipsReplaceOnValidationFailure(t *testing.T) {
+	t.Parallel()
+	replace := func(*netlink.Route) error {
+		t.Fatal("replace stub called despite validation failure")
+		return nil
+	}
+	d := validRoute()
+	d.Table = 0 // validator rejects
+
+	if err := writeDefaultVia(context.Background(), replace, d); err == nil {
+		t.Error("writeDefaultVia(invalid) = nil error, want non-nil")
 	}
 }
