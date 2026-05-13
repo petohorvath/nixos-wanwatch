@@ -46,6 +46,14 @@ func buildRule(r FwmarkRule) *netlink.Rule {
 	rule := netlink.NewRule()
 	rule.Family = int(r.Family)
 	rule.Mark = uint32(r.Mark)
+	// Explicit full mask: the netlink library only encodes
+	// FRA_FWMASK when rule.Mask != nil, and recent kernels
+	// (≥ 6.18 observed) reject or hide a rule that carries
+	// FRA_FWMARK with no FRA_FWMASK — userspace `ip rule add
+	// fwmark X table Y` defaults to mask 0xffffffff for the
+	// same reason.
+	mask := uint32(0xffffffff)
+	rule.Mask = &mask
 	rule.Table = r.Table
 	return rule
 }

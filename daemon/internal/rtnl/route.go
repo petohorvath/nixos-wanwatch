@@ -42,11 +42,11 @@ type RouteSubscriber struct {
 	ifaceCache map[int]string
 }
 
-// Run subscribes to RTNLGRP_IPV4_ROUTE + RTNLGRP_IPV6_ROUTE and
-// pushes one `RouteEvent` onto `out` for every default-route
-// add/del on a watched interface in the main routing table.
-// Returns when ctx is cancelled or the netlink subscription
-// fails.
+// Run subscribes to RTNLGRP_IPV4_ROUTE + RTNLGRP_IPV6_ROUTE,
+// primes the watcher with every default route currently in the
+// main RIB, and pushes one `RouteEvent` onto `out` for every
+// add/del thereafter. Returns when ctx is cancelled or the
+// netlink subscription fails.
 //
 // `out` is *not* closed on return; callers can retry Run with a
 // fresh goroutine and reuse the same channel after a transient
@@ -56,17 +56,52 @@ func (s *RouteSubscriber) Run(ctx context.Context, out chan<- RouteEvent) error 
 	done := make(chan struct{})
 	defer close(done)
 
-	// ListExisting dumps every current route so the daemon can
-	// populate its gateway cache at boot without waiting for a
-	// link to flap. RTNLGRP_*_ROUTE multicast deliveries follow.
-	opts := netlink.RouteSubscribeOptions{ListExisting: true}
-	if err := netlink.RouteSubscribeWithOptions(updates, done, opts); err != nil {
+	// The library's own ListExisting=true sends a malformed dump
+	// request (RTM_GETROUTE with an IfInfomsg body instead of an
+	// RtMsg one) that recent kernels reject. Subscribe without
+	// it and prime ourselves via netlink.RouteList — routes
+	// already installed when the daemon starts (the common case
+	// on a fresh boot, where systemd-networkd has finished by
+	// the time wanwatchd's main goroutine reaches here) would
+	// otherwise be invisible until they flap.
+	if err := netlink.RouteSubscribeWithOptions(updates, done, netlink.RouteSubscribeOptions{}); err != nil {
 		return fmt.Errorf("rtnl: RouteSubscribe: %w", err)
 	}
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
 	}
+	if err := s.dumpExisting(ctx, out); err != nil {
+		return fmt.Errorf("rtnl: dump existing routes: %w", err)
+	}
 	return s.runLoop(ctx, updates, out)
+}
+
+// dumpExisting walks the kernel's current v4 + v6 routes and
+// feeds each one through handleUpdate, emitting matching
+// RouteEvents on `out`. Mirrors what the library's
+// ListExisting=true path was supposed to do.
+func (s *RouteSubscriber) dumpExisting(ctx context.Context, out chan<- RouteEvent) error {
+	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
+		routes, err := netlink.RouteList(nil, family)
+		if err != nil {
+			return fmt.Errorf("RouteList family=%d: %w", family, err)
+		}
+		for _, r := range routes {
+			ev, emit := s.handleUpdate(netlink.RouteUpdate{
+				Type:  unix.RTM_NEWROUTE,
+				Route: r,
+			})
+			if !emit {
+				continue
+			}
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
 }
 
 // runLoop drains `updates`, folds each via handleUpdate, and
