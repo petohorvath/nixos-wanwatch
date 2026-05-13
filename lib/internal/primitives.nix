@@ -4,9 +4,8 @@
 
   Sections:
     - tryResult     — `tryOk`, `tryErr`
-    - Validation    — `check`, `tagError`, `parseOptional`,
-                      `partitionTry`, `isValidName`,
-                      `isPositiveInt`, `formatErrors`
+    - Validation    — `check`, `parseOptional`, `partitionTry`,
+                      `isValidName`, `isPositiveInt`, `formatErrors`
 
   This module owns nothing type-specific.
 
@@ -30,14 +29,9 @@
   rule collapses to a single line and the full validator becomes
   a `++` cascade.
 
-  ===== tagError =====
-
-  `tagError kind msg`: returns a single `{name = kind; value = msg;}`
-  error record. Equivalent shape to `check kind false msg`'s
-  single-element list, but for the case where the caller already
-  has a sequence of error strings (e.g. from `partitionTry`) and
-  wants to tag each with the same `kind`. Curry-friendly:
-  `builtins.map (tagError "kind") errStrings`.
+  Error records elsewhere — e.g. when forwarding errors from a
+  nested value type — are constructed directly with
+  `lib.nameValuePair "kind" "msg"`, which is the same shape.
 
   ===== partitionTry =====
 
@@ -94,11 +88,9 @@ let
   formatErrors =
     ctx: errors: "${ctx}: " + lib.concatMapStringsSep "; " (e: "[${e.name}] ${e.value}") errors;
 
-  tagError = lib.nameValuePair;
-
   check =
     kind: cond: msg:
-    if cond then [ ] else [ (tagError kind msg) ];
+    if cond then [ ] else [ (lib.nameValuePair kind msg) ];
 
   parseOptional = parser: input: if input == null then tryOk null else parser input;
 
@@ -122,7 +114,6 @@ in
     tryErr
     formatErrors
     check
-    tagError
     parseOptional
     partitionTry
     isValidName

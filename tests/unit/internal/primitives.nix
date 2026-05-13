@@ -95,35 +95,6 @@ in
     ];
   };
 
-  # ===== tagError =====
-
-  testTagErrorStructure = {
-    expr = primitives.tagError "someKind" "some message";
-    expected = {
-      name = "someKind";
-      value = "some message";
-    };
-  };
-
-  testTagErrorCurriable = {
-    # The typical usage: `map (tagError "kind") errors` tags a list
-    # of error strings with the same kind.
-    expr = builtins.map (primitives.tagError "k") [
-      "msg1"
-      "msg2"
-    ];
-    expected = [
-      {
-        name = "k";
-        value = "msg1";
-      }
-      {
-        name = "k";
-        value = "msg2";
-      }
-    ];
-  };
-
   # ===== partitionTry =====
 
   testPartitionTryAllOk = {

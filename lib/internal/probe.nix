@@ -74,7 +74,6 @@ let
     tryOk
     tryErr
     check
-    tagError
     partitionTry
     isPositiveInt
     ;
@@ -133,7 +132,7 @@ let
     else if targets == [ ] then
       check "probeNoTargets" false "targets must be non-empty"
     else
-      builtins.map (tagError "probeInvalidTarget") (parseTargets targets).errors;
+      builtins.map (lib.nameValuePair "probeInvalidTarget") (parseTargets targets).errors;
 
   validateInterval =
     interval:

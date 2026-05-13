@@ -64,7 +64,6 @@ let
     tryOk
     tryErr
     check
-    tagError
     partitionTry
     isValidName
     isPositiveInt
@@ -106,7 +105,7 @@ let
     else if members == [ ] then
       check "groupNoMembers" false "members must be non-empty"
     else
-      builtins.map (tagError "groupInvalidMember") membersResult.errors;
+      builtins.map (lib.nameValuePair "groupInvalidMember") membersResult.errors;
 
   validateStrategy =
     strategy:
@@ -139,7 +138,8 @@ let
       dups = lib.filterAttrs (_: c: c > 1) counts;
     in
     lib.mapAttrsToList (
-      name: _: tagError "groupDuplicateMember" "wan '${name}' is referenced by more than one member"
+      name: _:
+      lib.nameValuePair "groupDuplicateMember" "wan '${name}' is referenced by more than one member"
     ) dups;
 
   # ===== Aggregated validation + construction =====
