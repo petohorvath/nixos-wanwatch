@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -183,6 +184,57 @@ func TestInternetChecksumKnownVector(t *testing.T) {
 	if got, want := internetChecksum(in), uint16(0x220d); got != want {
 		t.Errorf("internetChecksum = %#x, want %#x", got, want)
 	}
+}
+
+// FuzzParseEchoReply runs the parser over arbitrary byte payloads
+// and asserts it never panics. The invariant for the return shape
+// is narrow: either a clean parse (err==nil, ident/seq decoded
+// from bytes 4–8 verbatim) or one of the two named sentinels
+// (ErrReplyTooShort, ErrUnexpectedType) — wrapped.
+//
+// `go test -run none -fuzz=FuzzParseEchoReply ./internal/probe`
+// runs a real fuzz campaign; CI's `go test ./...` runs the seed
+// corpus only.
+func FuzzParseEchoReply(f *testing.F) {
+	// Seed: valid v4 reply, valid v6 reply, truncated, request-as-
+	// reply, garbage type byte, all-zero, all-FF.
+	f.Add(uint8(FamilyV4), []byte{0, 0, 0, 0, 0x12, 0x34, 0x56, 0x78})
+	f.Add(uint8(FamilyV6), []byte{129, 0, 0, 0, 0xAB, 0xCD, 0x00, 0x01})
+	f.Add(uint8(FamilyV4), []byte{0, 0})        // too short
+	f.Add(uint8(FamilyV4), []byte{8, 0, 0, 0, 0, 0, 0, 0}) // request as reply
+	f.Add(uint8(FamilyV4), []byte{})            // empty
+	f.Add(uint8(FamilyV6), []byte(strings.Repeat("\xff", 64)))
+
+	f.Fuzz(func(t *testing.T, familyByte uint8, data []byte) {
+		// Limit the family input to the two values we accept; for
+		// anything else, ParseEchoReply behaviour is undefined and
+		// not part of the fuzzed contract.
+		var family Family
+		switch familyByte & 1 {
+		case 0:
+			family = FamilyV4
+		default:
+			family = FamilyV6
+		}
+
+		ident, seq, err := ParseEchoReply(family, data)
+		if err == nil {
+			// Accept path: ident/seq must equal the bytes at the
+			// fixed offsets, otherwise the decoder is reading from
+			// the wrong place.
+			wantIdent := uint16(data[4])<<8 | uint16(data[5])
+			wantSeq := uint16(data[6])<<8 | uint16(data[7])
+			if ident != wantIdent || seq != wantSeq {
+				t.Errorf("decode mismatch: (ident, seq) = (%#x, %#x); bytes say (%#x, %#x)",
+					ident, seq, wantIdent, wantSeq)
+			}
+			return
+		}
+		// Reject path: must be one of the two sentinels wrapped.
+		if !errors.Is(err, ErrReplyTooShort) && !errors.Is(err, ErrUnexpectedType) {
+			t.Errorf("Parse rejected with un-classified error: %v", err)
+		}
+	})
 }
 
 // TestInternetChecksumOddLength: a single trailing byte must be

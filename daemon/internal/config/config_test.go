@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -237,4 +238,54 @@ func mustParse(t *testing.T, raw string) Config {
 		t.Fatalf("baseline Parse failed unexpectedly: %v", err)
 	}
 	return cfg
+}
+
+// FuzzParse exercises the parser with arbitrary byte inputs. The
+// invariant is shape-level: Parse never panics; every accept path
+// produces a non-zero Config with Schema == SupportedSchema; every
+// reject path returns either ErrSchemaMismatch or ErrInvalidConfig
+// (wrapped) or a JSON-decode error — never a bare value-and-error
+// or a value-without-error.
+//
+// `go test -run none -fuzz=FuzzParse ./internal/config` runs an
+// actual fuzz campaign; `go test ./...` (CI default) only exercises
+// the seed corpus, which is itself a useful regression net.
+func FuzzParse(f *testing.F) {
+	f.Add([]byte(`{"schema":1}`))
+	f.Add([]byte(`{"schema":99}`))
+	f.Add([]byte(`{}`))
+	f.Add([]byte(``))
+	f.Add([]byte(`not json`))
+	f.Add([]byte(`{"schema":1,"global":{"statePath":"a","hooksDir":"b","metricsSocket":"c","logLevel":"info"},"wans":{},"groups":{}}`))
+	f.Add([]byte(`{"schema":1,"wans":null,"groups":null}`))
+	f.Add([]byte(`{"schema":"not-an-int"}`))
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		cfg, err := Parse(raw)
+		// Panic protection is the headline contract — gophers fuzz
+		// for panics. If the body got here without recover, parse
+		// didn't panic on this input; pass.
+		if err == nil {
+			// Accept paths must produce the version we claim to
+			// support; otherwise a future schema bump that forgot
+			// to update Parse would slip through.
+			if cfg.Schema != SupportedSchema {
+				t.Errorf("Parse(%q) returned nil err with Schema=%d, want %d",
+					raw, cfg.Schema, SupportedSchema)
+			}
+			return
+		}
+		// Reject paths surface as either of our sentinels (wrapped)
+		// or a stdlib JSON-decode error. Anything else is a missed
+		// classification.
+		if errors.Is(err, ErrSchemaMismatch) || errors.Is(err, ErrInvalidConfig) {
+			return
+		}
+		// json.Unmarshal returns *json.SyntaxError / *json.UnmarshalTypeError.
+		// We don't import encoding/json here; checking the wrapped
+		// message prefix is enough — Parse adds "config: parsing JSON:".
+		if !strings.Contains(err.Error(), "parsing JSON") {
+			t.Errorf("Parse(%q) returned an unclassified error: %v", raw, err)
+		}
+	})
 }

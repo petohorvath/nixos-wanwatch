@@ -1,6 +1,9 @@
 package selector
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
 
 func TestHysteresisStartsUnhealthy(t *testing.T) {
 	t.Parallel()
@@ -152,5 +155,113 @@ func TestHysteresisClampsNonPositiveThresholds(t *testing.T) {
 	}
 	if v := h.Observe(false); v {
 		t.Errorf("ctor-clamp: first unhealthy obs should flip back; verdict=%v", v)
+	}
+}
+
+// TestHysteresisDeterminismProperty: a HysteresisState is a pure
+// function over (consecutiveUp, consecutiveDown, observation
+// sequence). Two fresh states fed identical inputs must produce
+// identical verdict trajectories — every step, not just the
+// final answer. Replays 50 random sequences as a property check.
+func TestHysteresisDeterminismProperty(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewSource(0xCAFE))
+	for trial := 0; trial < 50; trial++ {
+		up := 1 + rng.Intn(5)
+		down := 1 + rng.Intn(5)
+		seq := make([]bool, 50)
+		for i := range seq {
+			seq[i] = rng.Intn(2) == 0
+		}
+
+		a := NewHysteresisState(up, down)
+		b := NewHysteresisState(up, down)
+		for i, obs := range seq {
+			va := a.Observe(obs)
+			vb := b.Observe(obs)
+			if va != vb {
+				t.Fatalf("trial %d step %d: A=%v B=%v (up=%d down=%d, seq=%v)",
+					trial, i, va, vb, up, down, seq[:i+1])
+			}
+		}
+	}
+}
+
+// TestHysteresisFlipRateBound: a sequence of length N can produce
+// at most ceil(N / min(up,down)) verdict flips. Catches a
+// regression where a flap-suppression bug starts emitting flips
+// proportional to the observation rate.
+func TestHysteresisFlipRateBound(t *testing.T) {
+	t.Parallel()
+	const (
+		up   = 3
+		down = 3
+	)
+	rng := rand.New(rand.NewSource(0xBEEF))
+	const n = 200
+	h := NewHysteresisState(up, down)
+	prev := h.Healthy()
+	flips := 0
+	for i := 0; i < n; i++ {
+		verdict := h.Observe(rng.Intn(2) == 0)
+		if verdict != prev {
+			flips++
+			prev = verdict
+		}
+	}
+	// Tightest theoretical bound for `min(up,down)=3` is
+	// `ceil(n / 3) = 67`. Real flip count is much lower because
+	// random sequences rarely produce 3-in-a-row runs alternating.
+	maxFlips := (n + 2) / 3
+	if flips > maxFlips {
+		t.Errorf("flips = %d, want ≤ %d (min-threshold bound on length %d)", flips, maxFlips, n)
+	}
+}
+
+// TestHysteresisFlipsOnlyAfterRequiredRun: the function flips only
+// after consecutive observations cross the configured threshold —
+// any earlier flip is a bug. Audit every flip in a random trace
+// and assert the previous K observations match the flip direction.
+func TestHysteresisFlipsOnlyAfterRequiredRun(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewSource(0x1337))
+	for trial := 0; trial < 20; trial++ {
+		up := 1 + rng.Intn(4)
+		down := 1 + rng.Intn(4)
+		seq := make([]bool, 100)
+		for i := range seq {
+			seq[i] = rng.Intn(2) == 0
+		}
+
+		h := NewHysteresisState(up, down)
+		prev := h.Healthy()
+		for i, obs := range seq {
+			verdict := h.Observe(obs)
+			if verdict == prev {
+				continue
+			}
+			// Flip happened at index i. The required-run direction:
+			// flipped up ⇒ last `up` observations must all be true;
+			// flipped down ⇒ last `down` must all be false.
+			required := up
+			expected := true
+			if !verdict {
+				required = down
+				expected = false
+			}
+			if i+1 < required {
+				t.Errorf("trial %d: flip at i=%d but only %d obs seen", trial, i, i+1)
+				continue
+			}
+			tail := seq[i+1-required : i+1]
+			for j, o := range tail {
+				if o != expected {
+					t.Errorf("trial %d: flip at i=%d (to %v) but obs[%d]=%v in tail %v",
+						trial, i, verdict, i+1-required+j, o, tail)
+					break
+				}
+			}
+			prev = verdict
+		}
 	}
 }
