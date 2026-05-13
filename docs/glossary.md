@@ -14,7 +14,7 @@ new term means updating this file in the same commit.
 | **Target** | A single IP being probed. A Probe has one or more Targets. | Probe |
 | **Sample** | One probe attempt + result (RTT in microseconds, or `loss`). | Probe |
 | **Window** | Sliding collection of recent Samples used to compute Health metrics. | Hysteresis |
-| **Health** | Derived status of a WAN: `up` / `down` / `degraded` / `unknown`. | Selection |
+| **Health** | Derived status of a WAN: `healthy` / `unhealthy` (boolean in v1; see TODO for v2 multi-state). | Selection |
 | **Hysteresis** | State machine suppressing flapping — consecutive cycles required to flip Health in either direction. | Window |
 | **Group** | Ordered collection of Members + Strategy + Table + Mark. | WAN, Selection |
 | **Member** | A WAN's *membership* in a Group, carrying per-Group attributes (weight, priority). | WAN |

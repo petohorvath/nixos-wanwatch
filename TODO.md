@@ -141,8 +141,26 @@ sibling-to-sibling coupling but kills the converter.
 single-family route change. `RouteReplace` is idempotent so the
 extra netlink syscall is harmless, but tracking per-family dirty
 state would halve the syscalls under flap.
-`daemon/cmd/wanwatchd/state.go:281` (applyRoutes loop),
-`state.go:336-345` (reapply driver).
+`daemon/cmd/wanwatchd/daemon.go:291` (applyRoutes loop),
+`daemon.go:343` (reapply driver).
+
+### Multi-state Health: degraded / unknown
+
+v1 collapses Health to a boolean (`healthy` / `unhealthy`); the
+glossary used to list `up`/`down`/`degraded`/`unknown` but the
+code never modelled the latter two. The shape that would justify
+the churn:
+
+- `degraded` — loss-ratio between the up/down thresholds, or RTT
+  between RttMs{Up,Down}. Currently the band-pass holds the
+  previous verdict; a tri-state would expose "in-band" to consumers.
+- `unknown` — `cooked == false` (no probe sample yet) and carrier
+  unknown. Today this collapses into the cold-start "healthy".
+
+Would change `state.FamilyHealth.Healthy bool` → an enum, the
+state.json schema (bump to v3), `wanwatch_wan_*_healthy` metric
+gauges (label-encode the enum instead), and selector inputs.
+Hold for v2.
 
 ### Split `rtnl` into `rtnl/link` + `rtnl/route`
 
