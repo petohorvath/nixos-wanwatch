@@ -171,6 +171,61 @@ func TestBuildMemberHealthHonorsCarrierAndProbeVerdict(t *testing.T) {
 	}
 }
 
+func TestCarrierUpAcceptsCarrierUpWithUnknownOperstate(t *testing.T) {
+	t.Parallel()
+	// Dummy / loopback / some tunnel drivers (and the kernel 6.18+
+	// dummy in particular) keep operstate at "unknown" — RFC 2863
+	// explicitly permits it for virtual links. Carrier=Up alone
+	// must be enough to count the link as ready, otherwise dummy-
+	// based VM tests never see a Decision fire.
+	w := &wanState{carrier: rtnl.CarrierUp, operstate: rtnl.OperstateUnknown}
+	if !w.carrierUp() {
+		t.Error("carrier=up + operstate=unknown should be ready")
+	}
+}
+
+func TestCarrierUpAcceptsOperstateUpWithUnknownCarrier(t *testing.T) {
+	t.Parallel()
+	// Symmetric: some hardware drivers drive operstate before
+	// IFF_LOWER_UP propagates. Operstate=Up alone must also be
+	// enough — taking the earliest positive signal.
+	w := &wanState{carrier: rtnl.CarrierUnknown, operstate: rtnl.OperstateUp}
+	if !w.carrierUp() {
+		t.Error("carrier=unknown + operstate=up should be ready")
+	}
+}
+
+func TestCarrierUpRejectsCarrierDown(t *testing.T) {
+	t.Parallel()
+	// Carrier-down is authoritative: even if operstate claims Up,
+	// the physical link is gone and the WAN must not be selected.
+	w := &wanState{carrier: rtnl.CarrierDown, operstate: rtnl.OperstateUp}
+	if w.carrierUp() {
+		t.Error("carrier=down must override operstate=up")
+	}
+}
+
+func TestCarrierUpRejectsOperstateDown(t *testing.T) {
+	t.Parallel()
+	// Admin-down (operstate=Down) must override carrier=Up — the
+	// user has explicitly disabled the interface even though the
+	// cable is live.
+	w := &wanState{carrier: rtnl.CarrierUp, operstate: rtnl.OperstateDown}
+	if w.carrierUp() {
+		t.Error("operstate=down must override carrier=up")
+	}
+}
+
+func TestCarrierUpRejectsBothUnknown(t *testing.T) {
+	t.Parallel()
+	// No positive signal seen → not ready. This is the initial
+	// state before any rtnl event has been processed.
+	w := &wanState{carrier: rtnl.CarrierUnknown, operstate: rtnl.OperstateUnknown}
+	if w.carrierUp() {
+		t.Error("both unknown should not be ready")
+	}
+}
+
 func TestHookEventForMatrix(t *testing.T) {
 	t.Parallel()
 	primary := "primary"

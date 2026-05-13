@@ -45,8 +45,24 @@ type wanState struct {
 
 // carrierUp returns whether the WAN's interface is currently
 // operationally up at the link layer — gates everything downstream.
+//
+// Carrier and operstate are OR'd, not AND'd: either signal saying
+// "up" is enough to count the link as ready. Dummy / loopback /
+// some tunnel drivers leave operstate at "unknown" forever (RFC
+// 2863 explicitly allows this for virtual interfaces) yet drive
+// carrier via IFF_LOWER_UP; conversely some hardware drivers
+// drive operstate before carrier propagates. We additionally
+// reject the explicit "down-ish" operstates so an admin-down
+// link isn't selected just because the cable happens to be live.
 func (w *wanState) carrierUp() bool {
-	return w.carrier == rtnl.CarrierUp && w.operstate == rtnl.OperstateUp
+	if w.carrier == rtnl.CarrierDown {
+		return false
+	}
+	switch w.operstate {
+	case rtnl.OperstateDown, rtnl.OperstateLowerLayerDown, rtnl.OperstateNotPresent:
+		return false
+	}
+	return w.carrier == rtnl.CarrierUp || w.operstate == rtnl.OperstateUp
 }
 
 // groupState is the per-group runtime slice.
