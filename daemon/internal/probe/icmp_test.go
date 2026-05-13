@@ -200,9 +200,9 @@ func FuzzParseEchoReply(f *testing.F) {
 	// reply, garbage type byte, all-zero, all-FF.
 	f.Add(uint8(FamilyV4), []byte{0, 0, 0, 0, 0x12, 0x34, 0x56, 0x78})
 	f.Add(uint8(FamilyV6), []byte{129, 0, 0, 0, 0xAB, 0xCD, 0x00, 0x01})
-	f.Add(uint8(FamilyV4), []byte{0, 0})        // too short
+	f.Add(uint8(FamilyV4), []byte{0, 0})                   // too short
 	f.Add(uint8(FamilyV4), []byte{8, 0, 0, 0, 0, 0, 0, 0}) // request as reply
-	f.Add(uint8(FamilyV4), []byte{})            // empty
+	f.Add(uint8(FamilyV4), []byte{})                       // empty
 	f.Add(uint8(FamilyV6), []byte(strings.Repeat("\xff", 64)))
 
 	f.Fuzz(func(t *testing.T, familyByte uint8, data []byte) {
