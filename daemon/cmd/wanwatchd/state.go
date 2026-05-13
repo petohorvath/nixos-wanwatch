@@ -197,7 +197,14 @@ func (d *daemon) handleProbeResult(r probe.ProbeResult) {
 
 	if ws.healthy != prevAggregate {
 		d.recomputeAffectedGroups(r.Wan, reasonHealth)
+		return
 	}
+	// Per-family verdict transitioned but the aggregate did not
+	// (e.g. v4 went healthy while v6 stayed down under
+	// familyHealthPolicy=all). recomputeAffectedGroups will not
+	// fire, but state.json still carries the stale per-family
+	// slot — republish so external readers see the change.
+	d.writeStateSnapshot()
 }
 
 // handleLinkEvent updates per-WAN carrier/operstate. Carrier-down

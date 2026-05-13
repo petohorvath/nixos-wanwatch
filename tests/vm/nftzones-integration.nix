@@ -149,11 +149,26 @@ pkgs.testers.runNixOSTest {
     )
 
     # 2. The daemon installed the fwmark policy-routing rule for
-    # both families (PLAN §6.1 step 2).
-    v4_rules = router.succeed(f"ip -4 rule show fwmark 0x{mark:x}")
-    assert v4_rules.strip(), f"v4 ip rule for fwmark {mark} missing"
-    v6_rules = router.succeed(f"ip -6 rule show fwmark 0x{mark:x}")
-    assert v6_rules.strip(), f"v6 ip rule for fwmark {mark} missing"
+    # both families (PLAN §6.1 step 2). `ip rule show fwmark X`
+    # filtering proved brittle across iproute2 versions (newer
+    # releases want `fwmark X/MASK`); list the full set and grep
+    # the printed mark instead.
+    def has_fwmark_rule(family_flag, mark):
+        rules = router.succeed(f"ip {family_flag} rule show").splitlines()
+        return any(
+            f"fwmark 0x{mark:x}" in line or f"fwmark 0x{mark:08x}" in line
+            for line in rules
+        )
+
+
+    assert has_fwmark_rule("-4", mark), (
+        f"v4 ip rule for fwmark {mark} ({hex(mark)}) missing:\n"
+        + router.succeed("ip -4 rule show")
+    )
+    assert has_fwmark_rule("-6", mark), (
+        f"v6 ip rule for fwmark {mark} ({hex(mark)}) missing:\n"
+        + router.succeed("ip -6 rule show")
+    )
 
     # 3. The daemon wrote the default route into the group's table
     # — a scope-link route out of wan0 (point-to-point, no gateway).

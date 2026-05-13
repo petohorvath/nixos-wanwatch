@@ -122,8 +122,6 @@ pkgs.testers.runNixOSTest {
     # 5. The daemon's bootstrap step installed fwmark policy rules
     #    for the configured group, in BOTH families. PLAN §6.1.
     mark = router.succeed(
-        "jq -r '.services.wanwatch.marks.\"home-uplink\"' "
-        "/etc/wanwatch/config.json 2>/dev/null || "
         "jq -r '.groups.\"home-uplink\".mark' /etc/wanwatch/config.json"
     ).strip()
     router.succeed(f"ip rule show fwmark 0x{int(mark):x} | grep -q .")
