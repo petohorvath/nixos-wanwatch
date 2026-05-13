@@ -95,12 +95,29 @@ func familiesFromTargets(targets []string) struct{ v4, v6 bool } {
 	return out
 }
 
-// targetsFor selects the targets to probe for `wan` in `family`.
-// v1: the same targets list is used for both families (config-render
-// time validation guarantees their literals match the family). A
-// per-family target list lands in v0.2 if operators need it.
-func targetsFor(wan config.Wan, _ probe.Family) []string {
-	return wan.Probe.Targets
+// targetsFor selects the targets to probe for `wan` in `family`
+// by filtering `wan.Probe.Targets` to the literals of that family.
+// Mixed-family lists are the norm (a v4+v6 WAN declares both
+// upstream); the daemon spawns one pinger per (WAN, family) and
+// each pinger expects only same-family targets — handing it
+// cross-family literals trips `probe.Pinger.Run`'s assert.
+//
+// Per-family target lists (a future `probe.targetsV4 /
+// targetsV6` override) would replace this filter; tracked in
+// TODO.md.
+func targetsFor(wan config.Wan, family probe.Family) []string {
+	out := make([]string, 0, len(wan.Probe.Targets))
+	for _, t := range wan.Probe.Targets {
+		ip := net.ParseIP(t)
+		if ip == nil {
+			continue
+		}
+		isV4 := ip.To4() != nil
+		if (family == probe.FamilyV4) == isV4 {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // startSubscriber opens an rtnetlink subscription filtered to the

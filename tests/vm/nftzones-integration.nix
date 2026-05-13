@@ -129,8 +129,21 @@ pkgs.testers.runNixOSTest {
     assert isinstance(table, int) and table > 0, f"table = {table!r}"
 
     # 1. The mark value reached the compiled nftables ruleset.
+    #    nft pretty-prints marks zero-padded to 8 hex digits
+    #    (e.g. 6320 → "0x000018b0"), so match on the int value
+    #    after stripping the prefix + leading zeros rather than
+    #    on a hand-rolled hex string.
     ruleset = router.succeed("nft list ruleset")
-    assert f"meta mark set 0x{mark:x}" in ruleset or f"meta mark set {mark}" in ruleset, (
+    import re
+
+    found = any(
+        int(m.group(1), 16) == mark
+        for m in re.finditer(r"meta mark set 0x([0-9a-fA-F]+)", ruleset)
+    ) or any(
+        int(m.group(1)) == mark
+        for m in re.finditer(r"meta mark set (\d+)\b", ruleset)
+    )
+    assert found, (
         f"nftables ruleset missing mark {mark} ({hex(mark)}):\n{ruleset}"
     )
 
