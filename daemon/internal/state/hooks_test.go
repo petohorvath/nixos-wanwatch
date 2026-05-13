@@ -97,9 +97,9 @@ func TestRunPassesEnvVars(t *testing.T) {
 
 	r := Runner{Dir: dir}
 	r.Run(context.Background(), HookContext{
-		Event:    EventUp,
-		Group:    "home",
-		WanNew:   "primary",
+		Event:        EventUp,
+		Group:        "home",
+		WanNew:       "primary",
 		GatewayV4New: "192.0.2.1",
 		Families:     []string{"v4", "v6"},
 		Table:        100,

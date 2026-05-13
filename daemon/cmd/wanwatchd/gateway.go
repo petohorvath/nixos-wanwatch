@@ -83,4 +83,3 @@ func (s Snapshot) String(iface string, fam rtnl.RouteFamily) string {
 	}
 	return gw.String()
 }
-

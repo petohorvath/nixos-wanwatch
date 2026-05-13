@@ -29,20 +29,20 @@ const (
 // defined in PLAN §5.5. Empty-string fields are emitted as empty
 // env vars (not unset).
 type HookContext struct {
-	Event     Event
-	Group     string
-	WanOld    string
-	WanNew    string
-	IfaceOld  string
-	IfaceNew  string
+	Event        Event
+	Group        string
+	WanOld       string
+	WanNew       string
+	IfaceOld     string
+	IfaceNew     string
 	GatewayV4Old string
 	GatewayV4New string
 	GatewayV6Old string
 	GatewayV6New string
-	Families  []string // e.g. ["v4", "v6"]
-	Table     int
-	Mark      int
-	Timestamp time.Time
+	Families     []string // e.g. ["v4", "v6"]
+	Table        int
+	Mark         int
+	Timestamp    time.Time
 }
 
 // HookResult records the outcome of one hook invocation. Returned
