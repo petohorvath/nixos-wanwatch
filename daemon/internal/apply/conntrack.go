@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -17,8 +18,12 @@ import (
 //
 // PLAN §5.5 marks conntrack flush as best-effort — the caller
 // (orchestrator) logs failures but does not fail the apply step.
-// Returns the number of entries deleted.
-func FlushBySource(family probe.Family, ip net.IP) (uint, error) {
+// Returns the number of entries deleted. ctx is checked at entry —
+// see WriteDefault for the cancellation contract.
+func FlushBySource(ctx context.Context, family probe.Family, ip net.IP) (uint, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if err := validateFlush(family, ip); err != nil {
 		return 0, err
 	}

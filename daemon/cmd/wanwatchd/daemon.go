@@ -139,10 +139,10 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 // group + family combo. Runs once at startup before any Decision —
 // the rules survive across daemon restarts (EnsureRule swallows
 // EEXIST), so re-running is a no-op.
-func (d *daemon) bootstrap() error {
+func (d *daemon) bootstrap(ctx context.Context) error {
 	for _, g := range d.cfg.Groups {
 		for _, fam := range probe.AllFamilies {
-			if err := apply.EnsureRule(apply.FwmarkRule{
+			if err := apply.EnsureRule(ctx, apply.FwmarkRule{
 				Family: fam,
 				Mark:   g.Mark,
 				Table:  g.Table,
@@ -164,7 +164,7 @@ func (d *daemon) bootstrap() error {
 // handleProbeResult folds a per-cycle result into the daemon's
 // runtime state. If the (WAN, family) Healthy verdict changes, it
 // recomputes every group containing the WAN.
-func (d *daemon) handleProbeResult(r probe.ProbeResult) {
+func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	ws, ok := d.wans[r.Wan]
 	if !ok {
 		return
@@ -192,7 +192,7 @@ func (d *daemon) handleProbeResult(r probe.ProbeResult) {
 	d.metrics.WanHealthy.WithLabelValues(ws.name).Set(boolToFloat(ws.healthy))
 
 	if ws.healthy != prevAggregate {
-		d.recomputeAffectedGroups(r.Wan, reasonHealth)
+		d.recomputeAffectedGroups(ctx, r.Wan, reasonHealth)
 		return
 	}
 	// Per-family verdict transitioned but the aggregate did not
@@ -207,7 +207,7 @@ func (d *daemon) handleProbeResult(r probe.ProbeResult) {
 // fast-tracks the WAN to unhealthy (PLAN §8 cold-start invariant)
 // — the selector sees the carrier change immediately, without
 // waiting for the probe to time out.
-func (d *daemon) handleLinkEvent(e rtnl.LinkEvent) {
+func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 	for _, ws := range d.wans {
 		if ws.cfg.Interface != e.Name {
 			continue
@@ -224,7 +224,7 @@ func (d *daemon) handleLinkEvent(e rtnl.LinkEvent) {
 		d.metrics.WanOperstate.WithLabelValues(ws.name).Set(float64(int(e.Operstate)))
 
 		if prevUp != ws.carrierUp() {
-			d.recomputeAffectedGroups(ws.name, reasonCarrier)
+			d.recomputeAffectedGroups(ctx, ws.name, reasonCarrier)
 		}
 		return
 	}
@@ -232,19 +232,19 @@ func (d *daemon) handleLinkEvent(e rtnl.LinkEvent) {
 
 // recomputeAffectedGroups runs selector.Select for every group
 // containing `wan` and applies any resulting change.
-func (d *daemon) recomputeAffectedGroups(wan string, reason decisionReason) {
+func (d *daemon) recomputeAffectedGroups(ctx context.Context, wan string, reason decisionReason) {
 	for _, g := range d.groups {
 		if !groupContainsWAN(g.cfg, wan) {
 			continue
 		}
-		d.recomputeGroup(g, reason)
+		d.recomputeGroup(ctx, g, reason)
 	}
 }
 
 // recomputeGroup is the per-group Decision path: run the selector,
 // detect a change, and apply it through the apply + state + hook
 // layers.
-func (d *daemon) recomputeGroup(g *groupState, reason decisionReason) {
+func (d *daemon) recomputeGroup(ctx context.Context, g *groupState, reason decisionReason) {
 	healths := buildMemberHealth(g.cfg, d.wans)
 	sel, err := selector.Select(g.cfg, healths)
 	if err != nil {
@@ -273,7 +273,7 @@ func (d *daemon) recomputeGroup(g *groupState, reason decisionReason) {
 	)
 
 	if sel.Active != nil {
-		d.applyRoutes(g, *sel.Active)
+		d.applyRoutes(ctx, g, *sel.Active)
 	}
 	d.writeStateSnapshot()
 	d.runHooks(g, old, sel.Active)
@@ -286,7 +286,7 @@ func (d *daemon) recomputeGroup(g *groupState, reason decisionReason) {
 // no entry yet (kernel hasn't installed a default on that link),
 // the family is logged + skipped — a subsequent RouteEvent will
 // trigger a reapply.
-func (d *daemon) applyRoutes(g *groupState, activeWan string) {
+func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan string) {
 	ws, ok := d.wans[activeWan]
 	if !ok {
 		return
@@ -318,7 +318,7 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 			route.Gateway = gw
 		}
 		started := time.Now()
-		err := apply.WriteDefault(route)
+		err := apply.WriteDefault(ctx, route)
 		d.metrics.ApplyRouteDuration.WithLabelValues(g.cfg.Name, famLabel).Observe(time.Since(started).Seconds())
 		if err != nil {
 			d.logger.Error("route write", "group", g.cfg.Name, "family", famLabel, "err", err)
@@ -338,7 +338,7 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 // changed. RouteReplace is idempotent so re-writing a known-good
 // route costs one extra netlink syscall — cheaper than tracking
 // per-family dirty state.
-func (d *daemon) handleRouteEvent(e rtnl.RouteEvent) {
+func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	prev, hadPrev := d.gateways.Get(e.Iface, e.Family)
 	switch e.Op {
 	case rtnl.RouteEventAdd:
@@ -360,7 +360,7 @@ func (d *daemon) handleRouteEvent(e rtnl.RouteEvent) {
 		if !ok || ws.cfg.Interface != e.Iface {
 			continue
 		}
-		d.applyRoutes(g, *g.active)
+		d.applyRoutes(ctx, g, *g.active)
 	}
 }
 

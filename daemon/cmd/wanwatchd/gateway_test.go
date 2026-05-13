@@ -122,7 +122,7 @@ func TestHandleRouteEventUpdatesCacheOnAdd(t *testing.T) {
 	d := testDaemon(t, testCfg())
 	gw := net.ParseIP("192.0.2.1")
 
-	d.handleRouteEvent(rtnl.RouteEvent{
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "eth0",
 		Family:  rtnl.RouteFamilyV4,
@@ -143,7 +143,7 @@ func TestHandleRouteEventClearsCacheOnDel(t *testing.T) {
 	d := testDaemon(t, testCfg())
 	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 
-	d.handleRouteEvent(rtnl.RouteEvent{
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:     rtnl.RouteEventDel,
 		Iface:  "eth0",
 		Family: rtnl.RouteFamilyV4,
@@ -162,7 +162,7 @@ func TestHandleRouteEventIgnoresUnrelatedInterface(t *testing.T) {
 	// should fire. We can't easily assert "no reapply"; we just
 	// verify the cache update happens for an iface no WAN uses.
 	d := testDaemon(t, testCfg())
-	d.handleRouteEvent(rtnl.RouteEvent{
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "lo",
 		Family:  rtnl.RouteFamilyV4,

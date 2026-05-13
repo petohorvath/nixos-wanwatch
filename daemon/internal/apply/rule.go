@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -21,8 +22,12 @@ type FwmarkRule struct {
 // EnsureRule installs `r` if it isn't already present. RuleAdd
 // returns EEXIST on a duplicate; swallow it so the operation is
 // idempotent regardless of whether a previous daemon run left the
-// rule behind.
-func EnsureRule(r FwmarkRule) error {
+// rule behind. ctx is checked at entry — see WriteDefault for the
+// cancellation contract.
+func EnsureRule(ctx context.Context, r FwmarkRule) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return ensureRuleVia(netlink.RuleAdd, r)
 }
 

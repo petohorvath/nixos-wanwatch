@@ -106,7 +106,7 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 		t.Fatalf("precondition: primary.healthy = false, want true at cold-start")
 	}
 
-	d.handleProbeResult(probe.ProbeResult{
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
 		Stats:  probe.FamilyStats{LossRatio: 0.95, RTTMicros: 50_000},
@@ -125,7 +125,7 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 func TestHandleRouteEventPopulatesGatewayCache(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
-	d.handleRouteEvent(rtnl.RouteEvent{
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "eth0",
 		Family:  rtnl.RouteFamilyV4,
@@ -142,7 +142,7 @@ func TestHandleRouteEventDelClearsCache(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
 	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
-	d.handleRouteEvent(rtnl.RouteEvent{
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:     rtnl.RouteEventDel,
 		Iface:  "eth0",
 		Family: rtnl.RouteFamilyV4,

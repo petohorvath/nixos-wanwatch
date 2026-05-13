@@ -69,7 +69,7 @@ func TestFlushBySourcePropagatesValidationError(t *testing.T) {
 	// nil ip → fail fast before any netlink call. This branch is
 	// the only one we can drive without root + a live conntrack
 	// table; the netlink-bound path is VM-tier per PLAN §9.4.
-	n, err := FlushBySource(probe.FamilyV4, nil)
+	n, err := FlushBySource(t.Context(), probe.FamilyV4, nil)
 	if err == nil {
 		t.Fatal("FlushBySource(nil ip) = nil err, want validation error")
 	}

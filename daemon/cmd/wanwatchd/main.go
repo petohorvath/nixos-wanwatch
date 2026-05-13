@@ -123,7 +123,7 @@ func run(parent context.Context, args []string, logSink *os.File) error {
 	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
 
 	d := newDaemon(&cfg, mreg, logger)
-	if err := d.bootstrap(); err != nil {
+	if err := d.bootstrap(ctx); err != nil {
 		cancel()
 		<-mErrCh
 		return fmt.Errorf("bootstrap: %w", err)

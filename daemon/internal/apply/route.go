@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -33,7 +34,14 @@ type DefaultRoute struct {
 // WriteDefault installs the default route described by `d`. Uses
 // RouteReplace so a pre-existing default in the same table is
 // overwritten atomically — the operation is therefore idempotent.
-func WriteDefault(d DefaultRoute) error {
+//
+// ctx is observed only on entry: the underlying netlink syscall is
+// synchronous and not cancellable, but a cancelled ctx aborts the
+// op before any kernel state changes.
+func WriteDefault(ctx context.Context, d DefaultRoute) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateDefaultRoute(d); err != nil {
 		return err
 	}

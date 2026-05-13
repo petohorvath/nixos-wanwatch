@@ -190,11 +190,11 @@ func eventLoop(
 		case <-ctx.Done():
 			return
 		case r := <-probeResults:
-			d.handleProbeResult(r)
+			d.handleProbeResult(ctx, r)
 		case e := <-linkEvents:
-			d.handleLinkEvent(e)
+			d.handleLinkEvent(ctx, e)
 		case e := <-routeEvents:
-			d.handleRouteEvent(e)
+			d.handleRouteEvent(ctx, e)
 		}
 	}
 }
