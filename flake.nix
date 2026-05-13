@@ -272,6 +272,37 @@
                 touch $out
               '';
 
+          # Race-detector pass. `go test -race` links the runtime
+          # against the race runtime — needs cgo and a C toolchain
+          # in PATH (hence `pkgs.gcc` here; the `daemon` and
+          # `coverage` checks run with CGO_ENABLED=0 to keep their
+          # closures slim).
+          race =
+            pkgs.runCommand "wanwatch-daemon-race"
+              {
+                src = ./daemon;
+                nativeBuildInputs = [
+                  pkgs.go
+                  pkgs.gcc
+                ];
+                GOFLAGS = "-mod=vendor";
+                GOPROXY = "off";
+                GOSUMDB = "off";
+                # CGO_ENABLED=1 is the whole point — without it,
+                # `-race` errors out with "race requires cgo".
+                CGO_ENABLED = "1";
+              }
+              ''
+                export HOME=$TMPDIR
+                export GOCACHE=$TMPDIR/gocache
+                mkdir -p source
+                cp -r $src/* source/
+                chmod -R u+w source
+                cd source
+                go test -race -timeout 120s ./...
+                touch $out
+              '';
+
           # Build the daemon as part of `nix flake check` so a
           # regression in `pkgs/wanwatchd.nix` (e.g. a missing source
           # file under `fileset`, a vendored-dep drift) fails CI
@@ -307,9 +338,14 @@
         )
       );
 
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShellNoCC {
-          packages = [
+      devShells = forAllSystems (
+        pkgs:
+        let
+          # `go test -race` needs a C toolchain — the race runtime
+          # is compiled and linked via cgo. mkShell (not -NoCC)
+          # provides the stdenv with gcc on its PATH so `go test
+          # -race ./...` Just Works inside `nix develop`.
+          base = [
             (treefmtFor pkgs).config.build.wrapper
             pkgs.nixfmt
             pkgs.go
@@ -318,7 +354,10 @@
             pkgs.golangci-lint
             pkgs.gofumpt
           ];
-        };
-      });
+        in
+        {
+          default = pkgs.mkShell { packages = base; };
+        }
+      );
     };
 }

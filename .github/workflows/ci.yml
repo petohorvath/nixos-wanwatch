@@ -117,6 +117,8 @@ jobs:
         run: nix build --print-build-logs .#checks.${{ matrix.system }}.package
       - name: Coverage gates (per PLAN §9.2)
         run: nix build --print-build-logs .#checks.${{ matrix.system }}.coverage
+      - name: Race detector
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.race
 
   integration:
     name: integration tests (${{ matrix.system }})
