@@ -54,8 +54,8 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 
 	body := scrape(t, r)
 	for _, want := range []string{
-		"wanwatch_probe_rtt_milliseconds",
-		"wanwatch_probe_jitter_milliseconds",
+		"wanwatch_probe_rtt_seconds",
+		"wanwatch_probe_jitter_seconds",
 		"wanwatch_probe_loss_ratio",
 		"wanwatch_probe_samples_total",
 		"wanwatch_wan_carrier",

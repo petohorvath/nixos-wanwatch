@@ -2,9 +2,7 @@
 
 The JSON snapshot the daemon publishes to `services.wanwatch.global.statePath` (default `/run/wanwatch/state.json`). Written atomically (tmpfile + `rename`) so readers always see a consistent file.
 
-**Schema version**: `2`. Bumped on any backwards-incompatible field change.
-
-Schema-2 additions: per-WAN `gateways.{v4,v6}` reflecting the daemon-discovered next-hop. See `SchemaVersion` history in `daemon/internal/state/state.go`.
+**Schema version**: `1`. Pre-release the version is pinned — there are no external consumers yet, so in-tree refactors don't bump it. The first tagged release freezes shape 1; from then on, any backwards-incompatible field change bumps the number.
 
 Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches `State` and `State.Wans/Groups` value types.
 
@@ -12,7 +10,7 @@ Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches 
 
 ```json
 {
-  "schema": 2,
+  "schema": 1,
   "updatedAt": "2026-05-12T14:30:01.234567890Z",
   "wans":   { "<name>": { ... }, ... },
   "groups": { "<name>": { ... }, ... }
@@ -48,8 +46,8 @@ Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches 
 | `carrier` | string | `"up"` / `"down"` / `"unknown"`. |
 | `operstate` | string | IFLA_OPERSTATE textual: `up`, `down`, `dormant`, `lowerlayerdown`, `notpresent`, `testing`, `unknown`. |
 | `healthy` | bool | Aggregate per `probe.familyHealthPolicy`. |
-| `gateways.v4` | string | Daemon-discovered v4 next-hop, or `""` if the kernel has no v4 default on this interface (or the route is scope-link, i.e. `pointToPoint`). Schema-2. |
-| `gateways.v6` | string | Same for v6. Schema-2. |
+| `gateways.v4` | string | Daemon-discovered v4 next-hop, or `""` if the kernel has no v4 default on this interface (or the route is scope-link, i.e. `pointToPoint`). |
+| `gateways.v6` | string | Same for v6. |
 | `families` | object | Per-family slice; one entry per family present in `probe.targets`. |
 
 ## `wans.<name>.families.<v4|v6>`
@@ -57,9 +55,9 @@ Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches 
 ```json
 {
   "healthy": true,
-  "rttMs": 12.4,
-  "jitterMs": 1.2,
-  "lossPct": 0.0,
+  "rttSeconds": 0.0124,
+  "jitterSeconds": 0.0012,
+  "lossRatio": 0.0,
   "targets": [ "1.1.1.1" ]
 }
 ```
@@ -67,9 +65,9 @@ Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches 
 | Field | Type | Meaning |
 |---|---|---|
 | `healthy` | bool | Post-threshold, post-hysteresis verdict. False until the first ProbeResult cooks (PLAN §8 cold-start). |
-| `rttMs` | float | Mean RTT across the family's targets in milliseconds. |
-| `jitterMs` | float | Mean jitter (stddev) across the family's targets. |
-| `lossPct` | float | Mean loss ratio × 100. |
+| `rttSeconds` | float | Mean RTT across the family's targets, seconds. |
+| `jitterSeconds` | float | Mean jitter (stddev) across the family's targets, seconds. |
+| `lossRatio` | float | Mean loss in [0, 1]. |
 | `targets` | array<string> | Probe targets for this family (echo of config). |
 
 ## `groups.<name>`
@@ -134,4 +132,6 @@ logger -t wanwatch \
 
 ## Compatibility policy
 
-Bump `state.SchemaVersion` whenever a field is added, renamed, or changes meaning. Unlike `config.json` (where naive readers are the daemon itself, which we control), `state.json` consumers are downstream — dashboards, ad-hoc scripts, monitoring agents — and benefit from a schema number they can branch on to opt into new fields. Additive bumps are therefore deliberate.
+Pre-release: `state.SchemaVersion` stays at 1. There are no external consumers yet, so in-tree refactors don't bump it.
+
+Post-release: bump `state.SchemaVersion` whenever a field is added, renamed, or changes meaning. Unlike `config.json` (where naive readers are the daemon itself, which we control), `state.json` consumers are downstream — dashboards, ad-hoc scripts, monitoring agents — and benefit from a schema number they can branch on to opt into new fields. Additive bumps are therefore deliberate.

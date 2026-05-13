@@ -68,15 +68,15 @@ func New() *Registry {
 		ProbeRTT: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: "probe",
-			Name:      "rtt_milliseconds",
-			Help:      "Last sample's round-trip time per probe target, milliseconds.",
+			Name:      "rtt_seconds",
+			Help:      "Last sample's round-trip time per probe target, seconds.",
 		}, []string{"wan", "target", "family"}),
 
 		ProbeJitter: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: "probe",
-			Name:      "jitter_milliseconds",
-			Help:      "Per-(WAN, family) jitter across the sliding window, milliseconds.",
+			Name:      "jitter_seconds",
+			Help:      "Per-(WAN, family) jitter across the sliding window, seconds.",
 		}, []string{"wan", "family"}),
 
 		ProbeLoss: prometheus.NewGaugeVec(prometheus.GaugeOpts{

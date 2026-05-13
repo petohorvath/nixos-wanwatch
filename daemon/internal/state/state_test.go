@@ -160,7 +160,7 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 				Operstate: "up",
 				Healthy:   true,
 				Families: map[string]FamilyHealth{
-					"v4": {Healthy: true, RTTMs: 12.4, JitterMs: 1.2, LossPct: 0.0, Targets: []string{"1.1.1.1"}},
+					"v4": {Healthy: true, RTTSeconds: 0.0124, JitterSeconds: 0.0012, LossRatio: 0.0, Targets: []string{"1.1.1.1"}},
 				},
 			},
 		},
@@ -182,8 +182,8 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if out.Wans["primary"].Families["v4"].RTTMs != 12.4 {
-		t.Errorf("nested RTT did not round-trip: %v", out.Wans["primary"].Families["v4"].RTTMs)
+	if out.Wans["primary"].Families["v4"].RTTSeconds != 0.0124 {
+		t.Errorf("nested RTT did not round-trip: %v", out.Wans["primary"].Families["v4"].RTTSeconds)
 	}
 	if out.Groups["home"].Active == nil || *out.Groups["home"].Active != "primary" {
 		t.Errorf("Active did not round-trip: %v", out.Groups["home"].Active)
@@ -192,13 +192,11 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 
 func TestSchemaVersionConstantStable(t *testing.T) {
 	t.Parallel()
-	// The SchemaVersion constant pairs with the schema bump
-	// procedure in PLAN §12 OQ #1. A change here is a load-bearing
-	// decision.
-	//
-	// Schema 2 added the per-WAN `gateways.{v4,v6}` field.
-	if SchemaVersion != 2 {
-		t.Errorf("SchemaVersion = %d, want 2 (gateways field landed)", SchemaVersion)
+	// Pre-release we pin SchemaVersion at 1. Changing this is a
+	// load-bearing decision — see PLAN §12 OQ #1 and the constant's
+	// doc-comment for the bump policy.
+	if SchemaVersion != 1 {
+		t.Errorf("SchemaVersion = %d, want 1 (pre-release pin)", SchemaVersion)
 	}
 }
 

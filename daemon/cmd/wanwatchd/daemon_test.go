@@ -71,8 +71,8 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("Wans[primary].Families[v4] missing")
 	}
-	if fh.RTTMs != 12.5 || fh.JitterMs != 0.8 || fh.LossPct != 5 {
-		t.Errorf("FamilyHealth = %+v, want RTTMs=12.5 JitterMs=0.8 LossPct=5", fh)
+	if fh.RTTSeconds != 0.0125 || fh.JitterSeconds != 0.0008 || fh.LossRatio != 0.05 {
+		t.Errorf("FamilyHealth = %+v, want RTTSeconds=0.0125 JitterSeconds=0.0008 LossRatio=0.05", fh)
 	}
 	if _, ok := got.Groups["home"]; !ok {
 		t.Fatalf("Groups[home] missing")

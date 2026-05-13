@@ -11,8 +11,8 @@
        group's routing table — the non-PtP apply path that this
        commit series introduced.
 
-  Schema-2 boundary: this test pins both the discovery loop and the
-  state.json gateway field.
+  This test pins both the discovery loop and the state.json
+  gateway field.
 */
 {
   pkgs,
@@ -109,11 +109,11 @@ pkgs.testers.runNixOSTest {
         f"kernel main-RIB default not installed:\n{main_route}"
     )
 
-    # 2. The daemon publishes state.json with schema=2 + the
+    # 2. The daemon publishes state.json with schema=1 + the
     #    discovered gateway in wans.uplink.gateways.v4.
     def has_gateway():
         state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-        if state["schema"] != 2:
+        if state["schema"] != 1:
             return False
         return state["wans"]["uplink"]["gateways"]["v4"] == "192.168.1.1"
 

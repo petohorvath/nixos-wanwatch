@@ -377,11 +377,11 @@ func (d *daemon) writeStateSnapshot() {
 		fams := make(map[string]state.FamilyHealth, len(ws.families))
 		for fam, fs := range ws.families {
 			fams[fam.String()] = state.FamilyHealth{
-				Healthy:  fs.healthy,
-				RTTMs:    float64(fs.stats.RTTMicros) / 1000,
-				JitterMs: float64(fs.stats.JitterMicros) / 1000,
-				LossPct:  fs.stats.LossRatio * 100,
-				Targets:  ws.cfg.Probe.Targets,
+				Healthy:       fs.healthy,
+				RTTSeconds:    float64(fs.stats.RTTMicros) / 1e6,
+				JitterSeconds: float64(fs.stats.JitterMicros) / 1e6,
+				LossRatio:     fs.stats.LossRatio,
+				Targets:       ws.cfg.Probe.Targets,
 			}
 		}
 		snap.Wans[ws.name] = state.Wan{
@@ -469,10 +469,10 @@ const maxHooksPerEvent = 8
 
 func (d *daemon) recordProbeMetrics(r probe.ProbeResult, stableHealthy bool) {
 	famLabel := r.Family.String()
-	d.metrics.ProbeJitter.WithLabelValues(r.Wan, famLabel).Set(float64(r.Stats.JitterMicros) / 1000)
+	d.metrics.ProbeJitter.WithLabelValues(r.Wan, famLabel).Set(float64(r.Stats.JitterMicros) / 1e6)
 	d.metrics.ProbeLoss.WithLabelValues(r.Wan, famLabel).Set(r.Stats.LossRatio)
 	for _, t := range r.Stats.PerTarget {
-		d.metrics.ProbeRTT.WithLabelValues(r.Wan, t.Target, famLabel).Set(float64(t.RTTMicros) / 1000)
+		d.metrics.ProbeRTT.WithLabelValues(r.Wan, t.Target, famLabel).Set(float64(t.RTTMicros) / 1e6)
 	}
 	d.metrics.WanFamilyHealthy.WithLabelValues(r.Wan, famLabel).Set(boolToFloat(stableHealthy))
 }

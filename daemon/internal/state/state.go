@@ -19,10 +19,11 @@ import (
 	"time"
 )
 
-// SchemaVersion is the state-file schema version. Bumped on
-// incompatible shape changes. Pairs with the `schema` key in the
-// rendered JSON.
-const SchemaVersion = 2
+// SchemaVersion is the state-file schema version. Pre-release we
+// keep it pinned at 1 — there are no external consumers and bumping
+// for in-tree refactors is bookkeeping noise. The first tagged
+// release freezes shape 1; future incompatible changes bump it.
+const SchemaVersion = 1
 
 // State is the daemon's externalized snapshot, written atomically
 // on every Decision.
@@ -57,15 +58,16 @@ type Gateways struct {
 }
 
 // FamilyHealth is the per-(WAN, family) probe-summary slice
-// surfaced in state.json. JSON shape is unchanged; the type was
-// renamed from `Family` to avoid colliding with `probe.Family`
-// (the IP-family enum used everywhere else).
+// surfaced in state.json. The type was renamed from `Family` to
+// avoid colliding with `probe.Family` (the IP-family enum used
+// everywhere else). Numeric units are seconds and a [0, 1] ratio
+// for parity with the Prometheus gauges.
 type FamilyHealth struct {
-	Healthy  bool     `json:"healthy"`
-	RTTMs    float64  `json:"rttMs"`
-	JitterMs float64  `json:"jitterMs"`
-	LossPct  float64  `json:"lossPct"`
-	Targets  []string `json:"targets"`
+	Healthy       bool     `json:"healthy"`
+	RTTSeconds    float64  `json:"rttSeconds"`
+	JitterSeconds float64  `json:"jitterSeconds"`
+	LossRatio     float64  `json:"lossRatio"`
+	Targets       []string `json:"targets"`
 }
 
 // Group is the per-Group state slice.
