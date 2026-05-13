@@ -15,15 +15,15 @@ func TestKnownStrategiesContainsPrimaryBackup(t *testing.T) {
 	}
 }
 
-func TestApplyDispatchesToStrategy(t *testing.T) {
+func TestSelectDispatchesToStrategy(t *testing.T) {
 	t.Parallel()
 	g := Group{Name: "home", Strategy: "primary-backup"}
 	members := []MemberHealth{
 		{Member: Member{Wan: "primary", Priority: 1}, Healthy: true},
 	}
-	sel, err := Apply(g, members)
+	sel, err := Select(g, members)
 	if err != nil {
-		t.Fatalf("Apply error: %v", err)
+		t.Fatalf("Select error: %v", err)
 	}
 	if sel.Group != "home" {
 		t.Errorf("sel.Group = %q, want %q", sel.Group, "home")
@@ -33,21 +33,21 @@ func TestApplyDispatchesToStrategy(t *testing.T) {
 	}
 }
 
-func TestApplyRejectsUnknownStrategy(t *testing.T) {
+func TestSelectRejectsUnknownStrategy(t *testing.T) {
 	t.Parallel()
 	g := Group{Name: "home", Strategy: "magical"}
-	_, err := Apply(g, nil)
+	_, err := Select(g, nil)
 	if err == nil {
-		t.Fatal("Apply error = nil, want non-nil for unknown strategy")
+		t.Fatal("Select error = nil, want non-nil for unknown strategy")
 	}
 	if !strings.Contains(err.Error(), "magical") {
 		t.Errorf("error %q does not mention the offending strategy name", err.Error())
 	}
 }
 
-func TestApplyUnknownStrategyMatchesSentinel(t *testing.T) {
+func TestSelectUnknownStrategyMatchesSentinel(t *testing.T) {
 	t.Parallel()
-	_, err := Apply(Group{Strategy: "bad"}, nil)
+	_, err := Select(Group{Strategy: "bad"}, nil)
 	if !errors.Is(err, ErrUnknownStrategy) {
 		t.Errorf("errors.Is(err, ErrUnknownStrategy) = false, want true (err = %v)", err)
 	}

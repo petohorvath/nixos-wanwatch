@@ -111,7 +111,7 @@ If no Member is healthy, the Group has no Selection — `state.json` shows `acti
 
 ## What the daemon does on a switch
 
-`Decision = Selection change`. When `selector.Apply` returns an Active that differs from the previous Selection, the daemon runs, in order:
+`Decision = Selection change`. When `selector.Select` returns an Active that differs from the previous Selection, the daemon runs, in order:
 
 1. `apply.WriteDefault` per family the new active serves — for point-to-point WANs the route is `scope link`; for normal WANs the daemon reads the discovered next-hop from its in-memory gateway cache. `RouteReplace` is idempotent, so a stale default in the same table is overwritten atomically. A cache miss (kernel hasn't installed a default on that link yet) skips the write; a subsequent route-discovery event triggers a reapply.
 2. `state.Writer.Write` — atomic tmpfile + rename. Readers see either the old or new file, never a partial one.

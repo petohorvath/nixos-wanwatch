@@ -30,7 +30,7 @@ Until the first `ProbeResult` lands for a (WAN, family), that family votes "heal
 1. Daemon boots, rules installed, no probes have completed.
 2. rtnl reports `carrier=up, operstate=up` on the primary.
 3. `buildMemberHealth` ⇒ primary healthy.
-4. `selector.Apply` picks primary.
+4. `selector.Select` picks primary.
 5. `apply.WriteDefault` writes the default route.
 6. State + hooks fire.
 
@@ -50,7 +50,7 @@ t=1      carrier drops on wan0
          rtnl emits LinkEvent{Name: wan0, Carrier: down}
          handleLinkEvent flips primary's carrierUp() = false
          buildMemberHealth: primary unhealthy, backup healthy
-         selector.Apply: active = backup
+         selector.Select: active = backup
 
          apply.WriteDefault(family=v4, table=100, gw=backup.v4, ifindex=wan1)
          apply.WriteDefault(family=v6, table=100, gw=backup.v6, ifindex=wan1)
@@ -72,7 +72,7 @@ t=10     carrier returns on wan0
          buildMemberHealth: primary healthy AGAIN (cold-start path —
                             primary.healthy was true at boot and never
                             went false from probes)
-         selector.Apply: active = primary (lower priority among healthy)
+         selector.Select: active = primary (lower priority among healthy)
          Decision fires; routes rewritten; hooks run.
 ```
 

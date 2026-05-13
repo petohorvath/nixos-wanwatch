@@ -21,7 +21,7 @@ import (
 	"fmt"
 )
 
-// ErrUnknownStrategy is returned by Apply when g.Strategy doesn't
+// ErrUnknownStrategy is returned by Select when g.Strategy doesn't
 // match any registered strategy. Sentinel so callers can match with
 // `errors.Is`.
 var ErrUnknownStrategy = errors.New("selector: unknown strategy")
@@ -67,17 +67,22 @@ type Selection struct {
 type Strategy func(g Group, members []MemberHealth) Selection
 
 // strategies registers v1's strategies by name. Lookup happens in
-// Apply; adding a strategy here is the only place the registry
+// Select; adding a strategy here is the only place the registry
 // changes.
 var strategies = map[string]Strategy{
 	"primary-backup": primaryBackup,
 }
 
-// Apply looks up the strategy named by g.Strategy and runs it
+// Select looks up the strategy named by g.Strategy and runs it
 // against members. Returns an error when the strategy is unknown —
 // the config layer should catch that case at startup, but defensive
 // here too.
-func Apply(g Group, members []MemberHealth) (Selection, error) {
+//
+// The name is deliberately not "Apply" — that term is reserved by
+// the glossary for kernel mutation (route, rule, conntrack writes
+// in `internal/apply`). Select produces a Selection; Apply consumes
+// the resulting Decision.
+func Select(g Group, members []MemberHealth) (Selection, error) {
 	s, ok := strategies[g.Strategy]
 	if !ok {
 		return Selection{}, fmt.Errorf("%w %q for group %q", ErrUnknownStrategy, g.Strategy, g.Name)

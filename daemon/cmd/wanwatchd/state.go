@@ -234,7 +234,7 @@ func (d *daemon) handleLinkEvent(e rtnl.LinkEvent) {
 	}
 }
 
-// recomputeAffectedGroups runs selector.Apply for every group
+// recomputeAffectedGroups runs selector.Select for every group
 // containing `wan` and applies any resulting change.
 func (d *daemon) recomputeAffectedGroups(wan string, reason decisionReason) {
 	for _, g := range d.groups {
@@ -250,7 +250,7 @@ func (d *daemon) recomputeAffectedGroups(wan string, reason decisionReason) {
 // layers.
 func (d *daemon) recomputeGroup(g *groupState, reason decisionReason) {
 	healths := buildMemberHealth(g.cfg, d.wans)
-	sel, err := selector.Apply(g.cfg, healths)
+	sel, err := selector.Select(g.cfg, healths)
 	if err != nil {
 		d.logger.Error("selector", "group", g.cfg.Name, "err", err)
 		return

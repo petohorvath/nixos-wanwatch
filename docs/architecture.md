@@ -121,7 +121,7 @@ LinkEvent  ─────►  wan.carrier/operstate  ────────�
                                           buildMemberHealth
                                                   │
                                                   ▼
-                                          selector.Apply  →  Selection
+                                          selector.Select →  Selection
                                                   │
                                                   ▼
                                           if changed:
@@ -147,7 +147,7 @@ LinkEvent  ─────►  wan.carrier/operstate  ────────�
    containing wan0
        │
        ▼
-5. selector.Apply returns Selection{Active="backup"}
+5. selector.Select returns Selection{Active="backup"}
        │
        ▼
 6. apply.WriteDefault writes the v4+v6 default in the

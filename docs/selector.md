@@ -68,7 +68,7 @@ var strategies = map[string]Strategy{
 }
 ```
 
-`group.validStrategies` (Nix) and `selector.KnownStrategies()` (Go) are the two surfaces that name the registry. A test under `tests/unit/internal/selector.nix` (`testStrategiesMatchGroupValidStrategies`) asserts both produce the same set — adding a strategy on one side without the other fails at eval time, not at first `selector.Apply` call.
+`group.validStrategies` (Nix) and `selector.KnownStrategies()` (Go) are the two surfaces that name the registry. A test under `tests/unit/internal/selector.nix` (`testStrategiesMatchGroupValidStrategies`) asserts both produce the same set — adding a strategy on one side without the other fails at eval time, not at first `selector.Select` call.
 
 v2 will add `load-balance` once multi-active lands.
 
@@ -126,7 +126,7 @@ A carrier-down event flips the WAN's `carrierUp()` to false. `buildMemberHealth`
 
 ## Determinism
 
-`selector.compute` (Nix) and `selector.Apply` (Go) are pure functions over `(Group, []MemberHealth)`. The hysteresis is stateful, but its inputs are explicit — every test exercises a fresh `HysteresisState`. Replaying the same observation sequence always produces the same verdict.
+`selector.compute` (Nix) and `selector.Select` (Go) are pure functions over `(Group, []MemberHealth)`. The hysteresis is stateful, but its inputs are explicit — every test exercises a fresh `HysteresisState`. Replaying the same observation sequence always produces the same verdict.
 
 The `tests/unit/internal/selector.nix:testComputeDeterministic` test pins this: same inputs across 50 calls produce identical outputs.
 
