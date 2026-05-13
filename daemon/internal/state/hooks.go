@@ -16,6 +16,9 @@ import (
 // the PLAN §5.5 `WANWATCH_EVENT` enumeration.
 type Event string
 
+// Hook events emitted on a Decision: a previously-absent Selection
+// becomes present (up), a present one becomes absent (down), or
+// the active member changes (switch).
 const (
 	EventUp     Event = "up"
 	EventDown   Event = "down"

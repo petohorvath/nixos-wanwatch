@@ -416,11 +416,11 @@ func (d *daemon) writeStateSnapshot() {
 	d.metrics.StatePublications.Inc()
 }
 
-// runHooks dispatches the event matching the old→new active
+// runHooks dispatches the event matching the old→next active
 // transition (see hookEventFor in decision.go) into the configured
 // hook directory.
-func (d *daemon) runHooks(g *groupState, old, new_ selector.Active) {
-	event := hookEventFor(old, new_)
+func (d *daemon) runHooks(g *groupState, old, next selector.Active) {
+	event := hookEventFor(old, next)
 	if event == "" {
 		return
 	}
@@ -428,24 +428,24 @@ func (d *daemon) runHooks(g *groupState, old, new_ selector.Active) {
 	defer cancel()
 
 	oldIface := ifaceFor(d.wans, old)
-	newIface := ifaceFor(d.wans, new_)
+	nextIface := ifaceFor(d.wans, next)
 	gws := d.gateways.Snapshot()
 	hookCtx := state.HookContext{
 		Event:    event,
 		Group:    g.cfg.Name,
 		WanOld:   old.Wan,
-		WanNew:   new_.Wan,
+		WanNew:   next.Wan,
 		IfaceOld: oldIface,
-		IfaceNew: newIface,
+		IfaceNew: nextIface,
 		// Gateway env vars come from the discovery cache. They're
 		// blank when (a) the iface has no cached default route yet,
 		// or (b) the route is scope-link (point-to-point) so there
 		// is no gateway to surface.
 		GatewayV4Old: gws.String(oldIface, rtnl.RouteFamilyV4),
-		GatewayV4New: gws.String(newIface, rtnl.RouteFamilyV4),
+		GatewayV4New: gws.String(nextIface, rtnl.RouteFamilyV4),
 		GatewayV6Old: gws.String(oldIface, rtnl.RouteFamilyV6),
-		GatewayV6New: gws.String(newIface, rtnl.RouteFamilyV6),
-		Families:     probedFamiliesFor(d.wans, new_),
+		GatewayV6New: gws.String(nextIface, rtnl.RouteFamilyV6),
+		Families:     probedFamiliesFor(d.wans, next),
 		Table:        g.cfg.Table,
 		Mark:         g.cfg.Mark,
 	}

@@ -37,6 +37,7 @@ func AllocateIdents(keys []IdentKey) (map[IdentKey]uint16, error) {
 		start := initialIdent(k)
 		assigned := false
 		for offset := 0; offset < identSpace; offset++ {
+			//nolint:gosec // ((int(start)+offset) % 2^16) ∈ [0, 2^16-1] by construction
 			candidate := uint16((int(start) + offset) % identSpace)
 			if _, taken := owners[candidate]; taken {
 				continue

@@ -1,0 +1,62 @@
+# golangci-lint v2 config. Curated check set pinned by CLAUDE.md's
+# §Lint section — adding or removing a linter here is a deliberate
+# decision: update CLAUDE.md in the same commit so the doc and the
+# config don't drift.
+#
+# Formatting (gofumpt + goimports) is enforced by treefmt-nix, not
+# here — keep the responsibilities separated so `nix fmt --fail-on-
+# change` and `golangci-lint run` report distinct failure classes.
+version: "2"
+
+run:
+  # Tests are scanned by default; the per-rule exclusions below
+  # relax the noisier rules for `_test.go` paths so test ergonomics
+  # aren't held to the same bar as production code.
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - goconst
+    - gocritic
+    - gosec
+    - govet
+    - prealloc
+    - revive
+    - staticcheck
+    - unparam
+    - unused
+
+  settings:
+    goconst:
+      # Default (3) flags every metric subsystem name and a fistful
+      # of switch-statement labels. Raise the floor so the rule only
+      # fires on literals that genuinely deserve a named constant.
+      min-occurrences: 8
+
+  exclusions:
+    rules:
+      # Test files routinely build inputs from string literals,
+      # ignore Close errors on test conns, and pre-seed allocations
+      # without the "use prealloc" hint adding value. Relax the
+      # rules that would otherwise drown the signal.
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - errcheck
+          - goconst
+          - gosec
+          - prealloc
+          - unparam
+
+      # internal/metrics/metrics.go defines every Prometheus metric
+      # in one file; the label names ("wan", "group", "family", …)
+      # repeat by design, but pulling them into named constants
+      # buys nothing — the label position is what the registry
+      # cares about, not the symbol on our side.
+      - path: internal/metrics/metrics\.go
+        linters:
+          - goconst

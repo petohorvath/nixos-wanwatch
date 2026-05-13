@@ -127,6 +127,7 @@ func (p *Pinger) cycle(conn pingConn, addrs map[string]net.Addr, windows map[str
 			continue
 		}
 		delete(inflight, replySeq)
+		//nolint:gosec // time.Since is monotonic, Microseconds() is non-negative
 		rttMicros := uint64(time.Since(entry.sent).Microseconds())
 		windows[entry.target].Push(Sample{RTTMicros: rttMicros})
 	}

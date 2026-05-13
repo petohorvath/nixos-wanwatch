@@ -100,20 +100,20 @@ const (
 	reasonCarrier decisionReason = "carrier"
 )
 
-// hookEventFor maps the old/new Active to the hook directory the
+// hookEventFor maps the old/next Active to the hook directory the
 // runner should dispatch into:
 //
 //   - absent → present       ⇒ up
 //   - present → absent       ⇒ down
 //   - present → present (≠)  ⇒ switch
 //   - otherwise              ⇒ "" (no event)
-func hookEventFor(old, new_ selector.Active) state.Event {
+func hookEventFor(old, next selector.Active) state.Event {
 	switch {
-	case !old.Has && new_.Has:
+	case !old.Has && next.Has:
 		return state.EventUp
-	case old.Has && !new_.Has:
+	case old.Has && !next.Has:
 		return state.EventDown
-	case old.Has && new_.Has && old.Wan != new_.Wan:
+	case old.Has && next.Has && old.Wan != next.Wan:
 		return state.EventSwitch
 	}
 	return ""

@@ -129,7 +129,7 @@ func TestWriteConcurrentSerializationSafe(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
-		go func(seed int) {
+		go func(_ int) {
 			defer wg.Done()
 			_ = w.Write(State{Wans: map[string]Wan{"w": {Interface: "eth0"}}})
 		}(i)

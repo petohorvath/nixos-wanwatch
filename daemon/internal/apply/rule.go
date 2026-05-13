@@ -51,6 +51,7 @@ func ensureRuleVia(ruleAdd func(*netlink.Rule) error, r FwmarkRule) error {
 func buildRule(r FwmarkRule) *netlink.Rule {
 	rule := netlink.NewRule()
 	rule.Family = int(r.Family)
+	//nolint:gosec // r.Mark is validated positive by validateRule + bounded by the Nix allocator
 	rule.Mark = uint32(r.Mark)
 	// Explicit full mask: the netlink library only encodes
 	// FRA_FWMASK when rule.Mask != nil, and recent kernels

@@ -22,6 +22,9 @@ type FamilyStats struct {
 
 // ProbeResult is what a Pinger emits on its output channel after
 // each probe cycle. Consumed by the selector + state writer.
+//
+//nolint:revive // ProbeResult reads cleaner than probe.Result at
+// every consumer; the stuttering is a deliberate vocabulary choice.
 type ProbeResult struct {
 	Wan    string
 	Family Family

@@ -52,6 +52,9 @@ func (c Carrier) String() string {
 // show` output.
 type Operstate int
 
+// One constant per IF_OPER_* value the kernel can emit. Names
+// match the kernel macros so a value can be cross-referenced
+// against `iproute2` source without translation.
 const (
 	OperstateUnknown        Operstate = 0
 	OperstateNotPresent     Operstate = 1
@@ -111,6 +114,7 @@ type LinkEvent struct {
 // convert by a plain cast — no converter shim needed.
 type RouteFamily int
 
+// IPv4 / IPv6 the route subscriber filters and labels by.
 const (
 	RouteFamilyV4 RouteFamily = unix.AF_INET
 	RouteFamilyV6 RouteFamily = unix.AF_INET6
@@ -130,6 +134,8 @@ func (f RouteFamily) String() string {
 // RTM_DELROUTE) on the main routing table.
 type RouteEventOp int
 
+// The two RouteEventOp values: add (kernel installed a route) and
+// del (kernel withdrew one).
 const (
 	RouteEventAdd RouteEventOp = iota
 	RouteEventDel

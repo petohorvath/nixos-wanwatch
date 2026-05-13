@@ -234,7 +234,7 @@ func TestHookEventForMatrix(t *testing.T) {
 	cases := []struct {
 		name string
 		old  selector.Active
-		new_ selector.Active
+		next selector.Active
 		want string
 	}{
 		{"down→up", selector.NoActive, primary, "up"},
@@ -246,9 +246,9 @@ func TestHookEventForMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := string(hookEventFor(tc.old, tc.new_))
+			got := string(hookEventFor(tc.old, tc.next))
 			if got != tc.want {
-				t.Errorf("hookEventFor(%+v,%+v) = %q, want %q", tc.old, tc.new_, got, tc.want)
+				t.Errorf("hookEventFor(%+v,%+v) = %q, want %q", tc.old, tc.next, got, tc.want)
 			}
 		})
 	}

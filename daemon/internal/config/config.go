@@ -95,6 +95,7 @@ type Hysteresis struct {
 // the schema doesn't match, ErrInvalidConfig (wrapped) when
 // structural checks fail, or a plain I/O error from os.ReadFile.
 func Load(path string) (Config, error) {
+	//nolint:gosec // operator-supplied --config path is the daemon's whole input contract
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("config: reading %s: %w", path, err)

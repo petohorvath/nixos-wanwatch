@@ -37,6 +37,7 @@ func FlushBySource(ctx context.Context, family probe.Family, ip net.IP) (uint, e
 	}
 	n, err := netlink.ConntrackDeleteFilters(
 		netlink.ConntrackTable,
+		//nolint:gosec // family is probe.FamilyV4 (=AF_INET=2) or FamilyV6 (=AF_INET6=10); both fit uint8
 		netlink.InetFamily(family),
 		origFilter,
 		replyFilter,

@@ -123,14 +123,14 @@ func TestPrimaryBackupDoesNotMutateInput(t *testing.T) {
 		{Member: Member{Wan: "z", Priority: 1}, Healthy: true},
 		{Member: Member{Wan: "a", Priority: 1}, Healthy: true},
 	}
-	copy_ := make([]MemberHealth, len(original))
-	copy(copy_, original)
+	dup := make([]MemberHealth, len(original))
+	copy(dup, original)
 
-	_ = primaryBackup(Group{}, copy_)
+	_ = primaryBackup(Group{}, dup)
 
 	for i := range original {
-		if copy_[i] != original[i] {
-			t.Errorf("input mutated at index %d: %+v vs %+v", i, copy_[i], original[i])
+		if dup[i] != original[i] {
+			t.Errorf("input mutated at index %d: %+v vs %+v", i, dup[i], original[i])
 		}
 	}
 }
