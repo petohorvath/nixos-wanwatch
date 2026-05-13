@@ -107,8 +107,11 @@ pkgs.testers.runNixOSTest {
     router.wait_for_file("/run/wanwatch/state.json")
 
     # Wait up to 30s for Telegraf to scrape + flush at least once.
+    # Don't reuse `_` here — the for-loop's `_` is already typed
+    # `int` and the typed test driver on stable channels rejects
+    # reassigning it to execute()'s stdout str.
     for _ in range(60):
-        ok, _ = router.execute("test -s ${scrapeFile}")
+        ok, out = router.execute("test -s ${scrapeFile}")
         if ok == 0:
             break
         router.execute("sleep 0.5")
