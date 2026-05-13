@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net"
+
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 )
 
 // Small free-function helpers shared across the daemon pipeline.
@@ -31,28 +33,29 @@ func interfaceIndex(name string) (int, error) {
 	return iface.Index, nil
 }
 
-// ifaceFor resolves a WAN name to its interface name via the
-// daemon's `wans` map. Returns "" when name is nil or the WAN
+// ifaceFor resolves an Active to its WAN's interface name via the
+// daemon's `wans` map. Returns "" when Active is absent or the WAN
 // isn't known — hook env vars treat empty string as "no value".
-func ifaceFor(wans map[string]*wanState, name *string) string {
-	if name == nil {
+func ifaceFor(wans map[string]*wanState, a selector.Active) string {
+	if !a.Has {
 		return ""
 	}
-	if w, ok := wans[*name]; ok {
+	if w, ok := wans[a.Wan]; ok {
 		return w.cfg.Interface
 	}
 	return ""
 }
 
-// probedFamiliesFor lists the families a WAN is probing as
-// stringified labels ("v4", "v6"). Empty slice when name is nil or
-// the WAN isn't known. Order is map-iteration order — fine for env
-// vars but tests that assert exact contents should sort first.
-func probedFamiliesFor(wans map[string]*wanState, name *string) []string {
-	if name == nil {
+// probedFamiliesFor lists the families an Active WAN is probing as
+// stringified labels ("v4", "v6"). Empty slice when Active is
+// absent or the WAN isn't known. Order is map-iteration order —
+// fine for env vars but tests that assert exact contents should
+// sort first.
+func probedFamiliesFor(wans map[string]*wanState, a selector.Active) []string {
+	if !a.Has {
 		return nil
 	}
-	w, ok := wans[*name]
+	w, ok := wans[a.Wan]
 	if !ok {
 		return nil
 	}
@@ -61,14 +64,4 @@ func probedFamiliesFor(wans map[string]*wanState, name *string) []string {
 		out = append(out, fam.String())
 	}
 	return out
-}
-
-// strPtr collapses a `*string` to its value or "" — convenient for
-// places like log fields and hook env vars where nil and "" are
-// indistinguishable to the consumer.
-func strPtr(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
 }

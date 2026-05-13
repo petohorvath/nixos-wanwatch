@@ -28,8 +28,8 @@ func TestSelectDispatchesToStrategy(t *testing.T) {
 	if sel.Group != "home" {
 		t.Errorf("sel.Group = %q, want %q", sel.Group, "home")
 	}
-	if sel.Active == nil || *sel.Active != "primary" {
-		t.Errorf("sel.Active = %v, want pointer to %q", sel.Active, "primary")
+	if !sel.Active.Has || sel.Active.Wan != "primary" {
+		t.Errorf("sel.Active = %+v, want {Wan:primary Has:true}", sel.Active)
 	}
 }
 

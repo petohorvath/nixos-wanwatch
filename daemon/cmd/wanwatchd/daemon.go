@@ -66,7 +66,7 @@ func (w *wanState) carrierUp() bool {
 // groupState is the per-group runtime slice.
 type groupState struct {
 	cfg            selector.Group
-	active         *string
+	active         selector.Active
 	activeSince    *time.Time
 	decisionsTotal int
 }
@@ -251,13 +251,13 @@ func (d *daemon) recomputeGroup(ctx context.Context, g *groupState, reason decis
 		d.logger.Error("selector", "group", g.cfg.Name, "err", err)
 		return
 	}
-	if equalStringPtr(sel.Active, g.active) {
+	if sel.Active == g.active {
 		return
 	}
 	old := g.active
 	g.active = sel.Active
 	now := time.Now().UTC()
-	if sel.Active != nil {
+	if sel.Active.Has {
 		g.activeSince = &now
 	}
 	g.decisionsTotal++
@@ -268,12 +268,12 @@ func (d *daemon) recomputeGroup(ctx context.Context, g *groupState, reason decis
 	d.logger.Info("decision",
 		"group", g.cfg.Name,
 		"reason", reason,
-		"old", strPtr(old),
-		"new", strPtr(sel.Active),
+		"old", old.Wan,
+		"new", sel.Active.Wan,
 	)
 
-	if sel.Active != nil {
-		d.applyRoutes(ctx, g, *sel.Active)
+	if sel.Active.Has {
+		d.applyRoutes(ctx, g, sel.Active.Wan)
 	}
 	d.writeStateSnapshot()
 	d.runHooks(g, old, sel.Active)
@@ -353,14 +353,14 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	}
 
 	for _, g := range d.groups {
-		if g.active == nil {
+		if !g.active.Has {
 			continue
 		}
-		ws, ok := d.wans[*g.active]
+		ws, ok := d.wans[g.active.Wan]
 		if !ok || ws.cfg.Interface != e.Iface {
 			continue
 		}
-		d.applyRoutes(ctx, g, *g.active)
+		d.applyRoutes(ctx, g, g.active.Wan)
 	}
 }
 
@@ -397,8 +397,13 @@ func (d *daemon) writeStateSnapshot() {
 		}
 	}
 	for _, g := range d.groups {
+		var active *string
+		if g.active.Has {
+			a := g.active.Wan
+			active = &a
+		}
 		snap.Groups[g.cfg.Name] = state.Group{
-			Active:         g.active,
+			Active:         active,
 			ActiveSince:    g.activeSince,
 			DecisionsTotal: g.decisionsTotal,
 			Strategy:       g.cfg.Strategy,
@@ -414,7 +419,7 @@ func (d *daemon) writeStateSnapshot() {
 // runHooks dispatches the event matching the old→new active
 // transition (see hookEventFor in decision.go) into the configured
 // hook directory.
-func (d *daemon) runHooks(g *groupState, old, new_ *string) {
+func (d *daemon) runHooks(g *groupState, old, new_ selector.Active) {
 	event := hookEventFor(old, new_)
 	if event == "" {
 		return
@@ -428,8 +433,8 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 	hookCtx := state.HookContext{
 		Event:    event,
 		Group:    g.cfg.Name,
-		WanOld:   strPtr(old),
-		WanNew:   strPtr(new_),
+		WanOld:   old.Wan,
+		WanNew:   new_.Wan,
 		IfaceOld: oldIface,
 		IfaceNew: newIface,
 		// Gateway env vars come from the discovery cache. They're
@@ -440,9 +445,9 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 		GatewayV4New: gws.String(newIface, rtnl.RouteFamilyV4),
 		GatewayV6Old: gws.String(oldIface, rtnl.RouteFamilyV6),
 		GatewayV6New: gws.String(newIface, rtnl.RouteFamilyV6),
-		Families: probedFamiliesFor(d.wans, new_),
-		Table:    g.cfg.Table,
-		Mark:     g.cfg.Mark,
+		Families:     probedFamiliesFor(d.wans, new_),
+		Table:        g.cfg.Table,
+		Mark:         g.cfg.Mark,
 	}
 	results := d.hookR.Run(ctx, hookCtx)
 	for _, r := range results {
@@ -475,7 +480,7 @@ func (d *daemon) recordProbeMetrics(r probe.ProbeResult, stableHealthy bool) {
 func (d *daemon) updateGroupActiveGauge(g *groupState) {
 	for _, m := range g.cfg.Members {
 		v := 0.0
-		if g.active != nil && *g.active == m.Wan {
+		if g.active.Has && g.active.Wan == m.Wan {
 			v = 1
 		}
 		d.metrics.GroupActive.WithLabelValues(g.cfg.Name, m.Wan).Set(v)

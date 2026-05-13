@@ -8,7 +8,7 @@ import (
 // primaryBackup picks the healthy Member with the lowest priority
 // (lower = preferred). Ties are broken by lexicographic WAN name
 // so the output is deterministic. When no Member is healthy,
-// Active is nil.
+// Active.Has is false.
 //
 // Weight is ignored by this strategy — it matters once multi-active
 // (load-balance) lands in v2 and the selector returns a weighted
@@ -16,7 +16,7 @@ import (
 func primaryBackup(g Group, members []MemberHealth) Selection {
 	healthy := healthyMembers(members)
 	if len(healthy) == 0 {
-		return Selection{Group: g.Name, Active: nil}
+		return Selection{Group: g.Name, Active: NoActive}
 	}
 
 	slices.SortFunc(healthy, func(a, b MemberHealth) int {
@@ -26,8 +26,7 @@ func primaryBackup(g Group, members []MemberHealth) Selection {
 		return cmp.Compare(a.Member.Wan, b.Member.Wan)
 	})
 
-	wan := healthy[0].Member.Wan
-	return Selection{Group: g.Name, Active: &wan}
+	return Selection{Group: g.Name, Active: Active{Wan: healthy[0].Member.Wan, Has: true}}
 }
 
 // healthyMembers filters to the subset whose Healthy is true.

@@ -228,51 +228,28 @@ func TestCarrierUpRejectsBothUnknown(t *testing.T) {
 
 func TestHookEventForMatrix(t *testing.T) {
 	t.Parallel()
-	primary := "primary"
-	backup := "backup"
+	primary := selector.Active{Wan: "primary", Has: true}
+	backup := selector.Active{Wan: "backup", Has: true}
 
 	cases := []struct {
 		name string
-		old  *string
-		new_ *string
+		old  selector.Active
+		new_ selector.Active
 		want string
 	}{
-		{"down→up", nil, &primary, "up"},
-		{"up→down", &primary, nil, "down"},
-		{"primary→backup", &primary, &backup, "switch"},
-		{"no change same", &primary, &primary, ""},
-		{"no change both nil", nil, nil, ""},
+		{"down→up", selector.NoActive, primary, "up"},
+		{"up→down", primary, selector.NoActive, "down"},
+		{"primary→backup", primary, backup, "switch"},
+		{"no change same", primary, primary, ""},
+		{"no change both absent", selector.NoActive, selector.NoActive, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := string(hookEventFor(tc.old, tc.new_))
 			if got != tc.want {
-				t.Errorf("hookEventFor(%v,%v) = %q, want %q", tc.old, tc.new_, got, tc.want)
+				t.Errorf("hookEventFor(%+v,%+v) = %q, want %q", tc.old, tc.new_, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestEqualStringPtr(t *testing.T) {
-	t.Parallel()
-	a := "x"
-	b := "x"
-	c := "y"
-	cases := []struct {
-		name string
-		p, q *string
-		want bool
-	}{
-		{"both nil", nil, nil, true},
-		{"left nil", nil, &a, false},
-		{"right nil", &a, nil, false},
-		{"same content", &a, &b, true},
-		{"different", &a, &c, false},
-	}
-	for _, tc := range cases {
-		if got := equalStringPtr(tc.p, tc.q); got != tc.want {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
-		}
 	}
 }

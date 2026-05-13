@@ -2,9 +2,6 @@ package selector
 
 import "testing"
 
-// strPtr is a tiny helper for building *string literals in test tables.
-func strPtr(s string) *string { return &s }
-
 func TestPrimaryBackup(t *testing.T) {
 	t.Parallel()
 
@@ -13,26 +10,26 @@ func TestPrimaryBackup(t *testing.T) {
 	tests := []struct {
 		name    string
 		members []MemberHealth
-		want    *string
+		want    Active
 	}{
 		{
-			name:    "empty member list yields nil Active",
+			name:    "empty member list yields absent Active",
 			members: []MemberHealth{},
-			want:    nil,
+			want:    NoActive,
 		},
 		{
 			name: "single healthy member is picked",
 			members: []MemberHealth{
 				{Member: Member{Wan: "primary", Priority: 1}, Healthy: true},
 			},
-			want: strPtr("primary"),
+			want: Active{Wan: "primary", Has: true},
 		},
 		{
-			name: "single unhealthy member yields nil Active",
+			name: "single unhealthy member yields absent Active",
 			members: []MemberHealth{
 				{Member: Member{Wan: "primary", Priority: 1}, Healthy: false},
 			},
-			want: nil,
+			want: NoActive,
 		},
 		{
 			name: "lowest priority among healthy wins",
@@ -40,7 +37,7 @@ func TestPrimaryBackup(t *testing.T) {
 				{Member: Member{Wan: "primary", Priority: 1}, Healthy: true},
 				{Member: Member{Wan: "backup", Priority: 2}, Healthy: true},
 			},
-			want: strPtr("primary"),
+			want: Active{Wan: "primary", Has: true},
 		},
 		{
 			name: "fails over to next priority when primary unhealthy",
@@ -48,15 +45,15 @@ func TestPrimaryBackup(t *testing.T) {
 				{Member: Member{Wan: "primary", Priority: 1}, Healthy: false},
 				{Member: Member{Wan: "backup", Priority: 2}, Healthy: true},
 			},
-			want: strPtr("backup"),
+			want: Active{Wan: "backup", Has: true},
 		},
 		{
-			name: "all unhealthy yields nil Active",
+			name: "all unhealthy yields absent Active",
 			members: []MemberHealth{
 				{Member: Member{Wan: "primary", Priority: 1}, Healthy: false},
 				{Member: Member{Wan: "backup", Priority: 2}, Healthy: false},
 			},
-			want: nil,
+			want: NoActive,
 		},
 		{
 			name: "priority order respected regardless of input order",
@@ -65,7 +62,7 @@ func TestPrimaryBackup(t *testing.T) {
 				{Member: Member{Wan: "primary", Priority: 1}, Healthy: true},
 				{Member: Member{Wan: "middle", Priority: 3}, Healthy: true},
 			},
-			want: strPtr("primary"),
+			want: Active{Wan: "primary", Has: true},
 		},
 		{
 			name: "equal priorities broken by wan-name lex order",
@@ -74,7 +71,7 @@ func TestPrimaryBackup(t *testing.T) {
 				{Member: Member{Wan: "aaa", Priority: 1}, Healthy: true},
 				{Member: Member{Wan: "mmm", Priority: 1}, Healthy: true},
 			},
-			want: strPtr("aaa"),
+			want: Active{Wan: "aaa", Has: true},
 		},
 		{
 			name: "weight is ignored by primary-backup",
@@ -82,7 +79,7 @@ func TestPrimaryBackup(t *testing.T) {
 				{Member: Member{Wan: "primary", Priority: 1, Weight: 1}, Healthy: true},
 				{Member: Member{Wan: "backup", Priority: 2, Weight: 1000}, Healthy: true},
 			},
-			want: strPtr("primary"),
+			want: Active{Wan: "primary", Has: true},
 		},
 	}
 
@@ -93,13 +90,8 @@ func TestPrimaryBackup(t *testing.T) {
 			if got.Group != g.Name {
 				t.Errorf("Group = %q, want %q", got.Group, g.Name)
 			}
-			switch {
-			case tc.want == nil && got.Active != nil:
-				t.Errorf("Active = %q, want nil", *got.Active)
-			case tc.want != nil && got.Active == nil:
-				t.Errorf("Active = nil, want %q", *tc.want)
-			case tc.want != nil && got.Active != nil && *got.Active != *tc.want:
-				t.Errorf("Active = %q, want %q", *got.Active, *tc.want)
+			if got.Active != tc.want {
+				t.Errorf("Active = %+v, want %+v", got.Active, tc.want)
 			}
 		})
 	}
@@ -116,11 +108,11 @@ func TestPrimaryBackupIsDeterministic(t *testing.T) {
 	first := primaryBackup(g, members)
 	for i := 0; i < 100; i++ {
 		got := primaryBackup(g, members)
-		if got.Active == nil || first.Active == nil {
-			t.Fatalf("iteration %d: got nil Active", i)
+		if !got.Active.Has || !first.Active.Has {
+			t.Fatalf("iteration %d: got absent Active", i)
 		}
-		if *got.Active != *first.Active {
-			t.Errorf("iteration %d: Active = %q, first call returned %q", i, *got.Active, *first.Active)
+		if got.Active != first.Active {
+			t.Errorf("iteration %d: Active = %+v, first call returned %+v", i, got.Active, first.Active)
 		}
 	}
 }

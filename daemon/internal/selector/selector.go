@@ -53,13 +53,28 @@ type MemberHealth struct {
 }
 
 // Selection is the strategy's output: which Member's WAN should
-// carry the group's traffic, if any. Active is nil when no member
-// is healthy (the "all-down" case — Apply layer leaves the routing
-// table as-is or installs a sentinel route, depending on policy).
+// carry the group's traffic, if any. Active.Has is false when no
+// member is healthy (the "all-down" case — Apply layer leaves the
+// routing table as-is or installs a sentinel route, depending on
+// policy).
 type Selection struct {
 	Group  string
-	Active *string
+	Active Active
 }
+
+// Active is the resolved choice of a Strategy: the chosen WAN's
+// name and a flag for whether one was chosen at all. Comparable
+// (Go's `==` works between Actives), which removes the
+// `*string` nil-check + deref pattern at every consumer.
+type Active struct {
+	Wan string
+	Has bool
+}
+
+// NoActive is the "no member healthy" Selection.Active value.
+// Equivalent to the Active zero value, exported for readability
+// at call sites.
+var NoActive = Active{}
 
 // Strategy chooses an active Member from a Group's MemberHealth list.
 // Implementations are deterministic — given the same inputs, they

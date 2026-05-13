@@ -91,19 +91,6 @@ func groupContainsWAN(g selector.Group, wan string) bool {
 	return false
 }
 
-// equalStringPtr compares two *string by value — nil == nil,
-// both-non-nil compared by content. Used to detect actual
-// Selection changes without spurious notifications.
-func equalStringPtr(a, b *string) bool {
-	switch {
-	case a == nil && b == nil:
-		return true
-	case a == nil || b == nil:
-		return false
-	}
-	return *a == *b
-}
-
 // decisionReason names the trigger for a Decision; emitted as a
 // metric label and in hook env vars.
 type decisionReason string
@@ -113,20 +100,20 @@ const (
 	reasonCarrier decisionReason = "carrier"
 )
 
-// hookEventFor maps the old/new active pointers to the hook
-// directory the runner should dispatch into:
+// hookEventFor maps the old/new Active to the hook directory the
+// runner should dispatch into:
 //
-//   - nil → non-nil ⇒ up
-//   - non-nil → nil ⇒ down
-//   - non-nil → non-nil, different ⇒ switch
-//   - otherwise ⇒ "" (no event)
-func hookEventFor(old, new_ *string) state.Event {
+//   - absent → present       ⇒ up
+//   - present → absent       ⇒ down
+//   - present → present (≠)  ⇒ switch
+//   - otherwise              ⇒ "" (no event)
+func hookEventFor(old, new_ selector.Active) state.Event {
 	switch {
-	case old == nil && new_ != nil:
+	case !old.Has && new_.Has:
 		return state.EventUp
-	case old != nil && new_ == nil:
+	case old.Has && !new_.Has:
 		return state.EventDown
-	case old != nil && new_ != nil && *old != *new_:
+	case old.Has && new_.Has && old.Wan != new_.Wan:
 		return state.EventSwitch
 	}
 	return ""
