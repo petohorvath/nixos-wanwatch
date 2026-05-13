@@ -106,10 +106,7 @@ func targetsFor(wan config.Wan, _ probe.Family) []string {
 // startSubscriber opens an rtnetlink subscription filtered to the
 // daemon's WAN interfaces and returns the LinkEvent channel.
 func startSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logger) <-chan rtnl.LinkEvent {
-	watched := make(map[string]struct{}, len(cfg.Wans))
-	for _, wan := range cfg.Wans {
-		watched[wan.Interface] = struct{}{}
-	}
+	watched := watchedInterfaces(cfg)
 	s := &rtnl.Subscriber{Interfaces: watched}
 	events := make(chan rtnl.LinkEvent, 64)
 	go func() {
@@ -122,13 +119,43 @@ func startSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logge
 	return events
 }
 
+// startRouteSubscriber opens an rtnetlink route subscription filtered
+// to the daemon's WAN interfaces and returns the RouteEvent channel.
+// The daemon uses these events to learn the current default-route
+// gateway on each WAN's interface from the kernel's main RIB.
+func startRouteSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logger) <-chan rtnl.RouteEvent {
+	watched := watchedInterfaces(cfg)
+	s := &rtnl.RouteSubscriber{Interfaces: watched}
+	events := make(chan rtnl.RouteEvent, 64)
+	go func() {
+		err := s.Run(ctx, events)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("rtnl route subscriber exited", "err", err)
+		}
+	}()
+	logger.Info("rtnl route subscriber started", "interfaces", len(watched))
+	return events
+}
+
+// watchedInterfaces is the set of interface names the daemon
+// subscribes to — both link and route channels filter through this.
+func watchedInterfaces(cfg *config.Config) map[string]struct{} {
+	out := make(map[string]struct{}, len(cfg.Wans))
+	for _, wan := range cfg.Wans {
+		out[wan.Interface] = struct{}{}
+	}
+	return out
+}
+
 // eventLoop is the daemon's central dispatch. Routes each
-// ProbeResult / LinkEvent through `d`'s Decision pipeline.
+// ProbeResult / LinkEvent / RouteEvent through `d`'s Decision
+// pipeline.
 func eventLoop(
 	ctx context.Context,
 	d *daemon,
 	probeResults <-chan probe.ProbeResult,
 	linkEvents <-chan rtnl.LinkEvent,
+	routeEvents <-chan rtnl.RouteEvent,
 ) {
 	for {
 		select {
@@ -138,6 +165,8 @@ func eventLoop(
 			d.handleProbeResult(r)
 		case e := <-linkEvents:
 			d.handleLinkEvent(e)
+		case e := <-routeEvents:
+			d.handleRouteEvent(e)
 		}
 	}
 }

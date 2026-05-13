@@ -60,13 +60,14 @@ type groupState struct {
 // daemon bundles the runtime state and subsystem handles. Wired
 // once in run(), then driven by eventLoop's dispatch.
 type daemon struct {
-	cfg     *config.Config
-	metrics *metrics.Registry
-	stateW  *state.Writer
-	hookR   *state.Runner
-	logger  *slog.Logger
-	wans    map[string]*wanState
-	groups  map[string]*groupState
+	cfg      *config.Config
+	metrics  *metrics.Registry
+	stateW   *state.Writer
+	hookR    *state.Runner
+	logger   *slog.Logger
+	wans     map[string]*wanState
+	groups   map[string]*groupState
+	gateways *GatewayCache
 }
 
 // newDaemon constructs the runtime state from `cfg`. Hysteresis
@@ -75,13 +76,14 @@ type daemon struct {
 // consecutive cycles cross the up-threshold.
 func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
-		cfg:     cfg,
-		metrics: mreg,
-		stateW:  &state.Writer{Path: cfg.Global.StatePath},
-		hookR:   &state.Runner{Dir: cfg.Global.HooksDir},
-		logger:  logger,
-		wans:    make(map[string]*wanState, len(cfg.Wans)),
-		groups:  make(map[string]*groupState, len(cfg.Groups)),
+		cfg:      cfg,
+		metrics:  mreg,
+		stateW:   &state.Writer{Path: cfg.Global.StatePath},
+		hookR:    &state.Runner{Dir: cfg.Global.HooksDir},
+		logger:   logger,
+		wans:     make(map[string]*wanState, len(cfg.Wans)),
+		groups:   make(map[string]*groupState, len(cfg.Groups)),
+		gateways: NewGatewayCache(),
 	}
 	for name, wan := range cfg.Wans {
 		ws := &wanState{
@@ -260,9 +262,11 @@ func (d *daemon) recomputeGroup(g *groupState, reason decisionReason) {
 
 // applyRoutes writes the default route per probed family of the
 // new active WAN. PointToPoint WANs get scope-link routes (no
-// gateway needed). Non-PtP WANs require a gateway discovered from
-// the kernel's main routing table — until that lookup is wired
-// (commit 3), the non-PtP path logs and skips.
+// gateway needed). Non-PtP WANs use the gateway the GatewayCache
+// learned from the kernel's main routing table; if the cache has
+// no entry yet (kernel hasn't installed a default on that link),
+// the family is logged + skipped — a subsequent RouteEvent will
+// trigger a reapply.
 func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 	ws, ok := d.wans[activeWan]
 	if !ok {
@@ -285,9 +289,14 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 		case ws.cfg.PointToPoint:
 			route.PointToPoint = true
 		default:
-			d.logger.Warn("gateway discovery not yet wired; skipping non-pointToPoint route",
-				"group", g.cfg.Name, "wan", activeWan, "family", famLabel)
-			continue
+			gw, ok := d.gateways.Get(ws.cfg.Interface, probeFamilyToRoute(fam))
+			if !ok || gw == nil {
+				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
+					"group", g.cfg.Name, "wan", activeWan, "family", famLabel,
+					"iface", ws.cfg.Interface)
+				continue
+			}
+			route.Gateway = gw
 		}
 		started := time.Now()
 		err := apply.WriteDefault(route)
@@ -297,6 +306,55 @@ func (d *daemon) applyRoutes(g *groupState, activeWan string) {
 			d.metrics.ApplyRouteErrors.WithLabelValues(g.cfg.Name, famLabel).Inc()
 		}
 	}
+}
+
+// handleRouteEvent absorbs an rtnetlink default-route observation
+// into the gateway cache and reapplies any group whose active WAN
+// runs on the affected interface. RTM_NEWROUTE updates the cache
+// (and if the gateway differs from the prior entry, kicks a
+// reapply); RTM_DELROUTE clears the entry.
+//
+// The reapply path is intentionally non-discriminating: it
+// rewrites every family of the active WAN, not just the one that
+// changed. RouteReplace is idempotent so re-writing a known-good
+// route costs one extra netlink syscall — cheaper than tracking
+// per-family dirty state.
+func (d *daemon) handleRouteEvent(e rtnl.RouteEvent) {
+	prev, hadPrev := d.gateways.Get(e.Iface, e.Family)
+	switch e.Op {
+	case rtnl.RouteEventAdd:
+		d.gateways.Set(e.Iface, e.Family, e.Gateway)
+	case rtnl.RouteEventDel:
+		d.gateways.Clear(e.Iface, e.Family)
+	}
+
+	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !ipEqual(prev, e.Gateway)
+	if !changed {
+		return
+	}
+
+	for _, g := range d.groups {
+		if g.active == nil {
+			continue
+		}
+		ws, ok := d.wans[*g.active]
+		if !ok || ws.cfg.Interface != e.Iface {
+			continue
+		}
+		d.applyRoutes(g, *g.active)
+	}
+}
+
+// ipEqual compares two net.IP values treating nil as a distinct
+// value from a non-nil zero address. Mirrors net.IP.Equal's
+// in-family normalization (so 192.0.2.1 == ::ffff:192.0.2.1) but
+// doesn't paper over nil — a nil-to-non-nil transition is a real
+// change.
+func ipEqual(a, b net.IP) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(b)
 }
 
 // writeStateSnapshot serializes the runtime state into the form
@@ -352,16 +410,23 @@ func (d *daemon) runHooks(g *groupState, old, new_ *string) {
 	ctx, cancel := context.WithTimeout(context.Background(), state.DefaultHookTimeout*time.Duration(maxHooksPerEvent))
 	defer cancel()
 
+	oldIface := ifaceFor(d.wans, old)
+	newIface := ifaceFor(d.wans, new_)
 	hookCtx := state.HookContext{
 		Event:    event,
 		Group:    g.cfg.Name,
 		WanOld:   strPtr(old),
 		WanNew:   strPtr(new_),
-		IfaceOld: ifaceFor(d.wans, old),
-		IfaceNew: ifaceFor(d.wans, new_),
-		// Gateway env vars are populated by the discovery cache —
-		// left blank until commit 3 wires it. PointToPoint WANs
-		// will always have these blank.
+		IfaceOld: oldIface,
+		IfaceNew: newIface,
+		// Gateway env vars come from the discovery cache. They're
+		// blank when (a) the iface has no cached default route yet,
+		// or (b) the route is scope-link (point-to-point) so there
+		// is no gateway to surface.
+		GwV4Old:  d.gateways.String(oldIface, rtnl.RouteFamilyV4),
+		GwV4New:  d.gateways.String(newIface, rtnl.RouteFamilyV4),
+		GwV6Old:  d.gateways.String(oldIface, rtnl.RouteFamilyV6),
+		GwV6New:  d.gateways.String(newIface, rtnl.RouteFamilyV6),
 		Families: probedFamiliesFor(d.wans, new_),
 		Table:    g.cfg.Table,
 		Mark:     g.cfg.Mark,

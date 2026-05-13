@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"path/filepath"
 	"testing"
 	"time"
@@ -87,6 +88,7 @@ func TestEventLoopRoutesProbeResultToDaemon(t *testing.T) {
 
 	probeResults := make(chan probe.ProbeResult, 1)
 	linkEvents := make(chan rtnl.LinkEvent, 1)
+	routeEvents := make(chan rtnl.RouteEvent, 1)
 	probeResults <- probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
@@ -96,7 +98,7 @@ func TestEventLoopRoutesProbeResultToDaemon(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents)
+		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 		close(done)
 	}()
 	time.Sleep(50 * time.Millisecond)
@@ -114,6 +116,7 @@ func TestEventLoopRoutesLinkEventToDaemon(t *testing.T) {
 
 	probeResults := make(chan probe.ProbeResult, 1)
 	linkEvents := make(chan rtnl.LinkEvent, 1)
+	routeEvents := make(chan rtnl.RouteEvent, 1)
 	linkEvents <- rtnl.LinkEvent{
 		Name:      "eth0",
 		Carrier:   rtnl.CarrierUp,
@@ -123,7 +126,7 @@ func TestEventLoopRoutesLinkEventToDaemon(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents)
+		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 		close(done)
 	}()
 	time.Sleep(50 * time.Millisecond)
@@ -135,6 +138,39 @@ func TestEventLoopRoutesLinkEventToDaemon(t *testing.T) {
 	}
 }
 
+func TestEventLoopRoutesRouteEventToDaemon(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfg())
+
+	probeResults := make(chan probe.ProbeResult, 1)
+	linkEvents := make(chan rtnl.LinkEvent, 1)
+	routeEvents := make(chan rtnl.RouteEvent, 1)
+	routeEvents <- rtnl.RouteEvent{
+		Op:      rtnl.RouteEventAdd,
+		Iface:   "eth0",
+		Family:  rtnl.RouteFamilyV4,
+		Gateway: net.ParseIP("192.0.2.1"),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
+		close(done)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	gw, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4)
+	if !ok {
+		t.Fatal("eth0/v4 gateway not in cache after RouteEvent")
+	}
+	if gw.String() != "192.0.2.1" {
+		t.Errorf("cache eth0/v4 = %v, want 192.0.2.1", gw)
+	}
+}
+
 func TestEventLoopReturnsOnCtxCancel(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
@@ -142,10 +178,11 @@ func TestEventLoopReturnsOnCtxCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	probeResults := make(chan probe.ProbeResult)
 	linkEvents := make(chan rtnl.LinkEvent)
+	routeEvents := make(chan rtnl.RouteEvent)
 
 	done := make(chan struct{})
 	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents)
+		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 		close(done)
 	}()
 	cancel()
