@@ -95,6 +95,7 @@ pkgs.testers.runNixOSTest {
       };
 
       networking.nftables.enable = true;
+      networking.nftzones.enable = true;
       networking.nftzones.tables.fw = {
         family = "inet";
         zones = {
