@@ -24,6 +24,17 @@ func readGauge(t *testing.T, g prometheus.Gauge) float64 {
 	return m.GetGauge().GetValue()
 }
 
+// readCounter is the Counter twin of readGauge — same idea, same
+// DTO entry point.
+func readCounter(t *testing.T, c prometheus.Counter) float64 {
+	t.Helper()
+	var m dto.Metric
+	if err := c.Write(&m); err != nil {
+		t.Fatalf("Counter.Write: %v", err)
+	}
+	return m.GetCounter().GetValue()
+}
+
 func TestBoolToFloat(t *testing.T) {
 	t.Parallel()
 	if got := boolToFloat(true); got != 1 {

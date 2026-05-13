@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
@@ -219,5 +221,325 @@ func TestUpdateGroupActiveGaugeAbsentClearsAll(t *testing.T) {
 
 	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 0 {
 		t.Errorf("primary after clear: gauge = %v, want 0", v)
+	}
+}
+
+// testCfgWithGroup builds the same two-WAN cfg as testCfg() and
+// attaches a single primary-backup group containing both members.
+// Hand-rolled here rather than mutating testCfg() so the existing
+// subscriber-level tests keep their slim config shape.
+func testCfgWithGroup() *config.Config {
+	cfg := testCfg()
+	cfg.Groups = map[string]selector.Group{
+		"home": {
+			Name:     "home",
+			Strategy: "primary-backup",
+			Table:    100,
+			Mark:     0x100,
+			Members: []selector.Member{
+				{Wan: "primary", Priority: 1},
+				{Wan: "backup", Priority: 2},
+			},
+		},
+	}
+	return cfg
+}
+
+// markHealthy sets carrier + operstate + healthy on every named
+// WAN so buildMemberHealth votes them in. Tests that exercise
+// recomputeGroup need this — newDaemon's cold-start leaves carrier
+// at CarrierUnknown, which collapses to false in carrierUp().
+func markHealthy(d *daemon, wans ...string) {
+	for _, name := range wans {
+		ws := d.wans[name]
+		ws.carrier = rtnl.CarrierUp
+		ws.operstate = rtnl.OperstateUp
+		ws.healthy = true
+	}
+}
+
+// TestRecomputeGroupColdToPrimary: every member healthy, cold start
+// (no active yet) → selector picks the lowest-priority member.
+// Asserts state.json publishes the new active and the per-group
+// `decisions_total` + `active{wan=primary}` metrics fire.
+func TestRecomputeGroupColdToPrimary(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+
+	if !g.active.Has || g.active.Wan != "primary" {
+		t.Errorf("g.active = %+v, want primary present", g.active)
+	}
+	if g.decisionsTotal != 1 {
+		t.Errorf("decisionsTotal = %d, want 1", g.decisionsTotal)
+	}
+	if g.activeSince == nil {
+		t.Error("activeSince = nil, want non-nil on up transition")
+	}
+	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 1 {
+		t.Errorf("group_active{primary} = %v, want 1", v)
+	}
+	// state.json should have been written.
+	if _, err := os.Stat(d.cfg.Global.StatePath); err != nil {
+		t.Errorf("state file not written: %v", err)
+	}
+}
+
+// TestRecomputeGroupNoChange: a second recomputeGroup with the
+// same input must not bump decisionsTotal — the change-detection
+// guard at the top of the function is what keeps the metric
+// honest under flap-free traffic.
+func TestRecomputeGroupNoChange(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	first := g.decisionsTotal
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if g.decisionsTotal != first {
+		t.Errorf("decisionsTotal advanced on no-op recompute: %d → %d", first, g.decisionsTotal)
+	}
+}
+
+// TestRecomputeGroupSwitch: primary unhealthy, backup healthy →
+// active flips from primary to backup; the prior primary gauge
+// drops to 0 and the new active gauge reads 1.
+func TestRecomputeGroupSwitch(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+
+	g := d.groups["home"]
+	// First decision: primary wins.
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if g.active.Wan != "primary" {
+		t.Fatalf("setup: want primary active, got %+v", g.active)
+	}
+	// Sicken primary. Carrier still up, but probes failed.
+	d.wans["primary"].healthy = false
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if !g.active.Has || g.active.Wan != "backup" {
+		t.Errorf("after primary failure: g.active = %+v, want backup", g.active)
+	}
+	if g.decisionsTotal != 2 {
+		t.Errorf("decisionsTotal = %d, want 2 (cold→primary, primary→backup)", g.decisionsTotal)
+	}
+	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 0 {
+		t.Errorf("primary gauge after switch = %v, want 0", v)
+	}
+	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "backup")); v != 1 {
+		t.Errorf("backup gauge after switch = %v, want 1", v)
+	}
+}
+
+// TestRecomputeAffectedGroupsFansOut: a per-WAN health change
+// drives recomputeGroup on every group containing that WAN, and
+// only those groups. Builds two groups (home contains primary;
+// guest contains backup only) and asserts the fan-out predicate
+// fires correctly.
+func TestRecomputeAffectedGroupsFansOut(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	cfg.Groups = map[string]selector.Group{
+		"home": {
+			Name: "home", Strategy: "primary-backup", Table: 100, Mark: 0x100,
+			Members: []selector.Member{
+				{Wan: "primary", Priority: 1},
+				{Wan: "backup", Priority: 2},
+			},
+		},
+		"guest": {
+			Name: "guest", Strategy: "primary-backup", Table: 200, Mark: 0x200,
+			Members: []selector.Member{
+				{Wan: "backup", Priority: 1},
+			},
+		},
+	}
+	d := testDaemon(t, cfg)
+	markHealthy(d, "primary", "backup")
+
+	// `primary` only belongs to `home` — recomputing for primary
+	// should leave guest untouched.
+	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
+	if !d.groups["home"].active.Has {
+		t.Errorf("home should have an active after primary fanout; got %+v", d.groups["home"].active)
+	}
+	if d.groups["guest"].decisionsTotal != 0 {
+		t.Errorf("guest.decisionsTotal = %d, want 0 (primary not a member)", d.groups["guest"].decisionsTotal)
+	}
+
+	// `backup` belongs to both — touching it must fire both.
+	d.recomputeAffectedGroups(t.Context(), "backup", reasonCarrier)
+	if d.groups["guest"].decisionsTotal != 1 {
+		t.Errorf("guest.decisionsTotal = %d, want 1 after backup fanout", d.groups["guest"].decisionsTotal)
+	}
+}
+
+// TestRecomputeGroupAllUnhealthy: every member unhealthy → no
+// Selection. Active.Has flips to false; the prior gauge clears.
+func TestRecomputeGroupAllUnhealthy(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if !g.active.Has {
+		t.Fatal("setup: expected primary active after first decision")
+	}
+	// Both go unhealthy.
+	d.wans["primary"].healthy = false
+	d.wans["backup"].healthy = false
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if g.active.Has {
+		t.Errorf("g.active = %+v, want absent when all members unhealthy", g.active)
+	}
+	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 0 {
+		t.Errorf("primary gauge after all-down = %v, want 0", v)
+	}
+}
+
+// TestRunHooksUpEvent: drop an executable hook into HooksDir/up.d
+// and assert the daemon's runHooks invokes it on an absent→present
+// transition, with the right env vars populated.
+func TestRunHooksUpEvent(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	// Mirror the env-capture pattern from internal/state/hooks_test.go.
+	outFile := filepath.Join(d.cfg.Global.HooksDir, "captured.txt")
+	writeHook(t, filepath.Join(d.cfg.Global.HooksDir, "up.d"), "env.sh",
+		`echo "$WANWATCH_EVENT|$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_IFACE_NEW" > `+outFile)
+
+	g := d.groups["home"]
+	d.runHooks(g, selector.NoActive, selector.Active{Wan: "primary", Has: true})
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("hook didn't run (no output file): %v", err)
+	}
+	got := strings.TrimSpace(string(data))
+	want := "up|home|primary|eth0"
+	if got != want {
+		t.Errorf("hook env capture = %q, want %q", got, want)
+	}
+}
+
+// TestRunHooksNoEventOnIdentical: same Active before/after → no
+// event → runHooks bails before touching HooksDir. We assert by
+// dropping a hook that would fail loudly if invoked, then proving
+// it wasn't.
+func TestRunHooksNoEventOnIdentical(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	sentinel := filepath.Join(d.cfg.Global.HooksDir, "ran.txt")
+	writeHook(t, filepath.Join(d.cfg.Global.HooksDir, "up.d"), "should-not-run.sh",
+		`touch `+sentinel)
+
+	active := selector.Active{Wan: "primary", Has: true}
+	d.runHooks(d.groups["home"], active, active)
+
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Error("hook fired on identical-active transition; want no event")
+	}
+}
+
+// TestRunHooksMissingDirIsNotError: no hook directory present →
+// runHooks must finish quietly. The state.Runner already
+// returns nil for ENOENT; we're pinning that the daemon layer
+// doesn't add noise around it.
+func TestRunHooksMissingDirIsNotError(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	// No writeHook → HooksDir/up.d/ doesn't exist.
+	d.runHooks(d.groups["home"], selector.NoActive,
+		selector.Active{Wan: "primary", Has: true})
+	// No assertion needed — the test fails by panicking if runHooks
+	// gets the error contract wrong. Reaching here is the success
+	// condition.
+}
+
+// applyAttempts sums every counter inside applyRoutes that could
+// fire on any path — runners differ in whether `eth0` exists and
+// whether the daemon has CAP_NET_ADMIN, so a single-counter
+// assertion would be too brittle. As long as one of these
+// advanced, applyRoutes was called.
+func applyAttempts(t *testing.T, d *daemon, group string) float64 {
+	t.Helper()
+	op := readCounter(t, d.metrics.ApplyOpErrors.WithLabelValues(group, "rule_install"))
+	v4 := readCounter(t, d.metrics.ApplyRouteErrors.WithLabelValues(group, "v4"))
+	v6 := readCounter(t, d.metrics.ApplyRouteErrors.WithLabelValues(group, "v6"))
+	return op + v4 + v6
+}
+
+// TestHandleRouteEventReappliesOnActiveIface: when a RouteEvent
+// arrives for the iface of the active member, applyRoutes must
+// fire. We can't observe the netlink call directly without a test
+// seam, so we proxy on the apply-error counters — at least one
+// will advance because every applyRoutes path under a `nix develop`
+// sandbox lacks CAP_NET_ADMIN.
+func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if g.active.Wan != "primary" {
+		t.Fatalf("setup: want primary active, got %+v", g.active)
+	}
+
+	before := applyAttempts(t, d, "home")
+
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
+		Op:      rtnl.RouteEventAdd,
+		Iface:   "eth0", // primary's iface — must trigger reapply
+		Family:  rtnl.RouteFamilyV4,
+		Gateway: net.ParseIP("192.0.2.1"),
+	})
+
+	if after := applyAttempts(t, d, "home"); after <= before {
+		t.Errorf("no apply counter advanced: %v → %v (active-WAN reapply branch not entered)", before, after)
+	}
+}
+
+// TestHandleRouteEventSkipsInactiveIface: a RouteEvent on an iface
+// not used by any active member should populate the cache but
+// not trigger any apply attempt.
+func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+
+	before := applyAttempts(t, d, "home")
+
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
+		Op:      rtnl.RouteEventAdd,
+		Iface:   "lo", // not used by any WAN
+		Family:  rtnl.RouteFamilyV4,
+		Gateway: net.ParseIP("127.0.0.1"),
+	})
+
+	if after := applyAttempts(t, d, "home"); after != before {
+		t.Errorf("apply counters advanced on inactive-iface event: %v → %v", before, after)
+	}
+}
+
+// writeHook is the same shape as the one in internal/state/hooks_test
+// — duplicated here because Go's test-helper sharing across packages
+// would need exporting it from the production tree.
+func writeHook(t *testing.T, eventDir, name, script string) {
+	t.Helper()
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	body := "#!/bin/sh\n" + script + "\n"
+	if err := os.WriteFile(filepath.Join(eventDir, name), []byte(body), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 }
