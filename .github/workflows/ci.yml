@@ -247,6 +247,7 @@ jobs:
             .#checks.x86_64-linux.${PFX}failover-v6 \
             .#checks.x86_64-linux.${PFX}failover-dual-stack \
             .#checks.x86_64-linux.${PFX}failover-probe-loss \
+            .#checks.x86_64-linux.${PFX}cold-start \
             .#checks.x86_64-linux.${PFX}recovery \
             .#checks.x86_64-linux.${PFX}hooks \
             .#checks.x86_64-linux.${PFX}metrics \

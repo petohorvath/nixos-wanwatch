@@ -90,6 +90,10 @@
           inherit pkgs;
           nixosModule = self.nixosModules.default;
         };
+        cold-start = import ./tests/vm/cold-start.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
         recovery = import ./tests/vm/recovery.nix {
           inherit pkgs;
           nixosModule = self.nixosModules.default;
