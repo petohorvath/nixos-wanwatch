@@ -54,7 +54,7 @@ func TestCarrierFromFlagsDown(t *testing.T) {
 
 func TestHandleUpdateEmitsFirstSighting(t *testing.T) {
 	t.Parallel()
-	s := &Subscriber{}
+	s := &LinkSubscriber{}
 	state := map[string]LinkState{}
 	upd := mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
 
@@ -75,7 +75,7 @@ func TestHandleUpdateEmitsFirstSighting(t *testing.T) {
 
 func TestHandleUpdateSuppressesDuplicate(t *testing.T) {
 	t.Parallel()
-	s := &Subscriber{}
+	s := &LinkSubscriber{}
 	state := map[string]LinkState{}
 	upd := mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
 
@@ -89,7 +89,7 @@ func TestHandleUpdateSuppressesDuplicate(t *testing.T) {
 
 func TestHandleUpdateEmitsOnChange(t *testing.T) {
 	t.Parallel()
-	s := &Subscriber{}
+	s := &LinkSubscriber{}
 	state := map[string]LinkState{}
 	s.handleUpdate(state, mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp))
 
@@ -104,7 +104,7 @@ func TestHandleUpdateEmitsOnChange(t *testing.T) {
 
 func TestHandleUpdateFiltersByInterfaceSet(t *testing.T) {
 	t.Parallel()
-	s := &Subscriber{Interfaces: map[string]struct{}{"eth0": {}}}
+	s := &LinkSubscriber{Interfaces: map[string]struct{}{"eth0": {}}}
 	state := map[string]LinkState{}
 
 	if _, ok := s.handleUpdate(state, mkUpdate("wwan0", unix.IFF_LOWER_UP, netlink.OperUp)); ok {
@@ -122,7 +122,7 @@ func TestHandleUpdateDeleteEmitsDownNotpresent(t *testing.T) {
 	t.Parallel()
 	// A previously up interface that gets RTM_DELLINK must surface
 	// as carrier=down/operstate=notpresent so the selector drops it.
-	s := &Subscriber{}
+	s := &LinkSubscriber{}
 	state := map[string]LinkState{}
 	s.handleUpdate(state, mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp))
 
@@ -143,7 +143,7 @@ func TestHandleUpdateDeleteBoundsStateOnNoChange(t *testing.T) {
 	// If the prior state already matches down/notpresent (unusual
 	// but possible), RTM_DELLINK still has to evict the map entry
 	// so transient veth/dummy churn doesn't grow the map.
-	s := &Subscriber{}
+	s := &LinkSubscriber{}
 	state := map[string]LinkState{
 		"veth0": {Name: "veth0", Carrier: CarrierDown, Operstate: OperstateNotPresent},
 	}
@@ -157,7 +157,7 @@ func TestHandleUpdateDeleteBoundsStateOnNoChange(t *testing.T) {
 
 func TestHandleUpdateNilInterfaceSetMatchesAll(t *testing.T) {
 	t.Parallel()
-	s := &Subscriber{}
+	s := &LinkSubscriber{}
 	state := map[string]LinkState{}
 
 	if _, ok := s.handleUpdate(state, mkUpdate("anything", unix.IFF_LOWER_UP, netlink.OperUp)); !ok {
@@ -175,7 +175,7 @@ func TestRunLoopForwardsEvent(t *testing.T) {
 	updates <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- (&Subscriber{}).runLoop(ctx, updates, out) }()
+	go func() { errCh <- (&LinkSubscriber{}).runLoop(ctx, updates, out) }()
 
 	select {
 	case ev := <-out:
@@ -200,7 +200,7 @@ func TestRunLoopReturnsOnUpdatesClosed(t *testing.T) {
 	out := make(chan LinkEvent, 1)
 	close(updates)
 
-	err := (&Subscriber{}).runLoop(context.Background(), updates, out)
+	err := (&LinkSubscriber{}).runLoop(context.Background(), updates, out)
 	if err == nil {
 		t.Fatal("runLoop on closed channel returned nil, want error")
 	}
@@ -213,22 +213,22 @@ func TestRunLoopCancelsBetweenUpdates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := (&Subscriber{}).runLoop(ctx, updates, out)
+	err := (&LinkSubscriber{}).runLoop(ctx, updates, out)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 
-// TestSubscriberRunViaWrapsSubscribeError: a netlink subscribe
+// TestLinkSubscriberRunViaWrapsSubscribeError: a netlink subscribe
 // failure must be wrapped with the `rtnl: LinkSubscribe:` prefix
 // so logs name the layer responsible.
-func TestSubscriberRunViaWrapsSubscribeError(t *testing.T) {
+func TestLinkSubscriberRunViaWrapsSubscribeError(t *testing.T) {
 	t.Parallel()
 	want := errors.New("netlink: subscribe denied")
 	subscribe := func(chan<- netlink.LinkUpdate, <-chan struct{}, netlink.LinkSubscribeOptions) error {
 		return want
 	}
-	err := (&Subscriber{}).runVia(context.Background(), subscribe, make(chan LinkEvent, 1))
+	err := (&LinkSubscriber{}).runVia(context.Background(), subscribe, make(chan LinkEvent, 1))
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want subscribe-error chained via %%w", err)
 	}
@@ -237,11 +237,11 @@ func TestSubscriberRunViaWrapsSubscribeError(t *testing.T) {
 	}
 }
 
-// TestSubscriberRunViaWiresSubscribeToRunLoop: a successful
+// TestLinkSubscriberRunViaWiresSubscribeToRunLoop: a successful
 // subscribe hands the `updates` channel through to runLoop — a
 // LinkUpdate written by the stub must surface as a LinkEvent on
 // `out`, proving the wire-up isn't dropped on the floor.
-func TestSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
+func TestLinkSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
 	t.Parallel()
 	// `subscribe` writes synthetic updates to the channel runVia
 	// hands it, then signals readiness via `subscribed`. Writing
@@ -260,7 +260,7 @@ func TestSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- (&Subscriber{}).runVia(ctx, subscribe, out)
+		done <- (&LinkSubscriber{}).runVia(ctx, subscribe, out)
 	}()
 
 	<-subscribed

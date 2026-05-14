@@ -120,11 +120,11 @@ func targetsFor(wan config.Wan, family probe.Family) []string {
 	return out
 }
 
-// startSubscriber opens an rtnetlink subscription filtered to the
+// startLinkSubscriber opens an rtnetlink subscription filtered to the
 // daemon's WAN interfaces and returns the LinkEvent channel.
-func startSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logger) <-chan rtnl.LinkEvent {
+func startLinkSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logger) <-chan rtnl.LinkEvent {
 	watched := watchedInterfaces(cfg)
-	s := &rtnl.Subscriber{Interfaces: watched}
+	s := &rtnl.LinkSubscriber{Interfaces: watched}
 	events := make(chan rtnl.LinkEvent, 64)
 	go func() {
 		err := s.Run(ctx, events)

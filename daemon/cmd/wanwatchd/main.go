@@ -8,7 +8,7 @@
 //   - main.go         — process lifecycle (flags, logging, signals)
 //   - daemon.go       — daemon struct + Decision pipeline (handlers,
 //     recompute, applyRoutes, writeStateSnapshot, runHooks)
-//   - subscribers.go  — startProbers / startSubscriber /
+//   - subscribers.go  — startProbers / startLinkSubscriber /
 //     startRouteSubscriber + eventLoop
 //   - decision.go     — pure helpers (thresholds, family policy,
 //     sort, hookEventFor) and the decisionReason enum
@@ -133,7 +133,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		<-mErrCh
 		return fmt.Errorf("probers: %w", err)
 	}
-	linkEvents := startSubscriber(ctx, &cfg, logger)
+	linkEvents := startLinkSubscriber(ctx, &cfg, logger)
 	routeEvents, err := startRouteSubscriber(ctx, &cfg, logger)
 	if err != nil {
 		cancel()

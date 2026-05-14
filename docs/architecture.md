@@ -137,7 +137,7 @@ LinkEvent  ─────►  wan.carrier/operstate  ────────�
 1. carrier on wan0 drops
        │
        ▼
-2. rtnl.Subscriber emits LinkEvent{Name=wan0, Carrier=down}
+2. rtnl.LinkSubscriber emits LinkEvent{Name=wan0, Carrier=down}
        │
        ▼
 3. handleLinkEvent sets wan0.carrier = down

@@ -9,9 +9,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Subscriber owns a netlink RTNLGRP_LINK subscription. Concurrent
+// LinkSubscriber owns a netlink RTNLGRP_LINK subscription. Concurrent
 // calls to Run are not supported.
-type Subscriber struct {
+type LinkSubscriber struct {
 	// Interfaces restricts emission to the named set. A nil map
 	// means "emit for every interface".
 	Interfaces map[string]struct{}
@@ -31,12 +31,12 @@ const updateChanBuffer = 256
 // `out` is *not* closed on return; callers can retry Run with a
 // fresh goroutine and reuse the same channel after a transient
 // failure.
-func (s *Subscriber) Run(ctx context.Context, out chan<- LinkEvent) error {
+func (s *LinkSubscriber) Run(ctx context.Context, out chan<- LinkEvent) error {
 	return s.runVia(ctx, netlink.LinkSubscribeWithOptions, out)
 }
 
 // linkSubscribeFn matches netlink.LinkSubscribeWithOptions and is
-// the seam Subscriber.runVia exposes for tests: real production
+// the seam LinkSubscriber.runVia exposes for tests: real production
 // uses the netlink call; tests inject a stub that either errors
 // or fills the `updates` channel with synthetic LinkUpdates.
 type linkSubscribeFn func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, opts netlink.LinkSubscribeOptions) error
@@ -44,7 +44,7 @@ type linkSubscribeFn func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, op
 // runVia is Run parameterized on the subscription function — the
 // only piece of Run that needs a netlink socket. Tests drive this
 // directly to cover the error wrapping and the runLoop wire-up.
-func (s *Subscriber) runVia(ctx context.Context, subscribe linkSubscribeFn, out chan<- LinkEvent) error {
+func (s *LinkSubscriber) runVia(ctx context.Context, subscribe linkSubscribeFn, out chan<- LinkEvent) error {
 	updates := make(chan netlink.LinkUpdate, updateChanBuffer)
 	done := make(chan struct{})
 	defer close(done)
@@ -63,7 +63,7 @@ func (s *Subscriber) runVia(ctx context.Context, subscribe linkSubscribeFn, out 
 // resulting events to `out`. Exits on ctx cancellation or when
 // `updates` closes. Split from Run so tests can drive it without a
 // netlink socket.
-func (s *Subscriber) runLoop(ctx context.Context, updates <-chan netlink.LinkUpdate, out chan<- LinkEvent) error {
+func (s *LinkSubscriber) runLoop(ctx context.Context, updates <-chan netlink.LinkUpdate, out chan<- LinkEvent) error {
 	state := make(map[string]LinkState)
 	for {
 		select {
@@ -94,7 +94,7 @@ func (s *Subscriber) runLoop(ctx context.Context, updates <-chan netlink.LinkUpd
 // selector out of that member, not leave a stale snapshot. The
 // state entry is removed either way so the map stays bounded as
 // transient interfaces (veth, dummy, …) come and go.
-func (s *Subscriber) handleUpdate(state map[string]LinkState, upd netlink.LinkUpdate) (LinkEvent, bool) {
+func (s *LinkSubscriber) handleUpdate(state map[string]LinkState, upd netlink.LinkUpdate) (LinkEvent, bool) {
 	attrs := upd.Attrs()
 	name := attrs.Name
 	if _, watch := s.Interfaces[name]; s.Interfaces != nil && !watch {

@@ -108,7 +108,7 @@ func (s *RouteSubscriber) Run(ctx context.Context, out chan<- RouteEvent) error 
 type routeSubscribeFn func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, opts netlink.RouteSubscribeOptions) error
 
 // runVia is Run parameterized on the subscription function. Same
-// rationale as Subscriber.runVia in subscriber.go — tests drive
+// rationale as LinkSubscriber.runVia in subscriber.go — tests drive
 // the wire-up without a netlink socket.
 func (s *RouteSubscriber) runVia(ctx context.Context, subscribe routeSubscribeFn, out chan<- RouteEvent) error {
 	updates := make(chan netlink.RouteUpdate, routeUpdateBuffer)
