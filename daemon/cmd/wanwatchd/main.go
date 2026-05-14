@@ -8,8 +8,10 @@
 //   - main.go         — process lifecycle (flags, logging, signals)
 //   - daemon.go       — daemon struct + Decision pipeline (handlers,
 //     recompute, applyRoutes, writeStateSnapshot, runHooks)
-//   - subscribers.go  — startProbers / startLinkSubscriber /
-//     startRouteSubscriber + eventLoop
+//   - probers.go      — startProbers + probe-target helpers
+//     (identKeysFor, targetsFor, familiesFromTargets)
+//   - subscribers.go  — startLinkSubscriber, startRouteSubscriber
+//   - eventloop.go    — eventLoop (central event dispatch)
 //   - decision.go     — pure helpers (thresholds, family policy,
 //     sort, hookEventFor) and the decisionReason enum
 //   - gateway.go      — GatewayCache (kernel default-route mirror)

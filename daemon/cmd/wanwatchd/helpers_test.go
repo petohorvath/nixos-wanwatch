@@ -1,9 +1,13 @@
 package main
 
 import (
+	"io"
+	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 	"github.com/prometheus/client_golang/prometheus"
@@ -33,6 +37,37 @@ func readCounter(t *testing.T, c prometheus.Counter) float64 {
 		t.Fatalf("Counter.Write: %v", err)
 	}
 	return m.GetCounter().GetValue()
+}
+
+// testDaemon builds a daemon wired against `cfg` without invoking
+// bootstrap() — netlink rule install isn't available in unit tests.
+func testDaemon(t *testing.T, cfg *config.Config) *daemon {
+	t.Helper()
+	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
+	cfg.Global.HooksDir = t.TempDir()
+	return newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func testCfg() *config.Config {
+	return &config.Config{
+		Wans: map[string]config.Wan{
+			"primary": {
+				Name:      "primary",
+				Interface: "eth0",
+				Probe: config.Probe{
+					Targets: []string{"1.1.1.1", "2606:4700:4700::1111"},
+				},
+			},
+			"backup": {
+				Name:      "backup",
+				Interface: "wwan0",
+				// v4-only WAN — only a v4 probe target.
+				Probe: config.Probe{
+					Targets: []string{"8.8.8.8"},
+				},
+			},
+		},
+	}
 }
 
 func TestBoolToFloat(t *testing.T) {
