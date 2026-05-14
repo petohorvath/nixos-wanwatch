@@ -4,11 +4,13 @@
 // so name and label drift is detectable by diffing this file
 // against the doc.
 //
-// Each metric is exposed as a public field on Registry so callers
-// (probe, rtnl, selector, apply, state) update them directly via
-// vishvananda's standard `.WithLabelValues(...).Set(...)` /
-// `.Inc()` / `.Observe(...)` API. Typed wrapper methods are a
-// follow-up if call sites prove fragile.
+// Each metric is exposed as a public field on Registry. The
+// cmd/wanwatchd daemon updates them from its event handlers — off
+// the values the probe / rtnl / selector / apply / state layers
+// return — via prometheus/client_golang's standard
+// `.WithLabelValues(...).Set(...)` / `.Inc()` / `.Observe(...)`
+// API. Typed wrapper methods are a follow-up if call sites prove
+// fragile.
 package metrics
 
 import (
@@ -29,10 +31,9 @@ type Registry struct {
 	reg *prometheus.Registry
 
 	// Probe layer — labels per PLAN §7.2.
-	ProbeRTT     *prometheus.GaugeVec
-	ProbeJitter  *prometheus.GaugeVec
-	ProbeLoss    *prometheus.GaugeVec
-	ProbeSamples *prometheus.CounterVec
+	ProbeRTT    *prometheus.GaugeVec
+	ProbeJitter *prometheus.GaugeVec
+	ProbeLoss   *prometheus.GaugeVec
 
 	// WAN layer.
 	WanCarrier        *prometheus.GaugeVec
@@ -49,7 +50,6 @@ type Registry struct {
 	// stay non-empty (Prometheus best practice).
 	ApplyRouteDuration *prometheus.HistogramVec
 	ApplyRouteErrors   *prometheus.CounterVec
-	ApplyOpDuration    *prometheus.HistogramVec
 	ApplyOpErrors      *prometheus.CounterVec
 
 	// Daemon-wide.
@@ -85,13 +85,6 @@ func New() *Registry {
 			Name:      "loss_ratio",
 			Help:      "Per-(WAN, family) packet loss fraction in [0, 1].",
 		}, []string{"wan", "family"}),
-
-		ProbeSamples: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: Namespace,
-			Subsystem: "probe",
-			Name:      "samples_total",
-			Help:      "Probe samples observed, partitioned by result ∈ {success,timeout,error}.",
-		}, []string{"wan", "target", "family", "result"}),
 
 		WanCarrier: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
@@ -157,14 +150,6 @@ func New() *Registry {
 			Help:      "Default-route writes that returned a netlink error.",
 		}, []string{"group", "family"}),
 
-		ApplyOpDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: Namespace,
-			Subsystem: "apply",
-			Name:      "op_duration_seconds",
-			Help:      "Wall time of a family-agnostic apply op ∈ {conntrack_flush,state_write,hook,rule_install}.",
-			Buckets:   prometheus.DefBuckets,
-		}, []string{"group", "op"}),
-
 		ApplyOpErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: Namespace,
 			Subsystem: "apply",
@@ -194,10 +179,10 @@ func New() *Registry {
 	}
 
 	reg.MustRegister(
-		r.ProbeRTT, r.ProbeJitter, r.ProbeLoss, r.ProbeSamples,
+		r.ProbeRTT, r.ProbeJitter, r.ProbeLoss,
 		r.WanCarrier, r.WanOperstate, r.WanFamilyHealthy, r.WanHealthy, r.WanCarrierChanges,
 		r.GroupActive, r.GroupDecisions,
-		r.ApplyRouteDuration, r.ApplyRouteErrors, r.ApplyOpDuration, r.ApplyOpErrors,
+		r.ApplyRouteDuration, r.ApplyRouteErrors, r.ApplyOpErrors,
 		r.StatePublications, r.HookInvocations, r.BuildInfo,
 	)
 	return r

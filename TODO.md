@@ -65,6 +65,28 @@ rules (now applied informally — see `daemon-state.md`'s revised
 "Compatibility policy" section). Will need refining once schema 3
 lands. PLAN §12 OQ #1.
 
+### Re-add `wanwatch_probe_samples_total`
+
+Cut from the v1 catalog — it was registered but never fed, because
+the data model can't supply it. The catalog shape is
+`{wan,target,family,result}` with `result ∈ {success,timeout,error}`,
+but the daemon's `Sample` (`daemon/internal/probe/stats.go`) carries a
+single `Lost bool` that collapses timeout and transport error into one
+bit, and the aggregated `ProbeResult` keeps no per-sample counts.
+Re-adding needs a tri-state sample result plus a path threading
+per-sample counts from the prober to the metrics layer.
+
+### Re-add `wanwatch_apply_op_duration_seconds`
+
+Cut from the v1 catalog — it was registered but never fed, because
+one label value doesn't fit. The catalog shape is `{group,op}` with
+`op ∈ {conntrack_flush,state_write,hook,rule_install}`, but
+`state_write` is not per-group: `state.json` is one file written once
+per Decision across all groups, so a `group` label on its duration is
+a category error. Resolve before re-adding — drop `state_write` from
+the op set, or split state-write timing into a separate group-less
+metric.
+
 ---
 
 ## v2 — major

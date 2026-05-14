@@ -36,7 +36,6 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.ProbeRTT.WithLabelValues("primary", "1.1.1.1", "v4").Set(12.3)
 	r.ProbeJitter.WithLabelValues("primary", "v4").Set(1.2)
 	r.ProbeLoss.WithLabelValues("primary", "v4").Set(0)
-	r.ProbeSamples.WithLabelValues("primary", "1.1.1.1", "v4", "success").Inc()
 	r.WanCarrier.WithLabelValues("primary").Set(1)
 	r.WanOperstate.WithLabelValues("primary").Set(6)
 	r.WanFamilyHealthy.WithLabelValues("primary", "v4").Set(1)
@@ -46,7 +45,6 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.GroupDecisions.WithLabelValues("home", "startup").Inc()
 	r.ApplyRouteDuration.WithLabelValues("home", "v4").Observe(0.001)
 	r.ApplyRouteErrors.WithLabelValues("home", "v4").Inc()
-	r.ApplyOpDuration.WithLabelValues("home", "rule_install").Observe(0.001)
 	r.ApplyOpErrors.WithLabelValues("home", "rule_install").Inc()
 	r.StatePublications.Inc()
 	r.HookInvocations.WithLabelValues("up", "ok").Inc()
@@ -57,7 +55,6 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 		"wanwatch_probe_rtt_seconds",
 		"wanwatch_probe_jitter_seconds",
 		"wanwatch_probe_loss_ratio",
-		"wanwatch_probe_samples_total",
 		"wanwatch_wan_carrier",
 		"wanwatch_wan_operstate",
 		"wanwatch_wan_family_healthy",
@@ -67,7 +64,6 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 		"wanwatch_group_decisions_total",
 		"wanwatch_apply_route_duration_seconds",
 		"wanwatch_apply_route_errors_total",
-		"wanwatch_apply_op_duration_seconds",
 		"wanwatch_apply_op_errors_total",
 		"wanwatch_state_publications_total",
 		"wanwatch_hook_invocations_total",

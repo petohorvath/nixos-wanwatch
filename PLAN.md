@@ -502,11 +502,9 @@ inside the daemon.
 
 ```
 # Probe layer — family ∈ {v4, v6}
-wanwatch_probe_rtt_milliseconds{wan,target,family}     gauge
-wanwatch_probe_jitter_milliseconds{wan,family}         gauge (per-family aggregate)
+wanwatch_probe_rtt_seconds{wan,target,family}          gauge
+wanwatch_probe_jitter_seconds{wan,family}              gauge (per-family aggregate)
 wanwatch_probe_loss_ratio{wan,family}                  gauge (0.0–1.0, per-family aggregate)
-wanwatch_probe_samples_total{wan,target,family,result} counter
-                                                       result ∈ {success,timeout,error}
 
 # WAN layer — carrier/operstate are family-agnostic; health is per-family + aggregate
 wanwatch_wan_carrier{wan}                              gauge (0|1)
@@ -523,10 +521,9 @@ wanwatch_group_decisions_total{group,reason}           counter
 # Apply layer — split per-family vs family-agnostic ops to avoid empty labels
 wanwatch_apply_route_duration_seconds{group,family}    histogram (per-family RTM_NEWROUTE)
 wanwatch_apply_route_errors_total{group,family}        counter
-wanwatch_apply_op_duration_seconds{group,op}           histogram (family-agnostic ops)
+wanwatch_apply_op_errors_total{group,op}               counter
                                                        op ∈ {conntrack_flush,state_write,hook,
                                                              rule_install}
-wanwatch_apply_op_errors_total{group,op}               counter
 
 # Daemon
 wanwatch_state_publications_total                      counter
