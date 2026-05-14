@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 )
 
 // validConfig is a minimal-but-realistic config JSON used as a base
@@ -112,6 +114,33 @@ func TestParseRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestParseRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
+	// "globl" instead of "global" — the typo'd key DisallowUnknownFields
+	// exists to catch. It's a JSON-decode error, neither sentinel.
+	bad := `{"schema":1,"globl":{},"wans":{},"groups":{}}`
+	_, err := Parse([]byte(bad))
+	if err == nil {
+		t.Fatal("Parse(unknown field) err = nil")
+	}
+	if errors.Is(err, ErrSchemaMismatch) || errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("err wrapped unexpected sentinel: %v", err)
+	}
+}
+
+func TestParseRejectsTrailingData(t *testing.T) {
+	t.Parallel()
+	// A complete config followed by junk: the first Decode succeeds,
+	// the second catches the leftover bytes.
+	_, err := Parse([]byte(validConfig + "  trailing"))
+	if err == nil {
+		t.Fatal("Parse(trailing data) err = nil")
+	}
+	if errors.Is(err, ErrSchemaMismatch) || errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("err wrapped unexpected sentinel: %v", err)
+	}
+}
+
 func TestValidateRejectsEmptyStatePath(t *testing.T) {
 	t.Parallel()
 	cfg := mustParse(t, validConfig)
@@ -205,6 +234,72 @@ func TestValidateRejectsDanglingMemberWan(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsBadValues covers the value-range mirror of the
+// lib's probe/group checks: one case per guard in validateProbe,
+// validateThresholds, validateHysteresis, and validateGroup.
+func TestValidateRejectsBadValues(t *testing.T) {
+	t.Parallel()
+
+	// setWan parses validConfig, applies fn to the "primary" WAN, and
+	// writes it back — the value map can't be mutated in place.
+	setWan := func(fn func(w *Wan)) func(t *testing.T) Config {
+		return func(t *testing.T) Config {
+			cfg := mustParse(t, validConfig)
+			w := cfg.Wans["primary"]
+			fn(&w)
+			cfg.Wans["primary"] = w
+			return cfg
+		}
+	}
+	// setGroup is setWan's analogue for the "home" group.
+	setGroup := func(fn func(g *selector.Group)) func(t *testing.T) Config {
+		return func(t *testing.T) Config {
+			cfg := mustParse(t, validConfig)
+			g := cfg.Groups["home"]
+			fn(&g)
+			cfg.Groups["home"] = g
+			return cfg
+		}
+	}
+
+	tests := []struct {
+		name  string
+		build func(t *testing.T) Config
+	}{
+		{"non-positive intervalMs", setWan(func(w *Wan) { w.Probe.IntervalMs = 0 })},
+		{"non-positive timeoutMs", setWan(func(w *Wan) { w.Probe.TimeoutMs = 0 })},
+		{"non-positive windowSize", setWan(func(w *Wan) { w.Probe.WindowSize = 0 })},
+		{"unknown probe method", setWan(func(w *Wan) { w.Probe.Method = "tcp" })},
+		{"unknown familyHealthPolicy", setWan(func(w *Wan) { w.Probe.FamilyHealthPolicy = "some" })},
+		{"lossPctDown over 100", setWan(func(w *Wan) { w.Probe.Thresholds.LossPctDown = 101 })},
+		{"lossPctUp negative", setWan(func(w *Wan) { w.Probe.Thresholds.LossPctUp = -1 })},
+		{"loss thresholds inverted", setWan(func(w *Wan) {
+			w.Probe.Thresholds.LossPctUp = 40
+			w.Probe.Thresholds.LossPctDown = 30
+		})},
+		{"non-positive rttMsUp", setWan(func(w *Wan) { w.Probe.Thresholds.RttMsUp = 0 })},
+		{"rtt thresholds inverted", setWan(func(w *Wan) {
+			w.Probe.Thresholds.RttMsUp = 600
+			w.Probe.Thresholds.RttMsDown = 500
+		})},
+		{"non-positive consecutiveUp", setWan(func(w *Wan) { w.Probe.Hysteresis.ConsecutiveUp = 0 })},
+		{"non-positive consecutiveDown", setWan(func(w *Wan) { w.Probe.Hysteresis.ConsecutiveDown = 0 })},
+		{"unknown strategy", setGroup(func(g *selector.Group) { g.Strategy = "bogus-strategy" })},
+		{"non-positive table", setGroup(func(g *selector.Group) { g.Table = 0 })},
+		{"non-positive mark", setGroup(func(g *selector.Group) { g.Mark = 0 })},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := tt.build(t)
+			if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("Validate() = %v, want wrap of ErrInvalidConfig", err)
+			}
+		})
+	}
+}
+
 func TestLoadReadsFile(t *testing.T) {
 	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "config.json")
@@ -259,6 +354,8 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte(`{"schema":1,"global":{"statePath":"a","hooksDir":"b","metricsSocket":"c","logLevel":"info"},"wans":{},"groups":{}}`))
 	f.Add([]byte(`{"schema":1,"wans":null,"groups":null}`))
 	f.Add([]byte(`{"schema":"not-an-int"}`))
+	f.Add([]byte(`{"schema":1,"bogusKey":true}`))
+	f.Add([]byte(`{"schema":1} trailing`))
 
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		cfg, err := Parse(raw)
