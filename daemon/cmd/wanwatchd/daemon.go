@@ -193,14 +193,13 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 
 	if ws.healthy != prevAggregate {
 		d.recomputeAffectedGroups(ctx, r.Wan, reasonHealth)
-		return
 	}
-	// Per-family verdict transitioned but the aggregate did not
-	// (e.g. v4 went healthy while v6 stayed down under
-	// familyHealthPolicy=all). recomputeAffectedGroups will not
-	// fire, but state.json still carries the stale per-family
-	// slot — republish so external readers see the change.
-	d.writeStateSnapshot()
+	// A per-family verdict can transition without moving the
+	// aggregate (e.g. v4 drops while v6 holds under
+	// familyHealthPolicy=any). That is not a Decision, so state.json
+	// is deliberately not republished — it is a Decision snapshot
+	// (PLAN §5.5), and the live per-family view is the Prometheus
+	// endpoint, updated above via recordProbeMetrics.
 }
 
 // handleLinkEvent updates per-WAN carrier/operstate. Carrier-down

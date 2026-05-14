@@ -587,14 +587,14 @@ func TestHandleProbeResultUnknownFamilyNoOp(t *testing.T) {
 	})
 }
 
-// TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate:
+// TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate:
 // for a dual-stack WAN under familyHealthPolicy=any, a single
-// family going healthy doesn't change the aggregate (it was
-// already healthy via cold-start). The path still republishes
-// state.json so external scrape readers see the per-family slot
-// flip — that branch was the previously-uncovered tail of
-// handleProbeResult.
-func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) {
+// family going unhealthy doesn't move the aggregate (the other
+// family is still healthy via cold-start). That is not a Decision,
+// so per PLAN §5.5 state.json is not republished — it is a
+// Decision snapshot, and the live per-family view is the
+// Prometheus endpoint, not state.json.
+func TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate(t *testing.T) {
 	t.Parallel()
 	cfg := testCfg()
 	// any-policy: aggregate stays true as long as ≥1 family is
@@ -614,8 +614,6 @@ func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) 
 	}
 	d := testDaemon(t, cfg)
 
-	stateBefore, _ := os.Stat(d.cfg.Global.StatePath)
-
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
@@ -625,17 +623,12 @@ func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) 
 	if !d.wans["primary"].healthy {
 		t.Error("aggregate flipped under `any` despite v6 still uncooked")
 	}
-	// Republish should have happened: state.json modtime advances,
-	// OR (cold path) state.json now exists.
-	stateAfter, err := os.Stat(d.cfg.Global.StatePath)
-	if err != nil {
-		t.Fatalf("state.json missing after republish branch: %v", err)
-	}
-	if stateBefore != nil && !stateAfter.ModTime().After(stateBefore.ModTime()) {
-		// Modtime may equal if the test runs within the FS's mtime
-		// granularity. Be lenient — the file existing post-call is
-		// the load-bearing assertion.
-		t.Logf("state.json modtime didn't advance (within FS granularity?)")
+	// No Decision fired, so state.json must not be written — it is a
+	// Decision snapshot (PLAN §5.5), not a live mirror. testDaemon
+	// skips bootstrap, so the file never existed; a republish on
+	// this path would have created it.
+	if _, err := os.Stat(d.cfg.Global.StatePath); err == nil {
+		t.Error("state.json was written on a non-Decision family flip")
 	}
 }
 

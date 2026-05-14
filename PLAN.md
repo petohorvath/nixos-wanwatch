@@ -376,9 +376,10 @@ Three artifacts comprise the daemon's public contract:
    (`schema: 1`). Written by the NixOS module, read by the daemon at
    startup. Full schema in `docs/specs/daemon-config.md`.
 2. **State file** `/run/wanwatch/state.json` — schema versioned
-   (`schema: 2`). Written atomically (tmpfile + rename) on every
-   Decision. Consumers (Telegraf, custom scripts, `wanwatchctl`)
-   read it. Full schema in `docs/specs/daemon-state.md`.
+   (`schema: 1`). Written atomically (tmpfile + rename) on every
+   Decision, plus an initial publish at startup. Consumers
+   (Telegraf, custom scripts, `wanwatchctl`) read it. Full schema
+   in `docs/specs/daemon-state.md`.
 3. **Hook env vars** — when invoking `/etc/wanwatch/hooks/{up,down,switch}.d/*`:
 
    ```
