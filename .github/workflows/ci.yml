@@ -52,6 +52,37 @@ jobs:
       - name: Verify no formatting drift
         run: git diff --exit-code
 
+  # `go mod` hygiene. The daemon's deps are vendored under
+  # `daemon/vendor/` and every flake check runs Go with
+  # `-mod=vendor`, which checks vendor/ against go.mod but never
+  # re-derives go.mod itself — so a stale `// indirect` annotation
+  # or an unused `require` passes every other job untouched.
+  # `go mod tidy -diff` re-derives go.mod/go.sum and exits
+  # non-zero if they would change; `go mod verify` confirms the
+  # module cache matches go.sum. This needs network — the pruned
+  # module graph is not vendored — so unlike the daemon checks it
+  # runs as a plain job, not a hermetic flake check, the same
+  # shape as the `format` drift gate above.
+  go-mod:
+    name: go.mod hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          purge-created: 0
+          purge-primary-key: never
+      - name: Verify modules against go.sum
+        run: nix develop --command bash -c 'cd daemon && go mod download && go mod verify'
+      - name: Verify go.mod and go.sum are tidy
+        run: nix develop --command bash -c 'cd daemon && go mod tidy -diff'
+
   # Unit and integration jobs run across both Linux systems the
   # flake exposes. Nix can't cross-build between architectures
   # without a remote builder, so each `system` runs on a matching
