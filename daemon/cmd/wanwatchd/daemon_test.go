@@ -33,7 +33,6 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 		},
 	}
 	d := testDaemon(t, cfg)
-	d.wans["primary"].healthy = true
 	d.wans["primary"].carrier = rtnl.CarrierUp
 	d.wans["primary"].operstate = rtnl.OperstateUp
 	d.wans["primary"].families[probe.FamilyV4].healthy = true
@@ -105,9 +104,11 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 		},
 	}
 	d := testDaemon(t, cfg)
-	// Cold-start defaults `healthy = true`; assert we're starting there.
-	if !d.wans["primary"].healthy {
-		t.Fatalf("precondition: primary.healthy = false, want true at cold-start")
+	// markHealthy brings carrier up; with families still uncooked the
+	// WAN starts healthy — the cold-start state we transition out of.
+	markHealthy(d, "primary")
+	if !d.wans["primary"].healthy() {
+		t.Fatalf("precondition: primary not healthy at setup")
 	}
 
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
@@ -119,7 +120,7 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 	if d.wans["primary"].families[probe.FamilyV4].healthy {
 		t.Error("primary/v4 still healthy after high-loss probe")
 	}
-	if d.wans["primary"].healthy {
+	if d.wans["primary"].healthy() {
 		t.Error("primary aggregate still healthy after high-loss probe")
 	}
 }
@@ -148,6 +149,7 @@ func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
 		},
 	}
 	d := testDaemon(t, cfg)
+	markHealthy(d, "primary")
 
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
@@ -158,7 +160,7 @@ func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
 	if !d.wans["primary"].families[probe.FamilyV4].healthy {
 		t.Error("primary/v4 not healthy after a good first probe — hysteresis ramped instead of seeding")
 	}
-	if !d.wans["primary"].healthy {
+	if !d.wans["primary"].healthy() {
 		t.Error("primary aggregate not healthy after a good first probe")
 	}
 }
@@ -286,16 +288,28 @@ func testCfgWithGroup() *config.Config {
 	return cfg
 }
 
-// markHealthy sets carrier + operstate + healthy on every named
-// WAN so buildMemberHealth votes them in. Tests that exercise
-// recomputeGroup need this — newDaemon's cold-start leaves carrier
-// at CarrierUnknown, which collapses to false in carrierUp().
+// markHealthy brings each named WAN's carrier + operstate up.
+// newDaemon leaves carrier at CarrierUnknown (cold start), which
+// carrierUp() reads as false; with carrier up and families still
+// uncooked, wanState.healthy() is true — the cold-start state.
 func markHealthy(d *daemon, wans ...string) {
 	for _, name := range wans {
 		ws := d.wans[name]
 		ws.carrier = rtnl.CarrierUp
 		ws.operstate = rtnl.OperstateUp
-		ws.healthy = true
+	}
+}
+
+// markUnhealthy cooks every family of each named WAN with a failed
+// probe verdict. Carrier is left as-is — the cooked-unhealthy
+// families collapse combineFamilies, so wanState.healthy() is
+// false even with carrier up. The probe-side mirror of markHealthy.
+func markUnhealthy(d *daemon, wans ...string) {
+	for _, name := range wans {
+		for _, fs := range d.wans[name].families {
+			fs.cooked = true
+			fs.healthy = false
+		}
 	}
 }
 
@@ -361,8 +375,8 @@ func TestRecomputeGroupSwitch(t *testing.T) {
 	if g.active.Wan != "primary" {
 		t.Fatalf("setup: want primary active, got %+v", g.active)
 	}
-	// Sicken primary. Carrier still up, but probes failed.
-	d.wans["primary"].healthy = false
+	// Sicken primary via failed probes — carrier stays up.
+	markUnhealthy(d, "primary")
 	d.recomputeGroup(t.Context(), g, reasonHealth)
 	if !g.active.Has || g.active.Wan != "backup" {
 		t.Errorf("after primary failure: g.active = %+v, want backup", g.active)
@@ -434,8 +448,7 @@ func TestRecomputeGroupAllUnhealthy(t *testing.T) {
 		t.Fatal("setup: expected primary active after first decision")
 	}
 	// Both go unhealthy.
-	d.wans["primary"].healthy = false
-	d.wans["backup"].healthy = false
+	markUnhealthy(d, "primary", "backup")
 	d.recomputeGroup(t.Context(), g, reasonHealth)
 	if g.active.Has {
 		t.Errorf("g.active = %+v, want absent when all members unhealthy", g.active)
@@ -652,6 +665,7 @@ func TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate(t *testing.T) 
 		},
 	}
 	d := testDaemon(t, cfg)
+	markHealthy(d, "primary")
 
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
@@ -659,7 +673,7 @@ func TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate(t *testing.T) 
 		Stats:  probe.FamilyStats{LossRatio: 0.95, RTTMicros: 50_000},
 	})
 
-	if !d.wans["primary"].healthy {
+	if !d.wans["primary"].healthy() {
 		t.Error("aggregate flipped under `any` despite v6 still uncooked")
 	}
 	// No Decision fired, so state.json must not be written — it is a
@@ -678,8 +692,8 @@ func TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate(t *testing.T) 
 //
 //  1. flow through eventLoop → handleLinkEvent
 //  2. trigger recomputeAffectedGroups → recomputeGroup
-//  3. produce a Selection with primary active (cold-start
-//     `healthy = true` makes this work without a probe sample)
+//  3. produce a Selection with primary active (carrier up plus
+//     uncooked families ⇒ healthy(), no probe sample needed)
 //  4. invoke runHooks with EventUp
 //  5. execute the hook script and write the expected env vars
 //
@@ -707,9 +721,9 @@ func TestEventLoopEndToEndFiresUpHook(t *testing.T) {
 		close(loopDone)
 	}()
 
-	// Send the carrier-up event for primary. Aggregate health stays
-	// healthy via cold-start, so primary becomes the active member
-	// → up event fires → hook runs.
+	// Send the carrier-up event for primary. With carrier up and
+	// families still uncooked, healthy() is true, so primary becomes
+	// the active member → up event fires → hook runs.
 	linkEvents <- rtnl.LinkEvent{Name: "eth0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp}
 
 	// Poll for the hook's output file. The hook timeout cap is

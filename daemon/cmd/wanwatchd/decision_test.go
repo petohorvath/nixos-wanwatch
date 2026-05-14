@@ -155,7 +155,9 @@ func TestBuildMemberHealthHonorsCarrierAndProbeVerdict(t *testing.T) {
 			name:      "primary",
 			carrier:   rtnl.CarrierUp,
 			operstate: rtnl.OperstateUp,
-			healthy:   true,
+			families: map[probe.Family]*familyState{
+				probe.FamilyV4: {cooked: true, healthy: true},
+			},
 		},
 	}
 	h := buildMemberHealth(g, wans)
@@ -381,22 +383,28 @@ func TestCombineFamiliesPolicyMatrix(t *testing.T) {
 }
 
 // TestBuildMemberHealthGatesByCarrier documents the load-bearing
-// `healthy = ok && w.carrierUp() && w.healthy` predicate: probes
-// reporting healthy do NOT count when carrier is down. This is
-// what makes carrier-down events drive failover instantly without
-// waiting for probe timeouts.
+// carrier gate in wanState.healthy(): a probe-healthy WAN with
+// carrier down still counts as unhealthy. This is what makes
+// carrier-down events drive failover instantly, without waiting
+// for probe timeouts.
 func TestBuildMemberHealthGatesByCarrier(t *testing.T) {
 	t.Parallel()
+	// Both WANs have a cooked-healthy probe verdict; only carrier
+	// differs.
 	wans := map[string]*wanState{
 		"primary": {
 			carrier:   rtnl.CarrierDown,
 			operstate: rtnl.OperstateDown,
-			healthy:   true, // probes say healthy
+			families: map[probe.Family]*familyState{
+				probe.FamilyV4: {cooked: true, healthy: true},
+			},
 		},
 		"backup": {
 			carrier:   rtnl.CarrierUp,
 			operstate: rtnl.OperstateUp,
-			healthy:   true,
+			families: map[probe.Family]*familyState{
+				probe.FamilyV4: {cooked: true, healthy: true},
+			},
 		},
 	}
 	g := selector.Group{
@@ -406,7 +414,7 @@ func TestBuildMemberHealthGatesByCarrier(t *testing.T) {
 	want := map[string]bool{"primary": false, "backup": true}
 	for _, m := range got {
 		if want[m.Member.Wan] != m.Healthy {
-			t.Errorf("member %q: healthy = %v, want %v (carrier+probe predicate broken)",
+			t.Errorf("member %q: healthy = %v, want %v (carrier gate broken)",
 				m.Member.Wan, m.Healthy, want[m.Member.Wan])
 		}
 	}
@@ -423,7 +431,7 @@ func TestBuildMemberHealthHandlesMissingWan(t *testing.T) {
 		Members: []selector.Member{{Wan: "ghost"}, {Wan: "primary"}},
 	}
 	wans := map[string]*wanState{
-		"primary": {carrier: rtnl.CarrierUp, operstate: rtnl.OperstateUp, healthy: true},
+		"primary": {carrier: rtnl.CarrierUp, operstate: rtnl.OperstateUp},
 	}
 	got := buildMemberHealth(g, wans)
 	if len(got) != 2 {

@@ -79,7 +79,7 @@ func buildMemberHealth(g selector.Group, wans map[string]*wanState) []selector.M
 	out := make([]selector.MemberHealth, 0, len(g.Members))
 	for _, m := range g.Members {
 		w, ok := wans[m.Wan]
-		healthy := ok && w.carrierUp() && w.healthy
+		healthy := ok && w.healthy()
 		out = append(out, selector.MemberHealth{Member: m, Healthy: healthy})
 	}
 	// Stable order so logs / hooks / state.json present members

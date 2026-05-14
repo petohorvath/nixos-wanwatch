@@ -31,14 +31,14 @@ type familyState struct {
 }
 
 // wanState is the per-WAN slice — carrier/operstate (from rtnl)
-// plus the per-family probe verdicts.
+// plus the per-family probe verdicts. Effective Health is computed
+// on demand by healthy(), never stored.
 type wanState struct {
 	name      string
 	cfg       config.Wan
 	carrier   rtnl.Carrier
 	operstate rtnl.Operstate
 	families  map[probe.Family]*familyState
-	healthy   bool
 }
 
 // carrierUp returns whether the WAN's interface is currently
@@ -63,6 +63,18 @@ func (w *wanState) carrierUp() bool {
 	return w.carrier == rtnl.CarrierUp || w.operstate == rtnl.OperstateUp
 }
 
+// healthy is the WAN's effective Health: carrier up AND the
+// per-family probe verdicts agreeing under the configured policy.
+// Computed, never stored — it derives from two independent event
+// streams (carrier from rtnl, probes from the pinger loop), and a
+// stored field would inevitably go stale when one updated without
+// the other. combineFamilies counts an uncooked family as healthy,
+// so before the first probe Window this reduces to carrierUp() —
+// the PLAN §8 cold-start rule.
+func (w *wanState) healthy() bool {
+	return w.carrierUp() && combineFamilies(w.families, w.cfg.Probe.FamilyHealthPolicy)
+}
+
 // groupState is the per-group runtime slice.
 type groupState struct {
 	cfg            selector.Group
@@ -84,10 +96,9 @@ type daemon struct {
 	gateways *GatewayCache
 }
 
-// newDaemon constructs the runtime state from `cfg`. Hysteresis
-// state machines start fresh — no probe samples observed yet — so
-// every WAN begins as not-healthy until the configured number of
-// consecutive cycles cross the up-threshold.
+// newDaemon constructs the runtime state from `cfg` — the per-WAN
+// and per-group slices plus a fresh hysteresis state machine per
+// (WAN, family). It performs no I/O and starts no goroutines.
 func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
 		cfg:      cfg,
@@ -106,12 +117,6 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 			carrier:   rtnl.CarrierUnknown,
 			operstate: rtnl.OperstateUnknown,
 			families:  make(map[probe.Family]*familyState, 2),
-			// PLAN §8 cold-start: no probe samples yet means
-			// "health unknown but carrier known". Treat the WAN
-			// as health-positive so a carrier-up rtnl event can
-			// fire an initial Decision without waiting on the
-			// probe loop.
-			healthy: true,
 		}
 		fams := familiesFromTargets(wan.Probe.Targets)
 		hyst := wan.Probe.Hysteresis
@@ -177,6 +182,9 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 
 	probeCfg := ws.cfg.Probe
 	raw := evaluateThresholds(fs.healthy, r.Stats, probeCfg.Thresholds)
+	// Capture effective Health before any family-state mutation —
+	// fs.cooked and fs.healthy below both feed ws.healthy().
+	prevHealthy := ws.healthy()
 
 	// First Window for a (WAN, family) seeds the hysteresis from the
 	// measured Health (PLAN §8 cold-start handoff); every Window
@@ -196,11 +204,10 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 		return
 	}
 	fs.healthy = stable
-	prevAggregate := ws.healthy
-	ws.healthy = combineFamilies(ws.families, probeCfg.FamilyHealthPolicy)
-	d.metrics.WanHealthy.WithLabelValues(ws.name).Set(boolToFloat(ws.healthy))
+	nowHealthy := ws.healthy()
+	d.metrics.WanHealthy.WithLabelValues(ws.name).Set(boolToFloat(nowHealthy))
 
-	if ws.healthy != prevAggregate {
+	if nowHealthy != prevHealthy {
 		d.recomputeAffectedGroups(ctx, r.Wan, reasonHealth)
 	}
 	// A per-family verdict can transition without moving the
@@ -221,7 +228,7 @@ func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 			continue
 		}
 		prevCarrier := ws.carrier
-		prevUp := ws.carrierUp()
+		prevHealthy := ws.healthy()
 		ws.carrier = e.Carrier
 		ws.operstate = e.Operstate
 
@@ -231,7 +238,7 @@ func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 		d.metrics.WanCarrier.WithLabelValues(ws.name).Set(boolToFloat(ws.carrier == rtnl.CarrierUp))
 		d.metrics.WanOperstate.WithLabelValues(ws.name).Set(float64(int(e.Operstate)))
 
-		if prevUp != ws.carrierUp() {
+		if ws.healthy() != prevHealthy {
 			d.recomputeAffectedGroups(ctx, ws.name, reasonCarrier)
 		}
 		return
@@ -396,7 +403,7 @@ func (d *daemon) writeStateSnapshot() {
 			Interface: ws.cfg.Interface,
 			Carrier:   ws.carrier.String(),
 			Operstate: ws.operstate.String(),
-			Healthy:   ws.healthy,
+			Healthy:   ws.healthy(),
 			Gateways: state.Gateways{
 				V4: gws.String(ws.cfg.Interface, rtnl.RouteFamilyV4),
 				V6: gws.String(ws.cfg.Interface, rtnl.RouteFamilyV6),
