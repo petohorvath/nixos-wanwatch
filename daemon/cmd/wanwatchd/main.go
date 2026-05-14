@@ -17,6 +17,7 @@
 //   - gateway.go      — GatewayCache (kernel default-route mirror)
 //   - helpers.go      — small free utilities (boolToFloat, …)
 //   - buildinfo.go    — version / commit / goVersion (ldflags)
+//   - sdnotify.go     — sd_notify READY + watchdog keepalive
 package main
 
 import (
@@ -160,6 +161,17 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		cancel(fmt.Errorf("route subscriber: %w", err))
 		return exitError(ctx, metricsDone, logger)
 	}
+
+	// Every subsystem is wired — tell systemd the daemon is ready and
+	// start the watchdog keepalive. Both no-op outside a Type=notify
+	// unit, so a non-systemd launch is unaffected. A failed READY send
+	// isn't fatal: systemd's start timeout would restart us anyway,
+	// and crashing on a transient socket hiccup while otherwise
+	// healthy would be worse.
+	if err := sdNotify("READY=1"); err != nil {
+		logger.Warn("sd_notify READY failed", "err", err)
+	}
+	go runWatchdog(ctx, logger)
 
 	eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 	return exitError(ctx, metricsDone, logger)

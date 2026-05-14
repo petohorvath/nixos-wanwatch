@@ -226,10 +226,15 @@ in
       startLimitBurst = 5;
 
       serviceConfig = {
-        Type = "simple";
+        # Type=notify: the daemon sends sd_notify READY=1 once every
+        # subsystem is wired, then a WATCHDOG=1 keepalive at half of
+        # WatchdogSec — a stuck event loop trips the watchdog and
+        # systemd restarts the unit.
+        Type = "notify";
         ExecStart = "${cfg.package}/bin/wanwatchd -config /etc/wanwatch/config.json";
         Restart = "on-failure";
         RestartSec = "5s";
+        WatchdogSec = "30s";
 
         User = cfg.user;
         Group = cfg.group;

@@ -671,8 +671,10 @@ the user running Telegraf via supplementary group). Exposes
 ### `cmd/wanwatchd`
 
 Wiring. Sets up channels between packages. Implements signal
-handling (SIGTERM clean shutdown), sd_notify watchdog
-(`github.com/coreos/go-systemd/v22`), and the main event loop:
+handling (SIGTERM clean shutdown), the sd_notify watchdog
+(`sdnotify.go` — stdlib `net`, a datagram to `$NOTIFY_SOCKET`; no
+external dependency, the protocol and env contract are ABI-stable),
+and the main event loop:
 
 ```go
 for {
