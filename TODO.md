@@ -27,6 +27,19 @@ Currently hard-coded to 5 s in `state.DefaultHookTimeout`. Expose as
 `services.wanwatch.global.hookTimeout`. PLAN §12 OQ #5;
 `daemon/internal/state/hooks.go:61`.
 
+### Pre-apply hooks
+
+Add a `<hooksDir>/pre-{up,down,switch}.d/*` tier that fires *before*
+the route apply, complementing the existing hooks (which fire after
+the apply converges). Useful for "about to switch" notifications or
+staging work.
+
+Pre-hooks stay notification-only: a pre-hook that *gates* or *blocks*
+the apply would make hooks part of the apply transaction, which PLAN
+§5.5 explicitly rules out — promoting them would need a PLAN change
+first. `daemon/cmd/wanwatchd/daemon.go` (runHooks / commitDecision),
+PLAN §5.5 env-var contract.
+
 ### Per-family probe targets
 
 Today the same `probe.targets` list feeds both families; the daemon

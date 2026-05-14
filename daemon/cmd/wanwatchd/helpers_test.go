@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
@@ -45,7 +48,32 @@ func testDaemon(t *testing.T, cfg *config.Config) *daemon {
 	t.Helper()
 	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
 	cfg.Global.HooksDir = t.TempDir()
-	return newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d := newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Default the apply seams to succeeding fakes: the sandbox has no
+	// CAP_NET_ADMIN, so the real netlink path can't run. Tests that
+	// exercise apply *failure* override d.writeRoute / d.ifindexOf.
+	d.ifindexOf = func(string) (int, error) { return 1, nil }
+	d.writeRoute = func(context.Context, apply.DefaultRoute) error { return nil }
+	return d
+}
+
+// failingIfindex is a d.ifindexOf stub that always fails — the
+// ifindex-lookup hard failure applyRoutes must surface and
+// commitDecision must hold pending.
+func failingIfindex(string) (int, error) {
+	return 0, errors.New("apply test: no such interface")
+}
+
+// countWrites points d.writeRoute at a stub that records every route
+// write and returns the running count, so a test can assert
+// applyRoutes ran without depending on netlink.
+func countWrites(d *daemon) *int {
+	var n int
+	d.writeRoute = func(context.Context, apply.DefaultRoute) error {
+		n++
+		return nil
+	}
+	return &n
 }
 
 func testCfg() *config.Config {

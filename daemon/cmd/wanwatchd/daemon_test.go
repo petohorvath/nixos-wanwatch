@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
@@ -517,37 +519,22 @@ func TestRunHooksMissingDirIsNotError(t *testing.T) {
 	// condition.
 }
 
-// applyAttempts sums every counter inside applyRoutes that could
-// fire on any path — runners differ in whether `eth0` exists and
-// whether the daemon has CAP_NET_ADMIN, so a single-counter
-// assertion would be too brittle. As long as one of these
-// advanced, applyRoutes was called.
-func applyAttempts(t *testing.T, d *daemon, group string) float64 {
-	t.Helper()
-	op := readCounter(t, d.metrics.ApplyOpErrors.WithLabelValues(group, "rule_install"))
-	v4 := readCounter(t, d.metrics.ApplyRouteErrors.WithLabelValues(group, "v4"))
-	v6 := readCounter(t, d.metrics.ApplyRouteErrors.WithLabelValues(group, "v6"))
-	return op + v4 + v6
-}
-
-// TestHandleRouteEventReappliesOnActiveIface: when a RouteEvent
-// arrives for the iface of the active member, applyRoutes must
-// fire. We can't observe the netlink call directly without a test
-// seam, so we proxy on the apply-error counters — at least one
-// will advance because every applyRoutes path under a `nix develop`
-// sandbox lacks CAP_NET_ADMIN.
+// TestHandleRouteEventReappliesOnActiveIface: a RouteEvent for the
+// active member's iface populates the gateway cache and reapplies —
+// applyRoutes now has a v4 gateway to write, so writeRoute fires.
 func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
 	markHealthy(d, "primary", "backup")
+	writes := countWrites(d)
+
 	g := d.groups["home"]
 	d.recomputeGroup(t.Context(), g, reasonHealth)
 	if g.active.Wan != "primary" {
 		t.Fatalf("setup: want primary active, got %+v", g.active)
 	}
 
-	before := applyAttempts(t, d, "home")
-
+	before := *writes
 	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "eth0", // primary's iface — must trigger reapply
@@ -555,23 +542,24 @@ func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 		Gateway: net.ParseIP("192.0.2.1"),
 	})
 
-	if after := applyAttempts(t, d, "home"); after <= before {
-		t.Errorf("no apply counter advanced: %v → %v (active-WAN reapply branch not entered)", before, after)
+	if *writes <= before {
+		t.Errorf("writeRoute calls %d → %d, want an increase (active-WAN reapply not entered)", before, *writes)
 	}
 }
 
 // TestHandleRouteEventSkipsInactiveIface: a RouteEvent on an iface
-// not used by any active member should populate the cache but
-// not trigger any apply attempt.
+// not used by any active member populates the cache but triggers no
+// route write.
 func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
 	markHealthy(d, "primary", "backup")
+	writes := countWrites(d)
+
 	g := d.groups["home"]
 	d.recomputeGroup(t.Context(), g, reasonHealth)
 
-	before := applyAttempts(t, d, "home")
-
+	before := *writes
 	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "lo", // not used by any WAN
@@ -579,8 +567,8 @@ func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
 		Gateway: net.ParseIP("127.0.0.1"),
 	})
 
-	if after := applyAttempts(t, d, "home"); after != before {
-		t.Errorf("apply counters advanced on inactive-iface event: %v → %v", before, after)
+	if *writes != before {
+		t.Errorf("writeRoute called on inactive-iface event: %d → %d", before, *writes)
 	}
 }
 
@@ -773,5 +761,173 @@ func TestRecordProbeMetricsEmptyPerTarget(t *testing.T) {
 	v := readGauge(t, d.metrics.WanFamilyHealthy.WithLabelValues("primary", "v4"))
 	if v != 0 {
 		t.Errorf("WanFamilyHealthy(primary,v4) = %v, want 0", v)
+	}
+}
+
+// TestCommitDecisionDefersOnApplyFailure: a hard apply failure
+// records the Decision internally (decisionsTotal, pendingActive)
+// but defers the visible effects — `active` stays absent and
+// state.json is not written, so neither reports a switch the kernel
+// hasn't made.
+func TestCommitDecisionDefersOnApplyFailure(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+	d.ifindexOf = failingIfindex
+
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+
+	if g.decisionsTotal != 1 {
+		t.Errorf("decisionsTotal = %d, want 1 (Decision recorded even on apply failure)", g.decisionsTotal)
+	}
+	if !g.applyPending || g.pendingActive.Wan != "primary" {
+		t.Errorf("applyPending=%v pendingActive=%+v, want pending on primary", g.applyPending, g.pendingActive)
+	}
+	if g.active.Has {
+		t.Errorf("g.active = %+v, want absent — apply failed, switch not converged", g.active)
+	}
+	if _, err := os.Stat(d.cfg.Global.StatePath); err == nil {
+		t.Error("state.json written despite a failed apply — switch not converged")
+	}
+}
+
+// TestRetryPendingApplyConverges: once apply starts succeeding, the
+// next probe result for the pending WAN converges the Decision —
+// promoting `active`, writing state.json, and firing the deferred
+// up hook, none of which happened while the apply was failing.
+func TestRetryPendingApplyConverges(t *testing.T) {
+	t.Parallel()
+	cfg := testCfgWithGroup()
+	// Give primary real thresholds so the probe result below keeps it
+	// healthy — the result is only here to *trigger* the retry, not
+	// to change the health verdict.
+	cfg.Wans["primary"] = config.Wan{
+		Name:      "primary",
+		Interface: "eth0",
+		Probe: config.Probe{
+			Targets:    []string{"1.1.1.1", "2606:4700:4700::1111"},
+			Thresholds: config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
+			Hysteresis: config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
+		},
+	}
+	d := testDaemon(t, cfg)
+	markHealthy(d, "primary", "backup")
+
+	sentinel := filepath.Join(d.cfg.Global.HooksDir, "up-ran.txt")
+	writeHook(t, filepath.Join(d.cfg.Global.HooksDir, "up.d"), "notify.sh",
+		"touch "+sentinel)
+
+	failing := true
+	d.ifindexOf = func(string) (int, error) {
+		if failing {
+			return 0, errors.New("no such interface")
+		}
+		return 1, nil
+	}
+
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if !g.applyPending {
+		t.Fatalf("setup: want applyPending after a failed apply, got %+v", g)
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Fatal("up hook fired while the Decision was still pending")
+	}
+
+	// Apply now succeeds; a probe result for the pending WAN retries.
+	failing = false
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats:  probe.FamilyStats{LossRatio: 0, RTTMicros: 10_000},
+	})
+
+	if g.applyPending {
+		t.Error("still applyPending after a successful retry")
+	}
+	if !g.active.Has || g.active.Wan != "primary" {
+		t.Errorf("g.active = %+v, want primary after the retry converged", g.active)
+	}
+	if _, err := os.Stat(d.cfg.Global.StatePath); err != nil {
+		t.Errorf("state.json not written after the retry converged: %v", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("deferred up hook did not fire after the retry converged: %v", err)
+	}
+}
+
+// TestSupersedingDecisionWhilePending: a second Decision made while
+// the first is still un-converged replaces pendingActive, bumps
+// decisionsTotal, and — since nothing ever converged — leaves
+// `active` absent so state/hooks never reported the dropped switch.
+func TestSupersedingDecisionWhilePending(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+	d.ifindexOf = failingIfindex
+
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if !g.applyPending || g.pendingActive.Wan != "primary" {
+		t.Fatalf("decision 1: want pending on primary, got pending=%v active=%+v",
+			g.applyPending, g.pendingActive)
+	}
+
+	// primary sickens — the selector now picks backup, superseding
+	// the still-pending primary Decision.
+	markUnhealthy(d, "primary")
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+
+	if !g.applyPending || g.pendingActive.Wan != "backup" {
+		t.Errorf("decision 2: want pending on backup, got pending=%v active=%+v",
+			g.applyPending, g.pendingActive)
+	}
+	if g.decisionsTotal != 2 {
+		t.Errorf("decisionsTotal = %d, want 2", g.decisionsTotal)
+	}
+	if g.active.Has {
+		t.Errorf("g.active = %+v, want absent — no Decision ever converged", g.active)
+	}
+}
+
+// TestApplyRoutesErrorContract: applyRoutes returns nil for a soft
+// gateway-skip (intentional deferral, not a failure) but an error
+// for every hard failure — unknown WAN, ifindex lookup, netlink
+// write — and a failed write bumps the per-(group,family) counter.
+func TestApplyRoutesErrorContract(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	g := d.groups["home"]
+
+	// No gateway cached for primary (non-PtP) → every family is a
+	// soft skip, which is not a failure.
+	if err := d.applyRoutes(t.Context(), g, "primary"); err != nil {
+		t.Errorf("applyRoutes with no gateways = %v, want nil (soft skip is not a failure)", err)
+	}
+
+	// Unknown WAN is a hard failure.
+	if err := d.applyRoutes(t.Context(), g, "ghost"); err == nil {
+		t.Error("applyRoutes for unknown wan = nil, want error")
+	}
+
+	// An ifindex lookup failure is a hard failure.
+	d.ifindexOf = failingIfindex
+	if err := d.applyRoutes(t.Context(), g, "primary"); err == nil {
+		t.Error("applyRoutes with a failing ifindex lookup = nil, want error")
+	}
+
+	// A netlink write error is a hard failure, and bumps the
+	// per-(group,family) error counter so the failure is observable.
+	d.ifindexOf = func(string) (int, error) { return 1, nil }
+	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.writeRoute = func(context.Context, apply.DefaultRoute) error {
+		return errors.New("netlink: operation not permitted")
+	}
+	if err := d.applyRoutes(t.Context(), g, "primary"); err == nil {
+		t.Error("applyRoutes with a failing route write = nil, want error")
+	}
+	if n := readCounter(t, d.metrics.ApplyRouteErrors.WithLabelValues("home", "v4")); n != 1 {
+		t.Errorf("apply_route_errors_total{home,v4} = %v, want 1", n)
 	}
 }

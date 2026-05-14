@@ -376,10 +376,10 @@ Three artifacts comprise the daemon's public contract:
    (`schema: 1`). Written by the NixOS module, read by the daemon at
    startup. Full schema in `docs/specs/daemon-config.md`.
 2. **State file** `/run/wanwatch/state.json` — schema versioned
-   (`schema: 1`). Written atomically (tmpfile + rename) on every
-   Decision, plus an initial publish at startup. Consumers
-   (Telegraf, custom scripts, `wanwatchctl`) read it. Full schema
-   in `docs/specs/daemon-state.md`.
+   (`schema: 1`). Written atomically (tmpfile + rename) once a
+   Decision's routes have converged in the kernel, plus an initial
+   publish at startup. Consumers (Telegraf, custom scripts,
+   `wanwatchctl`) read it. Full schema in `docs/specs/daemon-state.md`.
 3. **Hook env vars** — when invoking `/etc/wanwatch/hooks/{up,down,switch}.d/*`:
 
    ```
@@ -403,6 +403,12 @@ Three artifacts comprise the daemon's public contract:
    Hook exit status: daemon logs non-zero but does not retry or block.
    Hooks are best-effort notifications, not part of the apply
    transaction.
+
+   Both the state file and the hooks are deferred until a Decision's
+   routes have actually landed in the kernel — a hard apply failure
+   holds the Decision pending and is retried on the active WAN's next
+   probe result — so neither ever reports a switch the kernel has not
+   made.
 
 ### 5.6 WAN multiplicity across Groups
 
@@ -637,7 +643,9 @@ both families per Decision.
   gateway for; default route via the gateway/interface in that
   family's `table <T>`. Idempotent. Families the new member lacks a
   gateway for are left untouched (configurable in v0.2: clear vs
-  retain).
+  retain). A write that *hard*-fails (ifindex lookup or a netlink
+  error) leaves the Decision pending and is retried on the active
+  WAN's next probe result until it converges.
 - `rule.go` — `RTM_NEWRULE` per family to install `fwmark <m> table
   <t>` at startup. Idempotent — checks existing rules before adding.
   Runs once per (group, family) on daemon start.
