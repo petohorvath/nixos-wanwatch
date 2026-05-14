@@ -314,8 +314,8 @@ func TestRouteRunLoopReturnsOnUpdatesClosed(t *testing.T) {
 	close(updates)
 
 	err := (&RouteSubscriber{}).runLoop(context.Background(), updates, out)
-	if err == nil {
-		t.Fatal("runLoop on closed channel returned nil, want error")
+	if !errors.Is(err, errSubscriptionClosed) {
+		t.Fatalf("runLoop on closed channel = %v, want errSubscriptionClosed", err)
 	}
 }
 
@@ -480,5 +480,25 @@ func TestRouteSubscriberPrimeViaEmitsPerFamilyDefaults(t *testing.T) {
 	ev := <-out
 	if ev.Iface != "eth0" || ev.Gateway.String() != "192.0.2.1" || ev.Family != RouteFamilyV4 {
 		t.Errorf("event = %+v, want eth0/v4/192.0.2.1", ev)
+	}
+}
+
+// TestRouteSubscriberRunViaSurfacesErrorCallbackCause: the route
+// twin of the link-subscriber cause-surfacing test — a dead
+// subscription must surface the ErrorCallback's cause, %w-chained.
+func TestRouteSubscriberRunViaSurfacesErrorCallbackCause(t *testing.T) {
+	t.Parallel()
+	want := errors.New("netlink: receive failed: ENOBUFS")
+	subscribe := func(ch chan<- netlink.RouteUpdate, _ <-chan struct{}, opts netlink.RouteSubscribeOptions) error {
+		opts.ErrorCallback(want)
+		close(ch)
+		return nil
+	}
+	err := (&RouteSubscriber{}).runVia(context.Background(), subscribe, make(chan RouteEvent, 1))
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want ErrorCallback cause chained via %%w", err)
+	}
+	if !strings.Contains(err.Error(), "subscription ended") {
+		t.Errorf("err = %q, want 'subscription ended' context", err.Error())
 	}
 }

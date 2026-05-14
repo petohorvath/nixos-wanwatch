@@ -107,8 +107,21 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		"groups", len(cfg.Groups),
 	)
 
-	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
+	// ctx carries a cancellation *cause*: errShutdown for a
+	// signal-driven stop, or a subsystem's error if a background
+	// goroutine dies. The cause drives run()'s exit code via
+	// exitError. defer cancel(nil) only satisfies vet's lostcancel
+	// check — the meaningful causes are set by the explicit cancel
+	// calls below, and the first one wins.
+	ctx, cancel := context.WithCancelCause(parent)
+	defer cancel(nil)
+
+	sigCtx, sigStop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	defer sigStop()
+	go func() {
+		<-sigCtx.Done()
+		cancel(errShutdown)
+	}()
 
 	mreg := metrics.New()
 	mreg.BuildInfo.WithLabelValues(version, goVersion, commit).Set(1)
@@ -117,37 +130,78 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		Socket:  cfg.Global.MetricsSocket,
 		Handler: mreg.Handler(),
 	}
-	mErrCh := make(chan error, 1)
-	go func() { mErrCh <- mserver.Serve(ctx) }()
+	metricsDone := make(chan struct{})
+	go func() {
+		defer close(metricsDone)
+		err := mserver.Serve(ctx)
+		onSubsystemExit(cancel, logger, "metrics server", err)
+	}()
 
 	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
 
 	d := newDaemon(&cfg, mreg, logger)
 	if err := d.bootstrap(ctx); err != nil {
-		cancel()
-		<-mErrCh
-		return fmt.Errorf("bootstrap: %w", err)
+		cancel(fmt.Errorf("bootstrap: %w", err))
+		return exitError(ctx, metricsDone, logger)
 	}
 
-	probeResults, err := startProbers(ctx, &cfg, logger)
+	probeResults, err := startProbers(ctx, cancel, &cfg, logger)
 	if err != nil {
-		cancel()
-		<-mErrCh
-		return fmt.Errorf("probers: %w", err)
+		cancel(fmt.Errorf("probers: %w", err))
+		return exitError(ctx, metricsDone, logger)
 	}
-	linkEvents := startLinkSubscriber(ctx, &cfg, logger)
-	routeEvents, err := startRouteSubscriber(ctx, &cfg, logger)
+	linkEvents := startLinkSubscriber(ctx, cancel, &cfg, logger)
+	routeEvents, err := startRouteSubscriber(ctx, cancel, &cfg, logger)
 	if err != nil {
-		cancel()
-		<-mErrCh
-		return fmt.Errorf("route subscriber: %w", err)
+		cancel(fmt.Errorf("route subscriber: %w", err))
+		return exitError(ctx, metricsDone, logger)
 	}
 
 	eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
-	logger.Info("shutdown signal received", "err", ctx.Err())
+	return exitError(ctx, metricsDone, logger)
+}
 
-	if err := <-mErrCh; err != nil && !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("metrics server: %w", err)
+// errShutdown is the context cancellation cause recorded for an
+// orderly, signal-driven stop. Any other non-nil cause means a
+// background subsystem died and cancelled the daemon context to
+// force a non-zero exit, so systemd's Restart=on-failure brings the
+// whole process back — see modules/wanwatch.nix.
+var errShutdown = errors.New("shutdown signal received")
+
+// isCleanShutdown reports whether `cause` (context.Cause of the
+// daemon context, read after eventLoop) represents an orderly stop —
+// a signal, or a cancelled parent — rather than a subsystem failure
+// that must exit non-zero.
+func isCleanShutdown(cause error) bool {
+	return cause == nil ||
+		errors.Is(cause, errShutdown) ||
+		errors.Is(cause, context.Canceled)
+}
+
+// onSubsystemExit handles a background goroutine returning. A
+// context-cancellation error is the orderly-shutdown path and is
+// ignored; any other error is logged and recorded as the daemon
+// context's cancellation cause, so exitError reports it and the
+// process exits non-zero for systemd to restart.
+func onSubsystemExit(cancel context.CancelCauseFunc, logger *slog.Logger, name string, err error) {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
 	}
-	return nil
+	logger.Error("subsystem exited", "subsystem", name, "err", err)
+	cancel(fmt.Errorf("%s: %w", name, err))
+}
+
+// exitError waits for the metrics server to finish, then maps the
+// daemon context's cancellation cause to run()'s return value: nil
+// for an orderly stop (so the process exits 0), the cause otherwise
+// (so main exits non-zero and systemd restarts the daemon).
+func exitError(ctx context.Context, metricsDone <-chan struct{}, logger *slog.Logger) error {
+	<-metricsDone
+	cause := context.Cause(ctx)
+	if isCleanShutdown(cause) {
+		logger.Info("shutdown complete", "cause", cause)
+		return nil
+	}
+	logger.Error("daemon exiting on failure", "cause", cause)
+	return fmt.Errorf("daemon stopped: %w", cause)
 }

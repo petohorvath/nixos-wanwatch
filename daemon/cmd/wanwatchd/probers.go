@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -21,7 +20,12 @@ import (
 // Idents are allocated once up front so a hash collision between
 // (WAN, family) keys is surfaced at startup rather than as a silent
 // reply-misroute at runtime (PLAN §8).
-func startProbers(ctx context.Context, cfg *config.Config, logger *slog.Logger) (<-chan probe.ProbeResult, error) {
+//
+// A pinger that exits with anything other than context cancellation
+// calls `cancel` with the cause, taking the whole daemon down so
+// systemd restarts it — a probe layer that silently stopped would
+// leave failover blind.
+func startProbers(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan probe.ProbeResult, error) {
 	keys := identKeysFor(cfg)
 	idents, err := probe.AllocateIdents(keys)
 	if err != nil {
@@ -43,11 +47,7 @@ func startProbers(ctx context.Context, cfg *config.Config, logger *slog.Logger) 
 		}
 		go func(p *probe.Pinger) {
 			err := p.Run(ctx, results)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error("pinger exited",
-					"wan", p.Wan, "family", p.Family, "err", err,
-				)
-			}
+			onSubsystemExit(cancel, logger, fmt.Sprintf("prober %s/%s", p.Wan, p.Family), err)
 		}(p)
 	}
 	logger.Info("probers started", "count", len(keys))

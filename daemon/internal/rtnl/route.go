@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -115,17 +116,25 @@ func (s *RouteSubscriber) runVia(ctx context.Context, subscribe routeSubscribeFn
 	done := make(chan struct{})
 	defer close(done)
 
-	// The library's own ListExisting=true sends a malformed dump
-	// request (RTM_GETROUTE with an IfInfomsg body where the
-	// kernel expects an RtMsg); recent kernels reject it. Skip
-	// it and rely on `Prime` for the existing-routes pass.
-	if err := subscribe(updates, done, netlink.RouteSubscribeOptions{}); err != nil {
+	// subErr captures the netlink library's fatal error from its
+	// receive goroutine; translateSubClose reads it after the close.
+	var subErr atomic.Pointer[error]
+	opts := netlink.RouteSubscribeOptions{
+		// ListExisting is deliberately omitted: the library's
+		// ListExisting=true sends a malformed dump request
+		// (RTM_GETROUTE with an IfInfomsg body where the kernel
+		// expects an RtMsg) that recent kernels reject. `Prime`
+		// handles the existing-routes pass instead.
+		ReceiveBufferSize: netlinkRcvBufBytes,
+		ErrorCallback:     func(err error) { subErr.Store(&err) },
+	}
+	if err := subscribe(updates, done, opts); err != nil {
 		return fmt.Errorf("rtnl: RouteSubscribe: %w", err)
 	}
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
 	}
-	return s.runLoop(ctx, updates, out)
+	return translateSubClose(s.runLoop(ctx, updates, out), &subErr, "route")
 }
 
 // runLoop drains `updates`, folds each via handleUpdate, and
@@ -139,7 +148,7 @@ func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Ro
 			return ctx.Err()
 		case upd, ok := <-updates:
 			if !ok {
-				return fmt.Errorf("rtnl: route subscription channel closed")
+				return errSubscriptionClosed
 			}
 			ev, emit := s.handleUpdate(upd)
 			if !emit {

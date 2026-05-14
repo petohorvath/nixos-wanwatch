@@ -215,6 +215,16 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network-pre.target" ];
 
+      # A subsystem goroutine that dies cancels the daemon context
+      # and forces a non-zero exit (cmd/wanwatchd/main.go), so
+      # Restart=on-failure restarts the whole process. Bound the
+      # loop: a persistent failure (missing capability, kernel
+      # rejecting the netlink subscription, broken config) trips
+      # StartLimitBurst and lands the unit in `failed` — surfacing
+      # it to alerting instead of looping silently every RestartSec.
+      startLimitIntervalSec = 300;
+      startLimitBurst = 5;
+
       serviceConfig = {
         Type = "simple";
         ExecStart = "${cfg.package}/bin/wanwatchd -config /etc/wanwatch/config.json";

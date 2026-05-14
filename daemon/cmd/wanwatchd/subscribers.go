@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
@@ -11,18 +10,19 @@ import (
 )
 
 // startLinkSubscriber opens an rtnetlink subscription filtered to the
-// daemon's WAN interfaces and returns the LinkEvent channel.
-func startLinkSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logger) <-chan rtnl.LinkEvent {
+// daemon's WAN interfaces and returns the LinkEvent channel. A
+// subscriber that exits with anything other than context
+// cancellation calls `cancel` with the cause, taking the daemon down
+// for a systemd restart rather than running on blind.
+func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) <-chan rtnl.LinkEvent {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.LinkSubscriber{Interfaces: watched}
 	events := make(chan rtnl.LinkEvent, 64)
 	go func() {
 		err := s.Run(ctx, events)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error("rtnl subscriber exited", "err", err)
-		}
+		onSubsystemExit(cancel, logger, "link subscriber", err)
 	}()
-	logger.Info("rtnl subscriber started", "interfaces", len(watched))
+	logger.Info("rtnl link subscriber started", "interfaces", len(watched))
 	return events
 }
 
@@ -38,7 +38,7 @@ func startLinkSubscriber(ctx context.Context, cfg *config.Config, logger *slog.L
 // iteration. Without this, a link-event arriving before the
 // subscriber dumps would drive an applyRoutes call that finds an
 // empty cache and skips the route write.
-func startRouteSubscriber(ctx context.Context, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.RouteEvent, error) {
+func startRouteSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.RouteEvent, error) {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.RouteSubscriber{Interfaces: watched}
 	events := make(chan rtnl.RouteEvent, 64)
@@ -47,9 +47,7 @@ func startRouteSubscriber(ctx context.Context, cfg *config.Config, logger *slog.
 	}
 	go func() {
 		err := s.Run(ctx, events)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error("rtnl route subscriber exited", "err", err)
-		}
+		onSubsystemExit(cancel, logger, "route subscriber", err)
 	}()
 	logger.Info("rtnl route subscriber started", "interfaces", len(watched), "primed", len(events))
 	return events, nil

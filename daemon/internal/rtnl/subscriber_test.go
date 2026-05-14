@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,15 +195,16 @@ func TestRunLoopForwardsEvent(t *testing.T) {
 
 func TestRunLoopReturnsOnUpdatesClosed(t *testing.T) {
 	t.Parallel()
-	// A closed subscription channel must surface as a non-nil
-	// error so the caller can decide whether to retry.
+	// A closed subscription channel must surface as the
+	// errSubscriptionClosed sentinel so runVia can translate it
+	// into the ErrorCallback's captured cause.
 	updates := make(chan netlink.LinkUpdate)
 	out := make(chan LinkEvent, 1)
 	close(updates)
 
 	err := (&LinkSubscriber{}).runLoop(context.Background(), updates, out)
-	if err == nil {
-		t.Fatal("runLoop on closed channel returned nil, want error")
+	if !errors.Is(err, errSubscriptionClosed) {
+		t.Fatalf("runLoop on closed channel = %v, want errSubscriptionClosed", err)
 	}
 }
 
@@ -276,5 +278,55 @@ func TestLinkSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Errorf("runVia returned %v, want context.Canceled after cancel", err)
+	}
+}
+
+// TestLinkSubscriberRunViaSurfacesErrorCallbackCause: when the
+// netlink receive goroutine dies it reports the cause through
+// ErrorCallback and closes the update channel. runVia must surface
+// that concrete cause, %w-chained — not a bare "channel closed".
+func TestLinkSubscriberRunViaSurfacesErrorCallbackCause(t *testing.T) {
+	t.Parallel()
+	want := errors.New("netlink: receive failed: ENOBUFS")
+	subscribe := func(ch chan<- netlink.LinkUpdate, _ <-chan struct{}, opts netlink.LinkSubscribeOptions) error {
+		// Mimic linkSubscribeAt on a fatal Receive error: report the
+		// cause via the callback, then close the update channel.
+		opts.ErrorCallback(want)
+		close(ch)
+		return nil
+	}
+	err := (&LinkSubscriber{}).runVia(context.Background(), subscribe, make(chan LinkEvent, 1))
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want ErrorCallback cause chained via %%w", err)
+	}
+	if !strings.Contains(err.Error(), "subscription ended") {
+		t.Errorf("err = %q, want 'subscription ended' context", err.Error())
+	}
+}
+
+func TestTranslateSubClose(t *testing.T) {
+	t.Parallel()
+	cause := errors.New("netlink: ENOBUFS")
+	withCause := func() *atomic.Pointer[error] {
+		var p atomic.Pointer[error]
+		p.Store(&cause)
+		return &p
+	}
+
+	// Sentinel + captured cause → cause surfaced, %w-chained.
+	got := translateSubClose(errSubscriptionClosed, withCause(), "link")
+	if !errors.Is(got, cause) || !strings.Contains(got.Error(), "link subscription ended") {
+		t.Errorf("with cause: got %v, want wrapped %v", got, cause)
+	}
+
+	// Sentinel + no captured cause → sentinel passes through.
+	if got := translateSubClose(errSubscriptionClosed, &atomic.Pointer[error]{}, "link"); !errors.Is(got, errSubscriptionClosed) {
+		t.Errorf("no cause: got %v, want errSubscriptionClosed", got)
+	}
+
+	// Non-sentinel error → passes through untouched.
+	other := errors.New("some other error")
+	if got := translateSubClose(other, withCause(), "route"); !errors.Is(got, other) {
+		t.Errorf("non-sentinel: got %v, want %v", got, other)
 	}
 }

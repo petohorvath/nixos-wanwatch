@@ -2,7 +2,9 @@ package rtnl
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -22,6 +24,39 @@ type LinkSubscriber struct {
 // existing link — bridges, vlans, dockers can push this past 64
 // on a busy host) and subsequent flap bursts.
 const updateChanBuffer = 256
+
+// errSubscriptionClosed is returned by runLoop when the netlink
+// update channel closes — i.e. the library's receive goroutine
+// exited. translateSubClose maps it to the concrete cause captured
+// by the ErrorCallback (an ENOBUFS overflow, a socket error, …) so a
+// dead subscription is diagnosable rather than a bare "channel
+// closed".
+var errSubscriptionClosed = errors.New("rtnl: subscription channel closed")
+
+// netlinkRcvBufBytes is the SO_RCVBUF size requested for the
+// rtnetlink subscription sockets. The kernel drops messages with
+// ENOBUFS when the socket buffer overflows during a flap storm —
+// and the library reports that as a fatal error — so size the
+// buffer up front to make overflow rare. Shared by both subscribers.
+const netlinkRcvBufBytes = 1 << 20
+
+// translateSubClose maps runLoop's errSubscriptionClosed sentinel to
+// the concrete failure the netlink library reported through its
+// ErrorCallback (captured in subErr). `label` names the subscription
+// ("link" / "route") in the wrapped message. Any other error — and a
+// sentinel with no captured cause — passes through unchanged.
+//
+// subErr is written from the library's receive goroutine and read
+// here only after runLoop has observed `updates` closed; that close
+// is the happens-before edge, and atomic.Pointer makes it explicit.
+func translateSubClose(err error, subErr *atomic.Pointer[error], label string) error {
+	if errors.Is(err, errSubscriptionClosed) {
+		if cause := subErr.Load(); cause != nil {
+			return fmt.Errorf("rtnl: %s subscription ended: %w", label, *cause)
+		}
+	}
+	return err
+}
 
 // Run subscribes to RTNLGRP_LINK and pushes one LinkEvent onto
 // `out` for every real carrier/operstate change on a watched
@@ -49,14 +84,21 @@ func (s *LinkSubscriber) runVia(ctx context.Context, subscribe linkSubscribeFn, 
 	done := make(chan struct{})
 	defer close(done)
 
-	// ListExisting dumps every current link as an RTM_NEWLINK so
-	// the daemon learns carrier/operstate at boot without waiting
-	// for the first transition.
-	opts := netlink.LinkSubscribeOptions{ListExisting: true}
+	// subErr captures the netlink library's fatal error from its
+	// receive goroutine; translateSubClose reads it after the close.
+	var subErr atomic.Pointer[error]
+	opts := netlink.LinkSubscribeOptions{
+		// ListExisting dumps every current link as an RTM_NEWLINK so
+		// the daemon learns carrier/operstate at boot without waiting
+		// for the first transition.
+		ListExisting:      true,
+		ReceiveBufferSize: netlinkRcvBufBytes,
+		ErrorCallback:     func(err error) { subErr.Store(&err) },
+	}
 	if err := subscribe(updates, done, opts); err != nil {
 		return fmt.Errorf("rtnl: LinkSubscribe: %w", err)
 	}
-	return s.runLoop(ctx, updates, out)
+	return translateSubClose(s.runLoop(ctx, updates, out), &subErr, "link")
 }
 
 // runLoop drains `updates`, folds each via handleUpdate, and pushes
@@ -71,7 +113,7 @@ func (s *LinkSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Lin
 			return ctx.Err()
 		case upd, ok := <-updates:
 			if !ok {
-				return fmt.Errorf("rtnl: subscription channel closed")
+				return errSubscriptionClosed
 			}
 			ev, emit := s.handleUpdate(state, upd)
 			if !emit {
