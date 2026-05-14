@@ -124,6 +124,45 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 	}
 }
 
+// TestHandleProbeResultSeedsHysteresisNoColdStartFlap: a healthy
+// WAN with consecutiveUp>1 must not flap during warm-up. The first
+// ProbeResult seeds the hysteresis straight from the measured
+// Health (PLAN §8) instead of ramping up from false — without the
+// seed, a good first probe leaves the hysteresis verdict false
+// until consecutiveUp probes in, briefly dropping a healthy WAN.
+func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	cfg.Wans["primary"] = config.Wan{
+		Name:      "primary",
+		Interface: "eth0",
+		Probe: config.Probe{
+			Targets: []string{"1.1.1.1"},
+			Thresholds: config.Thresholds{
+				LossPctUp: 10, LossPctDown: 20,
+				RttMsUp: 100, RttMsDown: 200,
+			},
+			// consecutiveUp=3: pre-fix, a single good probe would not
+			// flip the hysteresis healthy — it would ramp from false.
+			Hysteresis: config.Hysteresis{ConsecutiveUp: 3, ConsecutiveDown: 3},
+		},
+	}
+	d := testDaemon(t, cfg)
+
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats:  probe.FamilyStats{LossRatio: 0.0, RTTMicros: 10_000},
+	})
+
+	if !d.wans["primary"].families[probe.FamilyV4].healthy {
+		t.Error("primary/v4 not healthy after a good first probe — hysteresis ramped instead of seeding")
+	}
+	if !d.wans["primary"].healthy {
+		t.Error("primary aggregate not healthy after a good first probe")
+	}
+}
+
 // TestHandleRouteEventPopulatesGatewayCache: an Add RouteEvent
 // populates the cache so subsequent applyRoutes can find a gw.
 func TestHandleRouteEventPopulatesGatewayCache(t *testing.T) {

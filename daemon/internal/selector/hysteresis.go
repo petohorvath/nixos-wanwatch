@@ -6,12 +6,13 @@ package selector
 // Observe; the verdict only flips when a configurable number of
 // consecutive observations cross the threshold in the new direction.
 //
-// Initial verdict is `false` (not healthy). The first
-// `consecutiveUp` healthy observations are required before the
-// verdict flips to true. Once true, `consecutiveDown` unhealthy
-// observations are required to flip it back. This matches the PLAN
-// §8 "Cold-start behavior" — we don't ship traffic via an unproven
-// WAN.
+// Initial verdict is `false`. Once observations start, the verdict
+// flips to true only after `consecutiveUp` healthy observations in
+// a row, and back to false only after `consecutiveDown` unhealthy
+// ones. The first observation is special: per PLAN §8 the cold-start
+// handoff seeds the verdict straight from the measured Health (see
+// Seed), so a (WAN, family) need not climb the up-ramp from scratch
+// when its first probe Window lands healthy.
 //
 // Not safe for concurrent use. Wrap externally if multiple
 // goroutines observe the same state.
@@ -59,6 +60,23 @@ func (h *HysteresisState) Observe(observedHealthy bool) bool {
 			h.healthy = false
 		}
 	}
+	return h.healthy
+}
+
+// Seed initializes the verdict directly from the first observed
+// Health, bypassing the consecutive-cycle ramp — the PLAN §8
+// cold-start handoff. Until its first probe Window completes a
+// (WAN, family) is trusted via carrier alone; when that Window
+// lands, climbing to the measured Health over `consecutiveUp`
+// cycles would spuriously flap a healthy WAN down→up during
+// warm-up, so the verdict adopts it immediately. Counters are
+// zeroed, so the next flip still needs a full consecutive run.
+// Call for the first observation only; Observe thereafter. Returns
+// the seeded verdict.
+func (h *HysteresisState) Seed(observedHealthy bool) bool {
+	h.healthy = observedHealthy
+	h.healthyCount = 0
+	h.unhealthyCount = 0
 	return h.healthy
 }
 

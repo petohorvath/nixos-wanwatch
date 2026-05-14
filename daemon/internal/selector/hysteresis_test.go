@@ -265,3 +265,71 @@ func TestHysteresisFlipsOnlyAfterRequiredRun(t *testing.T) {
 		}
 	}
 }
+
+// TestHysteresisSeedBypassesRamp: Seed sets the verdict directly
+// from the first observation — no consecutive-cycle ramp. A state
+// with consecutiveUp=3 seeded healthy is healthy at once, where
+// Observe would need three healthy observations. This is the PLAN
+// §8 cold-start handoff that keeps a healthy WAN from flapping
+// during warm-up.
+func TestHysteresisSeedBypassesRamp(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		seed bool
+	}{
+		{"seed healthy", true},
+		{"seed unhealthy", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := NewHysteresisState(3, 3)
+			if got := h.Seed(tc.seed); got != tc.seed {
+				t.Errorf("Seed(%v) = %v, want %v", tc.seed, got, tc.seed)
+			}
+			if h.Healthy() != tc.seed {
+				t.Errorf("after Seed(%v): Healthy() = %v, want %v", tc.seed, h.Healthy(), tc.seed)
+			}
+		})
+	}
+}
+
+// TestHysteresisSeedThenObserveRampsNormally: Seed sets the verdict
+// but must leave the counters clean, so the next flip still needs a
+// full consecutive run — a seeded-healthy state takes a whole
+// `consecutiveDown` run to flip down, a seeded-unhealthy one a whole
+// `consecutiveUp` run to flip up.
+func TestHysteresisSeedThenObserveRampsNormally(t *testing.T) {
+	t.Parallel()
+
+	t.Run("seeded healthy needs full down-ramp", func(t *testing.T) {
+		t.Parallel()
+		h := NewHysteresisState(2, 3)
+		h.Seed(true)
+		if v := h.Observe(false); !v {
+			t.Errorf("1 unhealthy after Seed(true): verdict=%v, want true", v)
+		}
+		if v := h.Observe(false); !v {
+			t.Errorf("2 unhealthy after Seed(true): verdict=%v, want true", v)
+		}
+		if v := h.Observe(false); v {
+			t.Errorf("3 unhealthy after Seed(true): verdict=%v, want false (flipped down)", v)
+		}
+	})
+
+	t.Run("seeded unhealthy needs full up-ramp", func(t *testing.T) {
+		t.Parallel()
+		h := NewHysteresisState(3, 2)
+		h.Seed(false)
+		if v := h.Observe(true); v {
+			t.Errorf("1 healthy after Seed(false): verdict=%v, want false", v)
+		}
+		if v := h.Observe(true); v {
+			t.Errorf("2 healthy after Seed(false): verdict=%v, want false", v)
+		}
+		if v := h.Observe(true); !v {
+			t.Errorf("3 healthy after Seed(false): verdict=%v, want true (flipped up)", v)
+		}
+	})
+}

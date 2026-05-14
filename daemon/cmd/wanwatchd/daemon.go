@@ -177,12 +177,21 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 
 	probeCfg := ws.cfg.Probe
 	raw := evaluateThresholds(fs.healthy, r.Stats, probeCfg.Thresholds)
-	stable := fs.hyst.Observe(raw)
+
+	// First Window for a (WAN, family) seeds the hysteresis from the
+	// measured Health (PLAN §8 cold-start handoff); every Window
+	// after ramps through Observe's consecutive-cycle logic.
+	prevCooked := fs.cooked
+	fs.cooked = true
+	var stable bool
+	if prevCooked {
+		stable = fs.hyst.Observe(raw)
+	} else {
+		stable = fs.hyst.Seed(raw)
+	}
 
 	d.recordProbeMetrics(r, stable)
 
-	prevCooked := fs.cooked
-	fs.cooked = true
 	if prevCooked && stable == fs.healthy {
 		return
 	}
