@@ -64,10 +64,12 @@ type HookResult struct {
 // `<Dir>/<event>.d/` for executable files and running each with
 // the env vars derived from HookContext.
 //
-// Default per-hook Timeout is 5s (PLAN §12 OQ #5; configurable in
-// v0.2 if users complain). Zero Timeout means no timeout. MaxHooks
-// caps how many hooks one event runs — the rest come back as
-// HookResult{Skipped: true}; zero MaxHooks means unlimited.
+// Timeout is the per-hook deadline, wired from the config's
+// `global.hookTimeoutMs` (PLAN §12 OQ #5). A zero Timeout falls back
+// to DefaultHookTimeout — the value a Runner constructed directly,
+// without a config, gets. MaxHooks caps how many hooks one event
+// runs — the rest come back as HookResult{Skipped: true}; zero
+// MaxHooks means unlimited.
 type Runner struct {
 	Dir      string
 	Timeout  time.Duration

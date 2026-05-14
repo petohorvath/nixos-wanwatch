@@ -95,6 +95,16 @@ let
           flag overrides this at runtime.
         '';
       };
+      hookTimeoutMs = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = wanwatch.config.defaultGlobal.hookTimeoutMs;
+        description = ''
+          Per-hook execution deadline in milliseconds. A hook still
+          running past this is killed (its process group is sent
+          SIGKILL) and reported as a timeout. Applies to every script
+          under `hooksDir`.
+        '';
+      };
     };
   };
 in
@@ -132,8 +142,8 @@ in
       type = globalSubmodule;
       default = { };
       description = ''
-        Global daemon settings — paths and log level. Each field
-        defaults to `wanwatch.config.defaultGlobal`.
+        Global daemon settings — paths, log level, hook timeout.
+        Each field defaults to `wanwatch.config.defaultGlobal`.
       '';
     };
 

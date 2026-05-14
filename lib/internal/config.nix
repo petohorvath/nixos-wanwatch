@@ -9,7 +9,7 @@
 
     {
       "schema": 1,
-      "global": { statePath, hooksDir, metricsSocket, logLevel },
+      "global": { statePath, hooksDir, metricsSocket, logLevel, hookTimeoutMs },
       "wans":   { "<name>": <wan.toJSONValue>, ... },
       "groups": { "<name>": <group.toJSONValue with mark/table
                              resolved>, ... }
@@ -86,6 +86,7 @@ let
     hooksDir = "/etc/wanwatch/hooks";
     metricsSocket = "/run/wanwatch/metrics.sock";
     logLevel = "info";
+    hookTimeoutMs = 5000;
   };
 
   resolveAllocations =

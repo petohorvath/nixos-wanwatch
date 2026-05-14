@@ -29,7 +29,8 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
   "statePath":     "/run/wanwatch/state.json",
   "hooksDir":      "/etc/wanwatch/hooks",
   "metricsSocket": "/run/wanwatch/metrics.sock",
-  "logLevel":      "info"
+  "logLevel":      "info",
+  "hookTimeoutMs": 5000
 }
 ```
 
@@ -39,6 +40,7 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 | `hooksDir` | string | `/etc/wanwatch/hooks` | Root of the hook-script tree (`<dir>/{up,down,switch}.d/`). |
 | `metricsSocket` | string | `/run/wanwatch/metrics.sock` | Unix-socket path for the Prometheus endpoint. |
 | `logLevel` | string | `info` | One of `debug`, `info`, `warn`, `error`. |
+| `hookTimeoutMs` | int | `5000` | Per-hook execution deadline in milliseconds. Must be `> 0`. |
 
 ## `wans.<name>`
 

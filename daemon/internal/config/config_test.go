@@ -18,7 +18,8 @@ const validConfig = `{
     "statePath": "/run/wanwatch/state.json",
     "hooksDir": "/etc/wanwatch/hooks",
     "metricsSocket": "/run/wanwatch/metrics.sock",
-    "logLevel": "info"
+    "logLevel": "info",
+    "hookTimeoutMs": 5000
   },
   "wans": {
     "primary": {
@@ -163,6 +164,15 @@ func TestValidateRejectsEmptyMetricsSocket(t *testing.T) {
 	t.Parallel()
 	cfg := mustParse(t, validConfig)
 	cfg.Global.MetricsSocket = ""
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("err = %v, want wrap of ErrInvalidConfig", err)
+	}
+}
+
+func TestValidateRejectsNonPositiveHookTimeout(t *testing.T) {
+	t.Parallel()
+	cfg := mustParse(t, validConfig)
+	cfg.Global.HookTimeoutMs = 0
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("err = %v, want wrap of ErrInvalidConfig", err)
 	}
@@ -351,7 +361,7 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte(`{}`))
 	f.Add([]byte(``))
 	f.Add([]byte(`not json`))
-	f.Add([]byte(`{"schema":1,"global":{"statePath":"a","hooksDir":"b","metricsSocket":"c","logLevel":"info"},"wans":{},"groups":{}}`))
+	f.Add([]byte(`{"schema":1,"global":{"statePath":"a","hooksDir":"b","metricsSocket":"c","logLevel":"info","hookTimeoutMs":5000},"wans":{},"groups":{}}`))
 	f.Add([]byte(`{"schema":1,"wans":null,"groups":null}`))
 	f.Add([]byte(`{"schema":"not-an-int"}`))
 	f.Add([]byte(`{"schema":1,"bogusKey":true}`))

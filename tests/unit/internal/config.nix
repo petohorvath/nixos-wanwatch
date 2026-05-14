@@ -99,6 +99,7 @@ in
       hooksDir = "/etc/wanwatch/hooks";
       metricsSocket = "/run/wanwatch/metrics.sock";
       logLevel = "info";
+      hookTimeoutMs = 5000;
     };
   };
 
@@ -268,6 +269,7 @@ in
         global = {
           logLevel = "debug";
           statePath = "/var/run/wanwatch/state.json";
+          hookTimeoutMs = 9000;
         };
       }).global;
     expected = {
@@ -275,6 +277,7 @@ in
       hooksDir = "/etc/wanwatch/hooks";
       metricsSocket = "/run/wanwatch/metrics.sock";
       logLevel = "debug";
+      hookTimeoutMs = 9000;
     };
   };
 

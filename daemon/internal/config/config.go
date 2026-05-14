@@ -46,12 +46,14 @@ type Config struct {
 	Groups map[string]selector.Group `json:"groups"`
 }
 
-// Global carries paths + log-level the daemon needs at startup.
+// Global carries paths, log-level, and the hook timeout the daemon
+// needs at startup.
 type Global struct {
 	StatePath     string `json:"statePath"`
 	HooksDir      string `json:"hooksDir"`
 	MetricsSocket string `json:"metricsSocket"`
 	LogLevel      string `json:"logLevel"`
+	HookTimeoutMs int    `json:"hookTimeoutMs"`
 }
 
 // Wan is the daemon-side view of a WAN, mirroring
@@ -158,6 +160,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Global.MetricsSocket == "" {
 		return invalidf("global.metricsSocket is empty")
+	}
+	if c.Global.HookTimeoutMs <= 0 {
+		return invalidf("global.hookTimeoutMs = %d, want > 0", c.Global.HookTimeoutMs)
 	}
 
 	for key, wan := range c.Wans {

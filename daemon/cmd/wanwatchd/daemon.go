@@ -128,10 +128,14 @@ type daemon struct {
 // (WAN, family). It performs no I/O and starts no goroutines.
 func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
-		cfg:        cfg,
-		metrics:    mreg,
-		stateW:     &state.Writer{Path: cfg.Global.StatePath},
-		hookR:      &state.Runner{Dir: cfg.Global.HooksDir, MaxHooks: maxHooksPerEvent},
+		cfg:     cfg,
+		metrics: mreg,
+		stateW:  &state.Writer{Path: cfg.Global.StatePath},
+		hookR: &state.Runner{
+			Dir:      cfg.Global.HooksDir,
+			MaxHooks: maxHooksPerEvent,
+			Timeout:  time.Duration(cfg.Global.HookTimeoutMs) * time.Millisecond,
+		},
 		logger:     logger,
 		wans:       make(map[string]*wanState, len(cfg.Wans)),
 		groups:     make(map[string]*groupState, len(cfg.Groups)),
