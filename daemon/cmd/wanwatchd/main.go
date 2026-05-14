@@ -18,10 +18,12 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -78,7 +80,7 @@ func main() {
 // run is the testable entry point. Takes the argv tail and a sink
 // for logs (os.Stderr in production, a buffer in tests) so the
 // daemon's startup path is exercisable without spawning a process.
-func run(parent context.Context, args []string, logSink *os.File) error {
+func run(parent context.Context, args []string, logSink io.Writer) error {
 	f, err := parseFlags(args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -92,11 +94,7 @@ func run(parent context.Context, args []string, logSink *os.File) error {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	levelName := cfg.Global.LogLevel
-	if f.logLevel != "" {
-		levelName = f.logLevel
-	}
-	level, err := parseLogLevel(levelName)
+	level, err := parseLogLevel(cmp.Or(f.logLevel, cfg.Global.LogLevel))
 	if err != nil {
 		return fmt.Errorf("log-level: %w", err)
 	}
