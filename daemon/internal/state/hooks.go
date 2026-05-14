@@ -55,6 +55,7 @@ type HookResult struct {
 	TimedOut bool
 	Err      error
 	Duration time.Duration
+	Output   string // combined stdout+stderr, capped at maxHookOutput
 }
 
 // Runner dispatches hooks for a given Event by scanning
@@ -71,6 +72,12 @@ type Runner struct {
 // DefaultHookTimeout is the per-hook deadline applied when
 // Runner.Timeout is zero. Matches PLAN §12 OQ #5.
 const DefaultHookTimeout = 5 * time.Second
+
+// maxHookOutput caps the combined stdout+stderr captured per hook.
+// A hook that floods its output must not be able to grow the
+// daemon's memory — everything past this is discarded and the
+// captured output is marked truncated.
+const maxHookOutput = 16 << 10
 
 // Env-var names passed to every hook invocation. Fixed by PLAN §5.5
 // — hook scripts depend on them. Exported so callers (and tests)
@@ -144,6 +151,16 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 	start := time.Now()
 	cmd := exec.CommandContext(hookCtx, path)
 	cmd.Env = env
+	// Capture combined stdout+stderr, bounded — see cappedBuffer.
+	// Pointing both streams at one buffer interleaves them in write
+	// order; os/exec serializes writes when Stdout == Stderr.
+	out := &cappedBuffer{limit: maxHookOutput}
+	cmd.Stdout = out
+	cmd.Stderr = out
+	// WaitDelay bounds how long Wait blocks for the output pipe to
+	// drain after the process exits or is cancelled — a backstop if a
+	// descendant that escaped the killed process group still holds it.
+	cmd.WaitDelay = 2 * time.Second
 	// Run the hook in its own process group, and on timeout/cancel
 	// SIGKILL the whole group rather than just the script process —
 	// exec.CommandContext's default Cancel kills only the direct
@@ -160,7 +177,7 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 	err := cmd.Run()
 	dur := time.Since(start)
 
-	res := HookResult{Path: path, Duration: dur}
+	res := HookResult{Path: path, Duration: dur, Output: out.String()}
 	if hookCtx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
 		res.ExitCode = -1
@@ -178,6 +195,35 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 		return res
 	}
 	return res
+}
+
+// cappedBuffer is an io.Writer that keeps the first `limit` bytes
+// written and discards the rest, so a hook that floods its output
+// cannot grow the daemon's memory. Write always reports a full
+// write so cmd.Wait does not see a short-write error. Not safe for
+// concurrent use — runOne points cmd.Stdout and cmd.Stderr at one
+// buffer, which os/exec serializes.
+type cappedBuffer struct {
+	limit   int
+	buf     []byte
+	written int
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	b.written += len(p)
+	if room := b.limit - len(b.buf); room > 0 {
+		b.buf = append(b.buf, p[:min(len(p), room)]...)
+	}
+	return len(p), nil
+}
+
+// String returns the captured output, with a marker appended when
+// the hook wrote past the cap.
+func (b *cappedBuffer) String() string {
+	if b.written > b.limit {
+		return string(b.buf) + "\n[hook output truncated]"
+	}
+	return string(b.buf)
 }
 
 // buildEnv constructs the env-var slice for a hook invocation.

@@ -321,3 +321,76 @@ func TestRunTimeoutKillsBackgroundedDescendants(t *testing.T) {
 		t.Error("backgrounded descendant survived the hook timeout — process group not killed")
 	}
 }
+
+// TestRunCapturesOutput: a hook's combined stdout+stderr is captured
+// into HookResult.Output, so a failing hook is diagnosable beyond
+// its exit code.
+func TestRunCapturesOutput(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeHook(t, filepath.Join(dir, "down.d"), "noisy.sh",
+		`echo "stdout line"; echo "stderr line" >&2; exit 3`)
+
+	r := Runner{Dir: dir}
+	results := r.Run(context.Background(), HookContext{Event: EventDown})
+	if results[0].ExitCode != 3 {
+		t.Errorf("ExitCode = %d, want 3", results[0].ExitCode)
+	}
+	if !strings.Contains(results[0].Output, "stdout line") {
+		t.Errorf("Output missing stdout: %q", results[0].Output)
+	}
+	if !strings.Contains(results[0].Output, "stderr line") {
+		t.Errorf("Output missing stderr: %q", results[0].Output)
+	}
+}
+
+// TestRunBoundsOutput: a hook that floods its output must not grow
+// the capture without limit — Output stays bounded and is marked
+// truncated.
+func TestRunBoundsOutput(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeHook(t, filepath.Join(dir, "up.d"), "flood.sh",
+		"head -c 200000 /dev/zero")
+
+	r := Runner{Dir: dir}
+	results := r.Run(context.Background(), HookContext{Event: EventUp})
+
+	out := results[0].Output
+	if len(out) > maxHookOutput+64 {
+		t.Errorf("Output len = %d, want <= maxHookOutput (%d) + marker", len(out), maxHookOutput)
+	}
+	if !strings.Contains(out, "truncated") {
+		t.Errorf("flooded Output not marked truncated (len=%d)", len(out))
+	}
+}
+
+// TestCappedBuffer: the bounded writer keeps the first `limit`
+// bytes, reports full writes so cmd.Wait sees no short-write error,
+// and marks output that ran past the cap.
+func TestCappedBuffer(t *testing.T) {
+	t.Parallel()
+	// Within the cap: kept verbatim, no marker.
+	under := &cappedBuffer{limit: 10}
+	if _, err := under.Write([]byte("hello")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := under.String(); got != "hello" {
+		t.Errorf("under cap: String() = %q, want %q", got, "hello")
+	}
+
+	// Past the cap: first `limit` bytes kept, marker appended, and
+	// Write still reports the full length.
+	over := &cappedBuffer{limit: 5}
+	n, err := over.Write([]byte("abcdefghij"))
+	if n != 10 || err != nil {
+		t.Errorf("Write = (%d, %v), want (10, nil) — must report a full write", n, err)
+	}
+	got := over.String()
+	if !strings.HasPrefix(got, "abcde") {
+		t.Errorf("over cap: String() = %q, want prefix %q", got, "abcde")
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Errorf("over cap: String() = %q, want a truncation marker", got)
+	}
+}

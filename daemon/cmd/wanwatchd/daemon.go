@@ -566,6 +566,11 @@ func (d *daemon) runHooks(g *groupState, old, next selector.Active) {
 			result = "nonzero"
 		}
 		d.metrics.HookInvocations.WithLabelValues(string(event), result).Inc()
+		if result != "ok" {
+			d.logger.Warn("hook failed",
+				"event", string(event), "hook", r.Path, "result", result,
+				"exitCode", r.ExitCode, "err", r.Err, "output", r.Output)
+		}
 	}
 }
 
