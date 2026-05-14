@@ -3,7 +3,10 @@ package probe
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -17,15 +20,20 @@ import (
 // os.ErrDeadlineExceeded once empty so cycle's read-deadline path
 // is exercised.
 type fakeConn struct {
-	mu      sync.Mutex
-	sent    [][]byte
-	replies [][]byte
-	closed  bool
+	mu       sync.Mutex
+	sent     [][]byte
+	replies  [][]byte
+	writeErr error // if set, WriteTo returns it
+	readErr  error // if set, ReadFrom returns it instead of draining replies
+	closed   bool
 }
 
 func (f *fakeConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
 	cp := make([]byte, len(b))
 	copy(cp, b)
 	f.sent = append(f.sent, cp)
@@ -35,10 +43,13 @@ func (f *fakeConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 func (f *fakeConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return 0, nil, f.readErr
+	}
 	if len(f.replies) == 0 {
-		// Mimic SetReadDeadline expiring — cycle treats any error
-		// as "no more replies this cycle".
-		return 0, nil, errFakeDeadline
+		// Mimic SetReadDeadline expiring — cycle distinguishes this
+		// from a real socket fault via errors.Is(os.ErrDeadlineExceeded).
+		return 0, nil, os.ErrDeadlineExceeded
 	}
 	n := copy(b, f.replies[0])
 	f.replies = f.replies[1:]
@@ -54,8 +65,6 @@ func (f *fakeConn) Close() error {
 	return nil
 }
 
-var errFakeDeadline = errors.New("fake deadline exceeded")
-
 func newPinger(targets []string) *Pinger {
 	return &Pinger{
 		Wan:        "primary",
@@ -66,6 +75,7 @@ func newPinger(targets []string) *Pinger {
 		Interval:   10 * time.Millisecond,
 		Timeout:    100 * time.Millisecond,
 		WindowSize: 4,
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 
@@ -110,7 +120,7 @@ func TestCycleRecordsRTTOnMatchedReply(t *testing.T) {
 	conn := &fakeConn{replies: [][]byte{reply}}
 
 	buf := make([]byte, 1500)
-	nextSeq := p.cycle(conn, addrs, windows, buf, 0)
+	nextSeq := p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
 	if nextSeq != 1 {
 		t.Errorf("nextSeq = %d, want 1 (one target ⇒ one seq consumed)", nextSeq)
@@ -131,7 +141,7 @@ func TestCycleRecordsLossOnNoReply(t *testing.T) {
 	conn := &fakeConn{} // no replies queued
 
 	buf := make([]byte, 1500)
-	p.cycle(conn, addrs, windows, buf, 0)
+	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
 	if windows["1.1.1.1"].LossRatio() != 1.0 {
 		t.Errorf("loss = %v, want 1.0 (no reply ⇒ lost)", windows["1.1.1.1"].LossRatio())
@@ -149,7 +159,7 @@ func TestCycleIgnoresWrongIdent(t *testing.T) {
 	conn := &fakeConn{replies: [][]byte{stranger}}
 
 	buf := make([]byte, 1500)
-	p.cycle(conn, addrs, windows, buf, 0)
+	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
 	if windows["1.1.1.1"].LossRatio() != 1.0 {
 		t.Errorf("loss = %v, want 1.0 (stranger reply must be ignored)", windows["1.1.1.1"].LossRatio())
@@ -359,3 +369,64 @@ func (n *nonIPConn) LocalAddr() net.Addr                    { return nil }
 func (n *nonIPConn) SetDeadline(time.Time) error            { return nil }
 func (n *nonIPConn) SetReadDeadline(time.Time) error        { return nil }
 func (n *nonIPConn) SetWriteDeadline(time.Time) error       { return nil }
+
+// TestCycleRecordsLossOnSendFailure: when WriteTo fails the target
+// is recorded as lost directly — no reply can come — without
+// waiting out the read window.
+func TestCycleRecordsLossOnSendFailure(t *testing.T) {
+	t.Parallel()
+	p := newPinger([]string{"1.1.1.1"})
+	addrs, _ := p.resolveTargets()
+	windows := map[string]*WindowStats{"1.1.1.1": mustNewWindow(t, p.WindowSize)}
+	conn := &fakeConn{writeErr: errors.New("sendto: network is down")}
+
+	buf := make([]byte, 1500)
+	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
+
+	if windows["1.1.1.1"].LossRatio() != 1.0 {
+		t.Errorf("loss = %v, want 1.0 (send failure ⇒ lost)", windows["1.1.1.1"].LossRatio())
+	}
+}
+
+// TestCycleRecordsLossOnReadError: a non-deadline ReadFrom error is
+// a real socket fault — cycle stops draining and records the
+// inflight targets as lost rather than treating it as a clean
+// end-of-cycle.
+func TestCycleRecordsLossOnReadError(t *testing.T) {
+	t.Parallel()
+	p := newPinger([]string{"1.1.1.1"})
+	addrs, _ := p.resolveTargets()
+	windows := map[string]*WindowStats{"1.1.1.1": mustNewWindow(t, p.WindowSize)}
+	conn := &fakeConn{readErr: errors.New("recvfrom: bad file descriptor")}
+
+	buf := make([]byte, 1500)
+	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
+
+	if windows["1.1.1.1"].LossRatio() != 1.0 {
+		t.Errorf("loss = %v, want 1.0 (read fault ⇒ inflight lost)", windows["1.1.1.1"].LossRatio())
+	}
+}
+
+// TestCycleSkipsReadOnCancelledContext: a cycle entered with an
+// already-cancelled context records loss without opening a read
+// window — even a reply sitting ready in the conn is left
+// unconsumed, so shutdown isn't delayed by a full Timeout.
+func TestCycleSkipsReadOnCancelledContext(t *testing.T) {
+	t.Parallel()
+	p := newPinger([]string{"1.1.1.1"})
+	addrs, _ := p.resolveTargets()
+	windows := map[string]*WindowStats{"1.1.1.1": mustNewWindow(t, p.WindowSize)}
+	conn := &fakeConn{replies: [][]byte{echoReplyFor(p.Family, p.Ident, 0)}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	buf := make([]byte, 1500)
+	p.cycle(ctx, conn, addrs, windows, buf, 0)
+
+	if windows["1.1.1.1"].LossRatio() != 1.0 {
+		t.Errorf("loss = %v, want 1.0 (cancelled ctx ⇒ read window skipped)", windows["1.1.1.1"].LossRatio())
+	}
+	if len(conn.replies) != 1 {
+		t.Errorf("queued reply was consumed (%d left, want 1) — read window not skipped", len(conn.replies))
+	}
+}

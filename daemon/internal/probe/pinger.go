@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"time"
@@ -34,6 +36,7 @@ type Pinger struct {
 	Interval   time.Duration
 	Timeout    time.Duration
 	WindowSize int
+	Logger     *slog.Logger // nil is normalized to a discard logger
 }
 
 // Run opens the ICMP socket, binds it to the WAN interface, and
@@ -51,6 +54,9 @@ func (p *Pinger) Run(ctx context.Context, out chan<- ProbeResult) error {
 // runWithConn is the cycle loop, extracted so tests can drive it
 // with a fake pingConn instead of opening a real socket.
 func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- ProbeResult) error {
+	if p.Logger == nil {
+		p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	addrs, err := p.resolveTargets()
 	if err != nil {
 		return err
@@ -64,6 +70,15 @@ func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- Prob
 		windows[t] = w
 	}
 
+	// On cancellation, poke the read deadline into the past so a
+	// cycle blocked in ReadFrom returns at once instead of waiting
+	// out the per-cycle Timeout. The goroutine exits with
+	// runWithConn — both unblock on ctx.Done().
+	go func() {
+		<-ctx.Done()
+		_ = conn.SetReadDeadline(time.Now())
+	}()
+
 	ticker := time.NewTicker(p.Interval)
 	defer ticker.Stop()
 
@@ -74,7 +89,7 @@ func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- Prob
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			seq = p.cycle(conn, addrs, windows, buf, seq)
+			seq = p.cycle(ctx, conn, addrs, windows, buf, seq)
 			result := ProbeResult{
 				Wan:    p.Wan,
 				Family: p.Family,
@@ -91,9 +106,10 @@ func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- Prob
 }
 
 // cycle issues one echo per target, drains replies until the cycle
-// timeout fires, then pushes a Sample (with measured RTT, or Lost)
-// into each target's window. Returns the next sequence to use.
-func (p *Pinger) cycle(conn pingConn, addrs map[string]net.Addr, windows map[string]*WindowStats, buf []byte, seq uint16) uint16 {
+// timeout fires (or ctx is cancelled), then pushes a Sample (with
+// measured RTT, or Lost) into each target's window. Returns the
+// next sequence to use.
+func (p *Pinger) cycle(ctx context.Context, conn pingConn, addrs map[string]net.Addr, windows map[string]*WindowStats, buf []byte, seq uint16) uint16 {
 	type pending struct {
 		target string
 		sent   time.Time
@@ -104,18 +120,42 @@ func (p *Pinger) cycle(conn pingConn, addrs map[string]net.Addr, windows map[str
 		if _, err := conn.WriteTo(req, addrs[target]); err == nil {
 			inflight[seq] = pending{target: target, sent: time.Now()}
 		} else {
-			// Send failure → record loss directly; don't wait for
-			// a reply that can't come.
+			// Send failed — record loss directly (no reply can come)
+			// and log it: a persistently broken socket (ENETDOWN,
+			// EPERM) otherwise looks identical to ordinary packet loss.
+			p.Logger.Warn("probe send failed",
+				"wan", p.Wan, "family", p.Family, "target", target, "err", err)
 			windows[target].Push(Sample{Lost: true})
 		}
 		seq++
 	}
 
-	deadline := time.Now().Add(p.Timeout)
-	_ = conn.SetReadDeadline(deadline)
+	recordLoss := func() {
+		for _, entry := range inflight {
+			windows[entry.target].Push(Sample{Lost: true})
+		}
+	}
+
+	// A shutdown that landed mid-send skips the read window — opening
+	// one would block out the whole Timeout before runWithConn could
+	// return. A shutdown *during* the read is caught instead by
+	// runWithConn's deadline poke.
+	if ctx.Err() != nil {
+		recordLoss()
+		return seq
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(p.Timeout))
 	for len(inflight) > 0 {
 		n, _, err := conn.ReadFrom(buf)
 		if err != nil {
+			// os.ErrDeadlineExceeded ends the cycle normally — the
+			// per-cycle deadline, or runWithConn's cancellation poke.
+			// Anything else is a real socket fault worth surfacing.
+			if !errors.Is(err, os.ErrDeadlineExceeded) {
+				p.Logger.Warn("probe read failed",
+					"wan", p.Wan, "family", p.Family, "err", err)
+			}
 			break
 		}
 		ident, replySeq, perr := ParseEchoReply(p.Family, buf[:n])
@@ -131,9 +171,7 @@ func (p *Pinger) cycle(conn pingConn, addrs map[string]net.Addr, windows map[str
 		rttMicros := uint64(time.Since(entry.sent).Microseconds())
 		windows[entry.target].Push(Sample{RTTMicros: rttMicros})
 	}
-	for _, entry := range inflight {
-		windows[entry.target].Push(Sample{Lost: true})
-	}
+	recordLoss()
 	return seq
 }
 

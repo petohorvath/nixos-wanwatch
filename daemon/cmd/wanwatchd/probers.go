@@ -44,6 +44,7 @@ func startProbers(ctx context.Context, cancel context.CancelCauseFunc, cfg *conf
 			Interval:   time.Duration(wan.Probe.IntervalMs) * time.Millisecond,
 			Timeout:    time.Duration(wan.Probe.TimeoutMs) * time.Millisecond,
 			WindowSize: wan.Probe.WindowSize,
+			Logger:     logger,
 		}
 		go func(p *probe.Pinger) {
 			err := p.Run(ctx, results)
