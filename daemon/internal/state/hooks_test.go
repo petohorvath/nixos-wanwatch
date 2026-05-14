@@ -294,3 +294,30 @@ func TestRunCapturesNonExitError(t *testing.T) {
 		t.Error("TimedOut = true, want false for non-timeout failure")
 	}
 }
+
+// TestRunTimeoutKillsBackgroundedDescendants: a hook that
+// backgrounds work and then blocks past the timeout must have its
+// whole process group killed — not just the direct child — so the
+// descendant can't outlive the daemon's apply step.
+func TestRunTimeoutKillsBackgroundedDescendants(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, "orphan-ran.txt")
+	// Background a subshell that would touch the sentinel after the
+	// hook itself is long gone, then block so the hook times out.
+	writeHook(t, filepath.Join(dir, "up.d"), "fork.sh",
+		"(sleep 1; touch "+sentinel+") &\nsleep 5")
+
+	r := Runner{Dir: dir, Timeout: 200 * time.Millisecond}
+	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	if !results[0].TimedOut {
+		t.Fatalf("setup: hook did not time out (TimedOut = false)")
+	}
+
+	// Well past the backgrounded subshell's 1s sleep: with the process
+	// group killed on timeout, it never reaches the touch.
+	time.Sleep(2 * time.Second)
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Error("backgrounded descendant survived the hook timeout — process group not killed")
+	}
+}

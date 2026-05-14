@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -143,6 +144,19 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 	start := time.Now()
 	cmd := exec.CommandContext(hookCtx, path)
 	cmd.Env = env
+	// Run the hook in its own process group, and on timeout/cancel
+	// SIGKILL the whole group rather than just the script process —
+	// exec.CommandContext's default Cancel kills only the direct
+	// child, orphaning anything the hook backgrounded.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			// Group already gone — the process exited as the deadline hit.
+			return os.ErrProcessDone
+		}
+		return err
+	}
 	err := cmd.Run()
 	dur := time.Since(start)
 
