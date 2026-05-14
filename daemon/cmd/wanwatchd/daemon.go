@@ -384,7 +384,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 	ifindex, err := d.ifindexOf(ws.cfg.Interface)
 	if err != nil {
 		d.logger.Error("ifindex lookup", "iface", ws.cfg.Interface, "err", err)
-		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "rule_install").Inc()
+		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "ifindex_lookup").Inc()
 		return fmt.Errorf("apply routes: ifindex %q: %w", ws.cfg.Interface, err)
 	}
 	var failed int

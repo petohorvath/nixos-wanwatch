@@ -45,7 +45,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.GroupDecisions.WithLabelValues("home", "startup").Inc()
 	r.ApplyRouteDuration.WithLabelValues("home", "v4").Observe(0.001)
 	r.ApplyRouteErrors.WithLabelValues("home", "v4").Inc()
-	r.ApplyOpErrors.WithLabelValues("home", "rule_install").Inc()
+	r.ApplyOpErrors.WithLabelValues("home", "ifindex_lookup").Inc()
 	r.StatePublications.Inc()
 	r.HookInvocations.WithLabelValues("up", "ok").Inc()
 	r.BuildInfo.WithLabelValues("0.1.0", runtime.Version(), "deadbeef").Set(1)

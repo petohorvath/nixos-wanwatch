@@ -529,7 +529,7 @@ wanwatch_apply_route_duration_seconds{group,family}    histogram (per-family RTM
 wanwatch_apply_route_errors_total{group,family}        counter
 wanwatch_apply_op_errors_total{group,op}               counter
                                                        op ∈ {conntrack_flush,state_write,hook,
-                                                             rule_install}
+                                                             rule_install,ifindex_lookup}
 
 # Daemon
 wanwatch_state_publications_total                      counter
