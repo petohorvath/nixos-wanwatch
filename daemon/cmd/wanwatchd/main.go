@@ -150,7 +150,11 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		cancel(fmt.Errorf("probers: %w", err))
 		return exitError(ctx, metricsDone, logger)
 	}
-	linkEvents := startLinkSubscriber(ctx, cancel, &cfg, logger)
+	linkEvents, err := startLinkSubscriber(ctx, cancel, &cfg, logger)
+	if err != nil {
+		cancel(fmt.Errorf("link subscriber: %w", err))
+		return exitError(ctx, metricsDone, logger)
+	}
 	routeEvents, err := startRouteSubscriber(ctx, cancel, &cfg, logger)
 	if err != nil {
 		cancel(fmt.Errorf("route subscriber: %w", err))

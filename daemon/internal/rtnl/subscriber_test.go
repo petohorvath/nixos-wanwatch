@@ -35,6 +35,15 @@ func mkDelete(name string) netlink.LinkUpdate {
 	}
 }
 
+// mkLink builds a netlink.Link shaped like what netlink.LinkList
+// returns — the IFF_* flags live in LinkAttrs.RawFlags, not a
+// message header, so primeVia must read them from there.
+func mkLink(name string, rawFlags uint32, oper netlink.LinkOperState) netlink.Link {
+	return &netlink.Device{
+		LinkAttrs: netlink.LinkAttrs{Name: name, OperState: oper, RawFlags: rawFlags},
+	}
+}
+
 func TestCarrierFromFlagsUp(t *testing.T) {
 	t.Parallel()
 	got := carrierFromFlags(unix.IFF_LOWER_UP)
@@ -301,6 +310,49 @@ func TestLinkSubscriberRunViaSurfacesErrorCallbackCause(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "subscription ended") {
 		t.Errorf("err = %q, want 'subscription ended' context", err.Error())
+	}
+}
+
+// TestLinkSubscriberPrimeViaWrapsListError: a netlink.LinkList
+// failure must be wrapped with the `rtnl: LinkList:` prefix so logs
+// name the layer responsible.
+func TestLinkSubscriberPrimeViaWrapsListError(t *testing.T) {
+	t.Parallel()
+	want := errors.New("netlink: link list denied")
+	listFn := func() ([]netlink.Link, error) { return nil, want }
+
+	err := (&LinkSubscriber{}).primeVia(context.Background(), listFn, make(chan LinkEvent, 1))
+	if !errors.Is(err, want) {
+		t.Errorf("err = %v, want list-error chained via %%w", err)
+	}
+	if !strings.Contains(err.Error(), "rtnl: LinkList") {
+		t.Errorf("err = %q, want 'rtnl: LinkList' prefix", err.Error())
+	}
+}
+
+// TestLinkSubscriberPrimeViaEmitsWatchedLinks: priming must emit one
+// LinkEvent per watched interface LinkList returns — carrier and
+// operstate decoded from RawFlags — and drop interfaces outside the
+// watched set.
+func TestLinkSubscriberPrimeViaEmitsWatchedLinks(t *testing.T) {
+	t.Parallel()
+	listFn := func() ([]netlink.Link, error) {
+		return []netlink.Link{
+			mkLink("eth0", unix.IFF_LOWER_UP, netlink.OperUp),
+			mkLink("lo", unix.IFF_LOWER_UP, netlink.OperUp),
+		}, nil
+	}
+	s := &LinkSubscriber{Interfaces: map[string]struct{}{"eth0": {}}}
+	out := make(chan LinkEvent, 4)
+	if err := s.primeVia(context.Background(), listFn, out); err != nil {
+		t.Fatalf("primeVia = %v, want nil", err)
+	}
+	if got := len(out); got != 1 {
+		t.Fatalf("len(out) = %d, want 1 (eth0 only; lo filtered)", got)
+	}
+	ev := <-out
+	if ev.Name != "eth0" || ev.Carrier != CarrierUp || ev.Operstate != OperstateUp {
+		t.Errorf("event = %+v, want eth0/up/up", ev)
 	}
 }
 

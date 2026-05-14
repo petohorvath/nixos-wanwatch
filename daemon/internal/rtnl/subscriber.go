@@ -20,9 +20,9 @@ type LinkSubscriber struct {
 }
 
 // updateChanBuffer is the netlink-update channel capacity. Sized
-// to absorb both the ListExisting startup dump (one update per
-// existing link — bridges, vlans, dockers can push this past 64
-// on a busy host) and subsequent flap bursts.
+// to absorb a flap burst — many links transitioning at once when an
+// uplink renegotiates — without the library's receive goroutine
+// blocking. The startup dump goes through Prime, not this channel.
 const updateChanBuffer = 256
 
 // errSubscriptionClosed is returned by runLoop when the netlink
@@ -58,10 +58,65 @@ func translateSubClose(err error, subErr *atomic.Pointer[error], label string) e
 	return err
 }
 
+// Prime walks the kernel's current links and pushes a LinkEvent
+// onto `out` for every watched interface. Callers should invoke
+// this synchronously before starting the event loop, so each WAN's
+// carrier/operstate is known on the event loop's first iteration.
+// Without it the daemon starts every WAN at carrier-unknown — which
+// it treats as down — so a probe result arriving before the
+// subscription's first transition would leave an up WAN unselected
+// until that transition lands.
+//
+// `out`'s buffer must hold at least one event per watched
+// interface; the daemon sizes it at 64, far above any realistic
+// WAN count.
+func (s *LinkSubscriber) Prime(ctx context.Context, out chan<- LinkEvent) error {
+	return s.primeVia(ctx, netlink.LinkList, out)
+}
+
+// linkListFn matches netlink.LinkList and is the seam
+// LinkSubscriber.primeVia exposes for tests — production uses the
+// netlink call; tests inject a stub returning synthetic links.
+type linkListFn func() ([]netlink.Link, error)
+
+// primeVia is Prime parameterized on the link enumerator. Tests
+// drive synthetic links through it to exercise the existing-link
+// filtering + emission paths without a netlink socket.
+//
+// LinkList carries the IFF_* flags in each link's Attrs().RawFlags,
+// whereas the subscription path delivers them in the netlink
+// message header — so the synthetic LinkUpdate copies RawFlags into
+// the IfInfomsg field handleUpdate reads.
+func (s *LinkSubscriber) primeVia(ctx context.Context, listFn linkListFn, out chan<- LinkEvent) error {
+	links, err := listFn()
+	if err != nil {
+		return fmt.Errorf("rtnl: LinkList: %w", err)
+	}
+	state := make(map[string]LinkState)
+	for _, link := range links {
+		upd := netlink.LinkUpdate{
+			Header: unix.NlMsghdr{Type: unix.RTM_NEWLINK},
+			Link:   link,
+		}
+		upd.Flags = link.Attrs().RawFlags
+		ev, emit := s.handleUpdate(state, upd)
+		if !emit {
+			continue
+		}
+		select {
+		case out <- ev:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
 // Run subscribes to RTNLGRP_LINK and pushes one LinkEvent onto
 // `out` for every real carrier/operstate change on a watched
 // interface. Returns when ctx is cancelled or the netlink
-// subscription fails.
+// subscription fails. Pair with Prime for the existing-links case —
+// Run itself does not dump.
 //
 // `out` is *not* closed on return; callers can retry Run with a
 // fresh goroutine and reuse the same channel after a transient
@@ -88,10 +143,9 @@ func (s *LinkSubscriber) runVia(ctx context.Context, subscribe linkSubscribeFn, 
 	// receive goroutine; translateSubClose reads it after the close.
 	var subErr atomic.Pointer[error]
 	opts := netlink.LinkSubscribeOptions{
-		// ListExisting dumps every current link as an RTM_NEWLINK so
-		// the daemon learns carrier/operstate at boot without waiting
-		// for the first transition.
-		ListExisting:      true,
+		// ListExisting is omitted: Prime does the existing-link dump
+		// synchronously before the event loop starts, so Run only
+		// carries subsequent transitions.
 		ReceiveBufferSize: netlinkRcvBufBytes,
 		ErrorCallback:     func(err error) { subErr.Store(&err) },
 	}

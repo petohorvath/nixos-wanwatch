@@ -14,16 +14,25 @@ import (
 // subscriber that exits with anything other than context
 // cancellation calls `cancel` with the cause, taking the daemon down
 // for a systemd restart rather than running on blind.
-func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) <-chan rtnl.LinkEvent {
+//
+// Prime runs synchronously before the subscriber goroutine spawns so
+// each WAN's carrier/operstate is on the channel before the event
+// loop's first iteration — see rtnl.LinkSubscriber.Prime for why a
+// probe result racing the link dump would otherwise leave an up WAN
+// unselected.
+func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.LinkEvent, error) {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.LinkSubscriber{Interfaces: watched}
 	events := make(chan rtnl.LinkEvent, 64)
+	if err := s.Prime(ctx, events); err != nil {
+		return nil, fmt.Errorf("rtnl link subscriber prime: %w", err)
+	}
 	go func() {
 		err := s.Run(ctx, events)
 		onSubsystemExit(cancel, logger, "link subscriber", err)
 	}()
-	logger.Info("rtnl link subscriber started", "interfaces", len(watched))
-	return events
+	logger.Info("rtnl link subscriber started", "interfaces", len(watched), "primed", len(events))
+	return events, nil
 }
 
 // startRouteSubscriber opens an rtnetlink route subscription filtered

@@ -12,10 +12,10 @@ import (
 )
 
 // routeUpdateBuffer is the netlink RouteUpdate channel capacity.
-// Sized like the link subscriber's: enough to absorb the ListExisting
-// startup dump (one update per existing default route across both
-// families and every table on a busy host) plus subsequent route
-// flap bursts when an uplink renegotiates.
+// Sized like updateChanBuffer: enough to absorb a route-flap burst
+// when an uplink renegotiates without the library's receive
+// goroutine blocking. The startup dump goes through Prime, not this
+// channel.
 const routeUpdateBuffer = 256
 
 // RouteSubscriber owns an rtnetlink RTNLGRP_IPV4_ROUTE +
