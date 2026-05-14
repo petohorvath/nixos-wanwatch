@@ -46,13 +46,15 @@ type HookContext struct {
 	Timestamp    time.Time
 }
 
-// HookResult records the outcome of one hook invocation. Returned
-// in a slice from Runner.Run; hooks that timed out have
-// `TimedOut = true` and `ExitCode = -1`.
+// HookResult records the outcome of one hook: invoked (with its
+// exit code, timeout flag, and captured output), or skipped because
+// Runner.MaxHooks was reached. Returned in a slice from Runner.Run;
+// hooks that timed out have `TimedOut = true` and `ExitCode = -1`.
 type HookResult struct {
 	Path     string
 	ExitCode int
 	TimedOut bool
+	Skipped  bool
 	Err      error
 	Duration time.Duration
 	Output   string // combined stdout+stderr, capped at maxHookOutput
@@ -63,10 +65,13 @@ type HookResult struct {
 // the env vars derived from HookContext.
 //
 // Default per-hook Timeout is 5s (PLAN §12 OQ #5; configurable in
-// v0.2 if users complain). Zero Timeout means no timeout.
+// v0.2 if users complain). Zero Timeout means no timeout. MaxHooks
+// caps how many hooks one event runs — the rest come back as
+// HookResult{Skipped: true}; zero MaxHooks means unlimited.
 type Runner struct {
-	Dir     string
-	Timeout time.Duration
+	Dir      string
+	Timeout  time.Duration
+	MaxHooks int
 }
 
 // DefaultHookTimeout is the per-hook deadline applied when
@@ -99,14 +104,15 @@ const (
 	EnvTimestamp    = "WANWATCH_TS"
 )
 
-// Run executes every hook under `<Dir>/<ctx.Event>.d/` with the
-// env vars in PLAN §5.5. Returns one HookResult per file. A
-// missing event directory returns nil — not an error; users with
-// no hooks shouldn't see noise in the logs.
+// Run executes the hooks under `<Dir>/<ctx.Event>.d/` with the env
+// vars in PLAN §5.5. Returns one HookResult per file. A missing
+// event directory returns nil — not an error; users with no hooks
+// shouldn't see noise in the logs.
 //
-// Files are executed in lexicographic order (matching `run-parts`
-// convention). Each invocation runs in its own context with the
-// configured timeout.
+// Files run in lexicographic order (matching `run-parts`), each in
+// its own context with the configured timeout. At most MaxHooks of
+// them run; the rest are returned with `Skipped = true` so the
+// caller can surface the cap rather than starving them silently.
 func (r *Runner) Run(parent context.Context, ctx HookContext) []HookResult {
 	eventDir := filepath.Join(r.Dir, string(ctx.Event)+".d")
 	entries, err := os.ReadDir(eventDir)
@@ -138,7 +144,11 @@ func (r *Runner) Run(parent context.Context, ctx HookContext) []HookResult {
 	sort.Strings(paths)
 
 	results := make([]HookResult, 0, len(paths))
-	for _, p := range paths {
+	for i, p := range paths {
+		if r.MaxHooks > 0 && i >= r.MaxHooks {
+			results = append(results, HookResult{Path: p, Skipped: true})
+			continue
+		}
 		results = append(results, runOne(parent, p, env, timeout))
 	}
 	return results

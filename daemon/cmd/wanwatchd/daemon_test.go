@@ -472,7 +472,7 @@ func TestRunHooksUpEvent(t *testing.T) {
 		`echo "$WANWATCH_EVENT|$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_IFACE_NEW" > `+outFile)
 
 	g := d.groups["home"]
-	d.runHooks(g, selector.NoActive, selector.Active{Wan: "primary", Has: true})
+	d.runHooks(t.Context(), g, selector.NoActive, selector.Active{Wan: "primary", Has: true})
 
 	data, err := os.ReadFile(outFile)
 	if err != nil {
@@ -497,7 +497,7 @@ func TestRunHooksNoEventOnIdentical(t *testing.T) {
 		`touch `+sentinel)
 
 	active := selector.Active{Wan: "primary", Has: true}
-	d.runHooks(d.groups["home"], active, active)
+	d.runHooks(t.Context(), d.groups["home"], active, active)
 
 	if _, err := os.Stat(sentinel); err == nil {
 		t.Error("hook fired on identical-active transition; want no event")
@@ -512,7 +512,7 @@ func TestRunHooksMissingDirIsNotError(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
 	// No writeHook → HooksDir/up.d/ doesn't exist.
-	d.runHooks(d.groups["home"], selector.NoActive,
+	d.runHooks(t.Context(), d.groups["home"], selector.NoActive,
 		selector.Active{Wan: "primary", Has: true})
 	// No assertion needed — the test fails by panicking if runHooks
 	// gets the error contract wrong. Reaching here is the success

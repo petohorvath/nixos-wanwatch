@@ -394,3 +394,40 @@ func TestCappedBuffer(t *testing.T) {
 		t.Errorf("over cap: String() = %q, want a truncation marker", got)
 	}
 }
+
+// TestRunCapsHookCount: with more executable hooks than MaxHooks,
+// only the first MaxHooks (lexicographic) run; the rest come back
+// marked Skipped so the daemon can log them rather than letting
+// them silently starve.
+func TestRunCapsHookCount(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "up.d")
+	ran := filepath.Join(dir, "ran.txt")
+	for _, n := range []string{"a.sh", "b.sh", "c.sh", "d.sh"} {
+		writeHook(t, eventDir, n, "echo "+n+" >> "+ran)
+	}
+
+	r := Runner{Dir: dir, MaxHooks: 2}
+	results := r.Run(context.Background(), HookContext{Event: EventUp})
+
+	if len(results) != 4 {
+		t.Fatalf("len(results) = %d, want 4 (2 run + 2 skipped)", len(results))
+	}
+	var ranCount, skipped int
+	for _, res := range results {
+		if res.Skipped {
+			skipped++
+		} else {
+			ranCount++
+		}
+	}
+	if ranCount != 2 || skipped != 2 {
+		t.Errorf("ran=%d skipped=%d, want ran=2 skipped=2", ranCount, skipped)
+	}
+	// Only the first two (lexicographic) actually executed.
+	data, _ := os.ReadFile(ran)
+	if got := strings.TrimSpace(string(data)); got != "a.sh\nb.sh" {
+		t.Errorf("executed hooks = %q, want %q", got, "a.sh\\nb.sh")
+	}
+}

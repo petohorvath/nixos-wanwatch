@@ -131,7 +131,7 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 		cfg:        cfg,
 		metrics:    mreg,
 		stateW:     &state.Writer{Path: cfg.Global.StatePath},
-		hookR:      &state.Runner{Dir: cfg.Global.HooksDir},
+		hookR:      &state.Runner{Dir: cfg.Global.HooksDir, MaxHooks: maxHooksPerEvent},
 		logger:     logger,
 		wans:       make(map[string]*wanState, len(cfg.Wans)),
 		groups:     make(map[string]*groupState, len(cfg.Groups)),
@@ -349,7 +349,7 @@ func (d *daemon) commitDecision(ctx context.Context, g *groupState) {
 	}
 	d.updateGroupActiveGauge(g)
 	d.writeStateSnapshot()
-	d.runHooks(g, old, next)
+	d.runHooks(ctx, g, old, next)
 }
 
 // retryPendingApply re-attempts commitDecision for any group whose
@@ -525,14 +525,14 @@ func (d *daemon) writeStateSnapshot() {
 
 // runHooks dispatches the event matching the old→next active
 // transition (see hookEventFor in decision.go) into the configured
-// hook directory.
-func (d *daemon) runHooks(g *groupState, old, next selector.Active) {
+// hook directory. The hooks run under `parent` — the daemon
+// context — so a shutdown signal cancels any in-flight hook rather
+// than blocking the daemon behind it.
+func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selector.Active) {
 	event := hookEventFor(old, next)
 	if event == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), state.DefaultHookTimeout*time.Duration(maxHooksPerEvent))
-	defer cancel()
 
 	oldIface := ifaceFor(d.wans, old)
 	nextIface := ifaceFor(d.wans, next)
@@ -556,8 +556,13 @@ func (d *daemon) runHooks(g *groupState, old, next selector.Active) {
 		Table:        g.cfg.Table,
 		Mark:         g.cfg.Mark,
 	}
-	results := d.hookR.Run(ctx, hookCtx)
+	results := d.hookR.Run(parent, hookCtx)
 	for _, r := range results {
+		if r.Skipped {
+			d.logger.Warn("hook skipped: per-event limit reached",
+				"event", string(event), "hook", r.Path, "limit", maxHooksPerEvent)
+			continue
+		}
 		result := "ok"
 		switch {
 		case r.TimedOut:
@@ -574,9 +579,10 @@ func (d *daemon) runHooks(g *groupState, old, next selector.Active) {
 	}
 }
 
-// maxHooksPerEvent is a safety bound for the aggregate hook
-// timeout: the daemon won't wait longer than this multiple of the
-// per-hook timeout for one event's entire .d directory to finish.
+// maxHooksPerEvent caps how many hooks one event's `.d` directory
+// may run, bounding the event loop's worst-case stall at
+// maxHooksPerEvent × DefaultHookTimeout. Hooks past the cap are
+// logged and skipped, not silently starved of their timeout.
 const maxHooksPerEvent = 8
 
 func (d *daemon) recordProbeMetrics(r probe.ProbeResult, stableHealthy bool) {
