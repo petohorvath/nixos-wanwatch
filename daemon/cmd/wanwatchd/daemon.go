@@ -479,7 +479,6 @@ func (d *daemon) writeStateSnapshot() {
 		Wans:   make(map[string]state.Wan, len(d.wans)),
 		Groups: make(map[string]state.Group, len(d.groups)),
 	}
-	gws := d.gateways.Snapshot()
 	for _, ws := range d.wans {
 		fams := make(map[string]state.FamilyHealth, len(ws.families))
 		for fam, fs := range ws.families {
@@ -497,8 +496,8 @@ func (d *daemon) writeStateSnapshot() {
 			Operstate: ws.operstate.String(),
 			Healthy:   ws.healthy(),
 			Gateways: state.Gateways{
-				V4: gws.String(ws.cfg.Interface, rtnl.RouteFamilyV4),
-				V6: gws.String(ws.cfg.Interface, rtnl.RouteFamilyV6),
+				V4: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV4),
+				V6: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV6),
 			},
 			Families: fams,
 		}
@@ -536,7 +535,6 @@ func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selec
 
 	oldIface := ifaceFor(d.wans, old)
 	nextIface := ifaceFor(d.wans, next)
-	gws := d.gateways.Snapshot()
 	hookCtx := state.HookContext{
 		Event:    event,
 		Group:    g.cfg.Name,
@@ -548,10 +546,10 @@ func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selec
 		// blank when (a) the iface has no cached default route yet,
 		// or (b) the route is scope-link (point-to-point) so there
 		// is no gateway to surface.
-		GatewayV4Old: gws.String(oldIface, rtnl.RouteFamilyV4),
-		GatewayV4New: gws.String(nextIface, rtnl.RouteFamilyV4),
-		GatewayV6Old: gws.String(oldIface, rtnl.RouteFamilyV6),
-		GatewayV6New: gws.String(nextIface, rtnl.RouteFamilyV6),
+		GatewayV4Old: d.gateways.String(oldIface, rtnl.RouteFamilyV4),
+		GatewayV4New: d.gateways.String(nextIface, rtnl.RouteFamilyV4),
+		GatewayV6Old: d.gateways.String(oldIface, rtnl.RouteFamilyV6),
+		GatewayV6New: d.gateways.String(nextIface, rtnl.RouteFamilyV6),
 		Families:     probedFamiliesFor(d.wans, next),
 		Table:        g.cfg.Table,
 		Mark:         g.cfg.Mark,

@@ -75,35 +75,20 @@ func TestGatewayCacheClear(t *testing.T) {
 	}
 }
 
-func TestSnapshotStringFormats(t *testing.T) {
+func TestGatewayCacheStringFormats(t *testing.T) {
 	t.Parallel()
 	c := NewGatewayCache()
 	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 	c.Set("wg0", rtnl.RouteFamilyV4, nil) // scope-link
-	s := c.Snapshot()
 
-	if got := s.String("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
+	if got := c.String("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
 		t.Errorf("String(eth0/v4) = %q, want 192.0.2.1", got)
 	}
-	if got := s.String("wg0", rtnl.RouteFamilyV4); got != "" {
+	if got := c.String("wg0", rtnl.RouteFamilyV4); got != "" {
 		t.Errorf("String(wg0/v4 scope-link) = %q, want empty", got)
 	}
-	if got := s.String("missing", rtnl.RouteFamilyV4); got != "" {
+	if got := c.String("missing", rtnl.RouteFamilyV4); got != "" {
 		t.Errorf("String(missing) = %q, want empty", got)
-	}
-}
-
-func TestSnapshotIsolatedFromCacheMutation(t *testing.T) {
-	t.Parallel()
-	c := NewGatewayCache()
-	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	snap := c.Snapshot()
-
-	c.Clear("eth0", rtnl.RouteFamilyV4)
-	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
-
-	if got := snap.String("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
-		t.Errorf("snap reflects post-snapshot mutation: got %q", got)
 	}
 }
 
