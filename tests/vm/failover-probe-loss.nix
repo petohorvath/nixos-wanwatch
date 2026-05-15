@@ -171,8 +171,8 @@ pkgs.testers.runNixOSTest {
         return 0.0
 
 
-    def wait_for_family_healthy(router, wan, timeout=15):
-        """Poll until wanwatch_wan_family_healthy{wan,family=v4} == 1.
+    def wait_for_wan_healthy(router, wan, timeout=15):
+        """Poll state.json until wans[wan].healthy == True.
 
         The cold-start carrier path (PLAN §8) can satisfy
         `wait_for_active(group, "primary")` the moment carrier comes
@@ -181,23 +181,20 @@ pkgs.testers.runNixOSTest {
         first probe sample may not have landed yet, and the assertion
         "active never reached 'backup'" 10s later wouldn't tell us
         whether the daemon mis-failed-over or whether backup was
-        never probe-healthy to begin with.
+        never probe-healthy to begin with. Gate on probe health
+        explicitly so the scenario starts from a known-good state.
 
-        Reads the live Prometheus metric, not state.json — the latter
-        is a Decision snapshot (PLAN §5.5) and only gets rewritten
-        when the group's active member changes, so a backup whose
-        probes go healthy *without* dislodging the active primary
-        wouldn't appear healthy in state.json at all."""
-        series = (
-            'wanwatch_wan_family_healthy{family="v4",wan="' + wan + '"}'
-        )
+        Reads state.json directly: per PLAN §5.5 the daemon now
+        republishes it on any per-family Health transition, so a
+        backup that goes probe-healthy without dislodging the
+        active primary still surfaces here."""
         for _ in range(timeout * 10):
-            if metric(scrape(router), series) == 1.0:
+            out = router.succeed("cat /run/wanwatch/state.json")
+            if json.loads(out)["wans"][wan]["healthy"]:
                 return
             router.execute("sleep 0.1")
         raise AssertionError(
-            f"wan {wan!r} v4 family never became probe-healthy; "
-            f"last scrape =\n{scrape(router)}"
+            f"wan {wan!r} never became probe-healthy; last state =\n{out}"
         )
 
 
@@ -252,8 +249,8 @@ pkgs.testers.runNixOSTest {
     # the backup probe Window cooks, and step 3 would then time out
     # failing over to a backup that was never reachable in the first
     # place — a noise failure that masquerades as a daemon bug.
-    wait_for_family_healthy(router, "primary")
-    wait_for_family_healthy(router, "backup")
+    wait_for_wan_healthy(router, "primary")
+    wait_for_wan_healthy(router, "backup")
 
     # Snapshot the health-decisions counter before we inject loss —
     # the assertion below is "counter advanced", not "counter equal
