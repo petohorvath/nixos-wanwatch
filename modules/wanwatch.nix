@@ -198,14 +198,23 @@ in
     environment.etc."wanwatch/config.json".text = renderedConfig;
 
     # Tell systemd-networkd to leave foreign routing-policy rules
-    # alone. The wanwatch daemon installs fwmark rules at bootstrap
-    # and depends on them surviving until shutdown; networkd's
-    # default `ManageForeignRoutingPolicyRules=yes` would delete
-    # them during its periodic reconciliation pass. Only takes
-    # effect when networkd is in use, so this is conditional on
-    # the option existing — networkd-free deployments are
-    # unaffected.
-    systemd.network.config.networkConfig.ManageForeignRoutingPolicyRules = lib.mkDefault false;
+    # AND foreign routes alone. The wanwatch daemon installs both
+    # at bootstrap / on every Decision and depends on them
+    # surviving until the next update; networkd's defaults
+    # (`ManageForeignRoutingPolicyRules=yes` and
+    # `ManageForeignRoutes=yes` since systemd 246) would delete
+    # them during its periodic reconciliation pass — observed in
+    # the VM tier as flakes where wait_for_active sees
+    # `active=primary` (commitDecision wrote state.json after
+    # `applyRoutes` succeeded) but `ip route show table <T>`
+    # comes back empty because networkd's reconciliation ran in
+    # between and wiped the route. Only takes effect when networkd
+    # is in use, so this is conditional on the options existing —
+    # networkd-free deployments are unaffected.
+    systemd.network.config.networkConfig = {
+      ManageForeignRoutingPolicyRules = lib.mkDefault false;
+      ManageForeignRoutes = lib.mkDefault false;
+    };
 
     users.users = lib.mkIf (cfg.user == "wanwatch") {
       wanwatch = {
