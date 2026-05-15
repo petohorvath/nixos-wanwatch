@@ -144,6 +144,21 @@ pkgs.testers.runNixOSTest {
     # Selection is unambiguous.
     router.succeed("ip link set eth1 up")
 
+    # Pre-warm the network before the cold-start measurement.
+    # `wanwatch.service` starts on `network-pre.target`, so on a
+    # slow runner (especially the unstable kernel/networkd matrix)
+    # the daemon can begin probing eth1 before networkd has
+    # assigned its VLAN-1 IP — the first probe Window then lands
+    # all-Lost, hysteresis seeds unhealthy, and the WAN flaps
+    # once probes catch up. That flap is exactly what this test
+    # is supposed to detect *as a daemon bug*, so let it measure
+    # the daemon's behavior, not the runner's networkd race:
+    # block on router→isp reachability, then restart wanwatchd
+    # so its probe loop starts from a known-good network state.
+    router.wait_until_succeeds("ping -c 1 -W 1 192.168.1.1", timeout=30)
+    router.systemctl("restart wanwatch.service")
+    router.wait_for_unit("wanwatch.service")
+
     # 1. Cold start: primary is Selected on carrier alone, before
     #    any probe has cooked (PLAN §8 cold-start carrier health).
     wait_for_active(router, "primary")
