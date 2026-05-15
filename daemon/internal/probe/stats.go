@@ -88,6 +88,15 @@ func (w *WindowStats) Len() int {
 	return w.head
 }
 
+// Filled reports whether the window has wrapped at least once —
+// equivalently, whether Len() == Capacity(). The cold-start
+// handoff in daemon/cmd/wanwatchd defers hysteresis seeding until
+// every per-target window reports Filled, so a partial-window
+// verdict (e.g. the first sample landed Lost because the route
+// hadn't converged yet) doesn't flap the WAN's effective Health
+// once probes catch up.
+func (w *WindowStats) Filled() bool { return w.filled }
+
 // LossRatio returns the fraction of Samples in the window that were
 // Lost, as a float in [0.0, 1.0]. Returns 0 when the window is empty.
 func (w *WindowStats) LossRatio() float64 {

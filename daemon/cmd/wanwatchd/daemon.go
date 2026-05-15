@@ -19,11 +19,15 @@ import (
 // familyState is the per-(WAN, family) slice of runtime state. One
 // per Pinger goroutine; updated when a ProbeResult arrives.
 //
-// `cooked` flips to true on the first ProbeResult — until then,
-// PLAN §8 cold-start grants the family healthy-via-carrier
-// (handled in combineFamilies). Without this, an interface that
-// boots before its first probe cycle would be unhealthy and the
-// daemon would publish no Selection even when carrier is fine.
+// `cooked` flips to true on the first ProbeResult whose sliding
+// window is filled — until then, PLAN §8 cold-start grants the
+// family healthy-via-carrier (handled in combineFamilies). Without
+// this an interface that boots before its first probe cycle would
+// be unhealthy and the daemon would publish no Selection even when
+// carrier is fine, and a partial-window verdict (e.g. the first
+// sample landed Lost because the route hadn't converged) would
+// seed the hysteresis unhealthy and flap the WAN once probes catch
+// up.
 type familyState struct {
 	family  probe.Family
 	stats   probe.FamilyStats
@@ -219,15 +223,35 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	}
 	fs.stats = r.Stats
 
+	// Cold-start gate: defer hysteresis seed until the first probe
+	// Window is *full*. Until then, the family stays `cooked=false`
+	// and combineFamilies treats it as healthy via carrier alone
+	// (PLAN §8). Without this gate, a Lost first Sample — common on
+	// loaded CI runners, where the probe loop fires before the
+	// route to the target has converged — seeds the hysteresis
+	// unhealthy and produces a spurious down→up Decision pair once
+	// probes catch up. The per-target windows agree on Filled via
+	// FamilyStats.WindowFilled from probe.Aggregate.
+	//
+	// Metrics and the apply retry still fire on every cycle —
+	// operators want live RTT/loss in Prometheus from the first
+	// Sample, and a Decision pending its kernel apply needs a kick
+	// regardless of cold-start state.
+	if !fs.cooked && !r.Stats.WindowFilled {
+		d.recordProbeMetrics(r, false)
+		d.retryPendingApply(ctx, r.Wan)
+		return
+	}
+
 	probeCfg := ws.cfg.Probe
 	raw := evaluateThresholds(fs.healthy, r.Stats, probeCfg.Thresholds)
 	// Capture effective Health before any family-state mutation —
 	// fs.cooked and fs.healthy below both feed ws.healthy().
 	prevHealthy := ws.healthy()
 
-	// First Window for a (WAN, family) seeds the hysteresis from the
-	// measured Health (PLAN §8 cold-start handoff); every Window
-	// after ramps through Observe's consecutive-cycle logic.
+	// First *full* Window for a (WAN, family) seeds the hysteresis
+	// from the measured Health (PLAN §8 cold-start handoff); every
+	// Window after ramps through Observe's consecutive-cycle logic.
 	prevCooked := fs.cooked
 	fs.cooked = true
 	var stable bool

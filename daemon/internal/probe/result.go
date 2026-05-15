@@ -13,10 +13,19 @@ type TargetStats struct {
 // FamilyStats is the per-(WAN, family) aggregate of all Targets'
 // stats. PerTarget retains the breakdown for the per-target
 // Prometheus gauges (PLAN §7.2).
+//
+// WindowFilled reports whether every per-target sliding window has
+// reached its configured capacity. The daemon uses it to honour the
+// PLAN §8 contract that hysteresis seeds from the first probe
+// *Window*, not the first probe *Sample* — without this gate a Lost
+// first sample (probe loop fires before the kernel routes / target
+// host responds) seeds the verdict unhealthy and triggers a
+// spurious down→up flap once probes converge.
 type FamilyStats struct {
 	RTTMicros    uint64
 	JitterMicros uint64
 	LossRatio    float64
+	WindowFilled bool
 	PerTarget    []TargetStats
 }
 
@@ -51,6 +60,7 @@ func Aggregate(targets map[string]*WindowStats) FamilyStats {
 	var rttSum, jitterSum uint64
 	var lossSum float64
 	var n int
+	allFilled := true
 	for name, w := range targets {
 		ts := TargetStats{
 			Target:       name,
@@ -59,6 +69,9 @@ func Aggregate(targets map[string]*WindowStats) FamilyStats {
 			LossRatio:    w.LossRatio(),
 		}
 		per = append(per, ts)
+		if !w.Filled() {
+			allFilled = false
+		}
 		if w.Len() == 0 {
 			continue
 		}
@@ -67,7 +80,7 @@ func Aggregate(targets map[string]*WindowStats) FamilyStats {
 		lossSum += ts.LossRatio
 		n++
 	}
-	out := FamilyStats{PerTarget: per}
+	out := FamilyStats{PerTarget: per, WindowFilled: allFilled}
 	if n > 0 {
 		out.RTTMicros = rttSum / uint64(n)
 		out.JitterMicros = jitterSum / uint64(n)

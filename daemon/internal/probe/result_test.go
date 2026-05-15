@@ -79,3 +79,53 @@ func TestAggregateLossRatioMeanIsBoundedByOne(t *testing.T) {
 		t.Errorf("LossRatio = %v, want 1.0", got.LossRatio)
 	}
 }
+
+// TestAggregateWindowFilledAllFull: when every target's window has
+// wrapped at least once, the aggregate reports WindowFilled = true
+// — the signal the daemon's cold-start gate keys on to seed
+// hysteresis from a real Window rather than a partial one.
+func TestAggregateWindowFilledAllFull(t *testing.T) {
+	t.Parallel()
+	a := mustNewWindow(t, 2)
+	a.Push(Sample{RTTMicros: 1})
+	a.Push(Sample{RTTMicros: 2})
+	b := mustNewWindow(t, 2)
+	b.Push(Sample{RTTMicros: 3})
+	b.Push(Sample{RTTMicros: 4})
+
+	got := Aggregate(map[string]*WindowStats{"a": a, "b": b})
+	if !got.WindowFilled {
+		t.Error("WindowFilled = false, want true (both windows full)")
+	}
+}
+
+// TestAggregateWindowFilledAnyPartial: one target's window short of
+// capacity drops WindowFilled to false even when other targets are
+// full. Avoids seeding the daemon's hysteresis off a verdict that
+// only some targets have contributed to.
+func TestAggregateWindowFilledAnyPartial(t *testing.T) {
+	t.Parallel()
+	a := mustNewWindow(t, 2)
+	a.Push(Sample{RTTMicros: 1})
+	a.Push(Sample{RTTMicros: 2}) // filled
+	b := mustNewWindow(t, 2)
+	b.Push(Sample{RTTMicros: 3}) // 1 of 2 — not yet filled
+
+	got := Aggregate(map[string]*WindowStats{"a": a, "b": b})
+	if got.WindowFilled {
+		t.Error("WindowFilled = true, want false (b is partial)")
+	}
+}
+
+// TestAggregateWindowFilledEmpty: no Samples anywhere → not filled.
+// Boundary that exercises the first probe cycle's emission, where
+// every window is still empty after sampling once.
+func TestAggregateWindowFilledEmpty(t *testing.T) {
+	t.Parallel()
+	a := mustNewWindow(t, 2) // empty
+
+	got := Aggregate(map[string]*WindowStats{"a": a})
+	if got.WindowFilled {
+		t.Error("WindowFilled = true on an empty window, want false")
+	}
+}

@@ -116,7 +116,10 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
-		Stats:  probe.FamilyStats{LossRatio: 0.95, RTTMicros: 50_000},
+		Stats: probe.FamilyStats{
+			LossRatio: 0.95, RTTMicros: 50_000,
+			WindowFilled: true,
+		},
 	})
 
 	if d.wans["primary"].families[probe.FamilyV4].healthy {
@@ -156,7 +159,10 @@ func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
-		Stats:  probe.FamilyStats{LossRatio: 0.0, RTTMicros: 10_000},
+		Stats: probe.FamilyStats{
+			LossRatio: 0.0, RTTMicros: 10_000,
+			WindowFilled: true,
+		},
 	})
 
 	if !d.wans["primary"].families[probe.FamilyV4].healthy {
@@ -164,6 +170,68 @@ func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
 	}
 	if !d.wans["primary"].healthy() {
 		t.Error("primary aggregate not healthy after a good first probe")
+	}
+}
+
+// TestHandleProbeResultDefersSeedUntilWindowFilled: a partial-window
+// first ProbeResult (the probe loop fires before the route has
+// converged → Lost first sample) must not seed the hysteresis. The
+// family stays uncooked, combineFamilies keeps the WAN healthy via
+// carrier alone (PLAN §8), and no spurious health Decision fires.
+// Once a full Window lands healthy, the seed fires and the family
+// transitions in one shot — never down→up.
+func TestHandleProbeResultDefersSeedUntilWindowFilled(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	cfg.Wans["primary"] = config.Wan{
+		Name:      "primary",
+		Interface: "eth0",
+		Probe: config.Probe{
+			Targets: config.Targets{V4: []string{"1.1.1.1"}},
+			Thresholds: config.Thresholds{
+				LossPctUp: 5, LossPctDown: 25,
+				RttMsUp: 4000, RttMsDown: 5000,
+			},
+			// consecutiveUp/Down=2 mirrors the cold-start scenario;
+			// a pre-fix ramp would dip the WAN for one cycle before
+			// recovering, generating a down+up Decision pair.
+			Hysteresis: config.Hysteresis{ConsecutiveUp: 2, ConsecutiveDown: 2},
+		},
+	}
+	d := testDaemon(t, cfg)
+	markHealthy(d, "primary")
+
+	// Partial-window Lost first sample (route hasn't converged).
+	// Without the gate, hysteresis would Seed unhealthy here.
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats: probe.FamilyStats{
+			LossRatio: 1.0,
+			// WindowFilled deliberately omitted (zero == false).
+		},
+	})
+	if d.wans["primary"].families[probe.FamilyV4].cooked {
+		t.Error("cooked = true after a partial-window Sample; want deferred")
+	}
+	if !d.wans["primary"].healthy() {
+		t.Error("aggregate flipped unhealthy on a partial-window Lost sample; want carrier-only-healthy")
+	}
+
+	// First full Window now lands healthy. Seed adopts it.
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats: probe.FamilyStats{
+			LossRatio: 0.0, RTTMicros: 10_000,
+			WindowFilled: true,
+		},
+	})
+	if !d.wans["primary"].families[probe.FamilyV4].cooked {
+		t.Error("cooked = false after a full-Window seed")
+	}
+	if !d.wans["primary"].families[probe.FamilyV4].healthy {
+		t.Error("family not healthy after a healthy full-Window seed — Seed didn't fire on first filled Window")
 	}
 }
 
@@ -802,7 +870,10 @@ func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) 
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
-		Stats:  probe.FamilyStats{LossRatio: 0.95, RTTMicros: 50_000},
+		Stats: probe.FamilyStats{
+			LossRatio: 0.95, RTTMicros: 50_000,
+			WindowFilled: true,
+		},
 	})
 
 	if !d.wans["primary"].healthy() {
