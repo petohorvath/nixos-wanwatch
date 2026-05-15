@@ -2,9 +2,11 @@ package state
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -411,6 +413,111 @@ func TestCappedBuffer(t *testing.T) {
 	}
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("over cap: String() = %q, want a truncation marker", got)
+	}
+}
+
+// TestCancelHookPgrpKillSucceeds: the happy path. SIGKILL goes to
+// the negated PID (the process group), nil is returned, and the
+// direct-process fallback is never invoked.
+func TestCancelHookPgrpKillSucceeds(t *testing.T) {
+	t.Parallel()
+	var pgrpArgPid int
+	var pgrpArgSig syscall.Signal
+	pgrpKill := func(pid int, sig syscall.Signal) error {
+		pgrpArgPid = pid
+		pgrpArgSig = sig
+		return nil
+	}
+	procKillCalls := 0
+	procKill := func() error {
+		procKillCalls++
+		return nil
+	}
+
+	if err := cancelHook(42, pgrpKill, procKill); err != nil {
+		t.Errorf("cancelHook = %v, want nil", err)
+	}
+	if pgrpArgPid != -42 {
+		t.Errorf("pgrpKill called with pid=%d, want -42 (negative PID targets the pgrp)", pgrpArgPid)
+	}
+	if pgrpArgSig != syscall.SIGKILL {
+		t.Errorf("pgrpKill signal = %v, want SIGKILL", pgrpArgSig)
+	}
+	if procKillCalls != 0 {
+		t.Errorf("procKill calls = %d, want 0 — pgrp kill succeeded so no fallback", procKillCalls)
+	}
+}
+
+// TestCancelHookESRCHFallsBackToDirectKill: pgrp kill returns ESRCH
+// (either the child truly exited or it's racing setpgid). The direct
+// Process.Kill closes the race window — if the child was alive in
+// the parent's pgrp, this is what actually kills it.
+func TestCancelHookESRCHFallsBackToDirectKill(t *testing.T) {
+	t.Parallel()
+	pgrpKill := func(_ int, _ syscall.Signal) error { return syscall.ESRCH }
+	procKillCalls := 0
+	procKill := func() error {
+		procKillCalls++
+		return nil // direct kill succeeded → race lost case
+	}
+
+	if err := cancelHook(42, pgrpKill, procKill); err != nil {
+		t.Errorf("cancelHook = %v, want nil (direct kill closed the race)", err)
+	}
+	if procKillCalls != 1 {
+		t.Errorf("procKill calls = %d, want 1 (fallback must fire on ESRCH)", procKillCalls)
+	}
+}
+
+// TestCancelHookBothESRCHReportsProcessDone: pgrp kill ESRCH +
+// direct kill ErrProcessDone = the child genuinely exited. Surface
+// that to exec.Cmd so it doesn't run its WaitDelay-driven fallback
+// kill (PLAN §5.5 wraps this in 'process already finished').
+func TestCancelHookBothESRCHReportsProcessDone(t *testing.T) {
+	t.Parallel()
+	pgrpKill := func(_ int, _ syscall.Signal) error { return syscall.ESRCH }
+	procKill := func() error { return os.ErrProcessDone }
+
+	err := cancelHook(42, pgrpKill, procKill)
+	if !errors.Is(err, os.ErrProcessDone) {
+		t.Errorf("cancelHook = %v, want os.ErrProcessDone", err)
+	}
+}
+
+// TestCancelHookPgrpKillNonESRCHErrorPropagates: a kill failure
+// that's not ESRCH (EPERM under hardened LSM, for instance) must
+// not fall back to Process.Kill — the fallback would mask a real
+// permissions/configuration problem behind a misleading success.
+func TestCancelHookPgrpKillNonESRCHErrorPropagates(t *testing.T) {
+	t.Parallel()
+	pgrpKill := func(_ int, _ syscall.Signal) error { return syscall.EPERM }
+	procKillCalls := 0
+	procKill := func() error {
+		procKillCalls++
+		return nil
+	}
+
+	err := cancelHook(42, pgrpKill, procKill)
+	if !errors.Is(err, syscall.EPERM) {
+		t.Errorf("cancelHook = %v, want syscall.EPERM", err)
+	}
+	if procKillCalls != 0 {
+		t.Errorf("procKill calls = %d, want 0 — fallback must not mask non-ESRCH errors", procKillCalls)
+	}
+}
+
+// TestCancelHookDirectKillError: if both kills error and the second
+// error is not ErrProcessDone, propagate the second error so the
+// caller sees the real failure mode (e.g. a transient kill failure
+// distinct from "already done").
+func TestCancelHookDirectKillError(t *testing.T) {
+	t.Parallel()
+	pgrpKill := func(_ int, _ syscall.Signal) error { return syscall.ESRCH }
+	procKill := func() error { return syscall.EPERM }
+
+	err := cancelHook(42, pgrpKill, procKill)
+	if !errors.Is(err, syscall.EPERM) {
+		t.Errorf("cancelHook = %v, want syscall.EPERM", err)
 	}
 }
 

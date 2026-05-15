@@ -179,12 +179,7 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 	// child, orphaning anything the hook backgrounded.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			// Group already gone — the process exited as the deadline hit.
-			return os.ErrProcessDone
-		}
-		return err
+		return cancelHook(cmd.Process.Pid, syscall.Kill, cmd.Process.Kill)
 	}
 	err := cmd.Run()
 	dur := time.Since(start)
@@ -207,6 +202,44 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 		return res
 	}
 	return res
+}
+
+// cancelHook is the body of cmd.Cancel for hook subprocesses. SIGKILL
+// the whole process group first so backgrounded descendants die with
+// the script (see TestRunTimeoutKillsBackgroundedDescendants), and on
+// ESRCH fall back to a direct os.Process.Kill to disambiguate two
+// otherwise-indistinguishable cases:
+//
+//  1. The child has truly exited and its process group is gone.
+//  2. The child is alive but hasn't reached its own `setpgid(0,0)`
+//     yet — the fork→setpgid race documented in
+//     syscall/exec_linux.go:391. In this window the child's pgid
+//     equals the *parent's* pgid, so kill(-childPid, …) targets a
+//     nonexistent group and returns ESRCH even though the child is
+//     running.
+//
+// The direct Process.Kill closes the race in (2). If it returns
+// os.ErrProcessDone instead, we know we were in case (1) and
+// propagate that to exec.Cmd so it skips its WaitDelay-driven
+// fallback kill.
+//
+// pgrpKill and procKill are seams for the test — production wires
+// them to syscall.Kill and cmd.Process.Kill.
+func cancelHook(pid int, pgrpKill func(int, syscall.Signal) error, procKill func() error) error {
+	err := pgrpKill(-pid, syscall.SIGKILL)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
+	if killErr := procKill(); killErr != nil {
+		if errors.Is(killErr, os.ErrProcessDone) {
+			return os.ErrProcessDone
+		}
+		return killErr
+	}
+	return nil
 }
 
 // cappedBuffer is an io.Writer that keeps the first `limit` bytes
