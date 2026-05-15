@@ -203,19 +203,34 @@ func TestHandleProbeResultDefersSeedUntilWindowFilled(t *testing.T) {
 
 	// Partial-window Lost first sample (route hasn't converged).
 	// Without the gate, hysteresis would Seed unhealthy here.
+	partialStats := probe.FamilyStats{
+		LossRatio: 1.0,
+		RTTMicros: 0,
+		// WindowFilled deliberately omitted (zero == false).
+	}
 	d.handleProbeResult(t.Context(), probe.ProbeResult{
 		Wan:    "primary",
 		Family: probe.FamilyV4,
-		Stats: probe.FamilyStats{
-			LossRatio: 1.0,
-			// WindowFilled deliberately omitted (zero == false).
-		},
+		Stats:  partialStats,
 	})
-	if d.wans["primary"].families[probe.FamilyV4].cooked {
+	fs := d.wans["primary"].families[probe.FamilyV4]
+	if fs.cooked {
 		t.Error("cooked = true after a partial-window Sample; want deferred")
 	}
 	if !d.wans["primary"].healthy() {
 		t.Error("aggregate flipped unhealthy on a partial-window Lost sample; want carrier-only-healthy")
+	}
+	// Live stats absorbed even in the deferred branch — operators
+	// rely on Prometheus showing real RTT/loss before hysteresis
+	// has cooked, so fs.stats and the per-family probe metrics
+	// must reflect the ProbeResult either way.
+	if fs.stats.LossRatio != partialStats.LossRatio {
+		t.Errorf("fs.stats.LossRatio = %v after partial probe, want %v (live stats not absorbed)",
+			fs.stats.LossRatio, partialStats.LossRatio)
+	}
+	if v := readGauge(t, d.metrics.ProbeLoss.WithLabelValues("primary", "v4")); v != partialStats.LossRatio {
+		t.Errorf("wanwatch_probe_loss_ratio = %v after partial probe, want %v",
+			v, partialStats.LossRatio)
 	}
 
 	// First full Window now lands healthy. Seed adopts it.
@@ -232,6 +247,139 @@ func TestHandleProbeResultDefersSeedUntilWindowFilled(t *testing.T) {
 	}
 	if !d.wans["primary"].families[probe.FamilyV4].healthy {
 		t.Error("family not healthy after a healthy full-Window seed — Seed didn't fire on first filled Window")
+	}
+}
+
+// TestColdStartCookHealthyDoesNotBumpDecisions: PLAN §8 cold-start
+// requires hysteresis to seed from the first healthy probe Window
+// rather than ramp up from false, so a WAN that's already healthy
+// via carrier-only never flaps during warm-up. recomputeGroup
+// fires the carrier-up Decision once; the subsequent cook with a
+// healthy raw verdict must not produce a second Decision. The VM
+// cold-start scenario asserts this end-to-end; this is the
+// unit-level pin against a refactor accidentally breaking the
+// invariant the VM test depends on.
+func TestColdStartCookHealthyDoesNotBumpDecisions(t *testing.T) {
+	t.Parallel()
+	cfg := testCfgWithGroup()
+	// testCfg's default Thresholds are all zero, which would make
+	// any non-zero RTT trip lossPctUp/rttMsUp and seed unhealthy.
+	// Set realistic ones so a healthy probe really reads as healthy.
+	cfg.Wans["primary"] = config.Wan{
+		Name:      "primary",
+		Interface: "eth0",
+		Probe: config.Probe{
+			Targets:    config.Targets{V4: []string{"1.1.1.1"}},
+			Thresholds: config.Thresholds{LossPctUp: 5, LossPctDown: 25, RttMsUp: 4000, RttMsDown: 5000},
+			Hysteresis: config.Hysteresis{ConsecutiveUp: 2, ConsecutiveDown: 2},
+		},
+	}
+	d := testDaemon(t, cfg)
+	markHealthy(d, "primary", "backup")
+
+	g := d.groups["home"]
+	// Carrier-up Decision lands primary as active. decisionsTotal=1.
+	d.recomputeGroup(t.Context(), g, reasonCarrier)
+	if g.decisionsTotal != 1 {
+		t.Fatalf("setup: decisionsTotal = %d, want 1 (cold-start carrier Decision)", g.decisionsTotal)
+	}
+	if !g.active.Has || g.active.Wan != "primary" {
+		t.Fatalf("setup: active = %+v, want primary", g.active)
+	}
+
+	// First full Window for v4 lands healthy. Cook fires;
+	// fs.healthy goes true; ws.healthy() was already true via
+	// cold-start carrier-only, stays true now via cooked-healthy.
+	// No aggregate flip → no recomputeAffectedGroups call → no
+	// Decision counter bump.
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats: probe.FamilyStats{
+			LossRatio: 0, RTTMicros: 10_000,
+			WindowFilled: true,
+		},
+	})
+
+	fs := d.wans["primary"].families[probe.FamilyV4]
+	if !fs.cooked {
+		t.Fatalf("post-cook precondition: family.cooked = false, want true")
+	}
+	if !fs.healthy {
+		t.Fatalf("post-cook precondition: family.healthy = false, want true (Seed adopted raw=true)")
+	}
+	if g.decisionsTotal != 1 {
+		t.Errorf("decisionsTotal = %d, want 1 — cold-start cook on a healthy Window must not produce a health Decision",
+			g.decisionsTotal)
+	}
+}
+
+// TestColdStartManyPartialWindowsThenCook: a cold-start that takes
+// more than one probe cycle to fill the Window (e.g. multi-target
+// probes where targets fill at different rates, or simply a config
+// with windowSize > 1 — the common case) must keep the daemon in
+// carrier-only mode through *every* partial-window ProbeResult, and
+// only cook on the cycle that finally lands WindowFilled=true. Pins
+// that the deferred branch is idempotent across an arbitrary ramp,
+// not a one-shot no-op.
+func TestColdStartManyPartialWindowsThenCook(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	cfg.Wans["primary"] = config.Wan{
+		Name:      "primary",
+		Interface: "eth0",
+		Probe: config.Probe{
+			Targets: config.Targets{V4: []string{"1.1.1.1"}},
+			Thresholds: config.Thresholds{
+				LossPctUp: 5, LossPctDown: 25,
+				RttMsUp: 4000, RttMsDown: 5000,
+			},
+			Hysteresis: config.Hysteresis{ConsecutiveUp: 2, ConsecutiveDown: 2},
+		},
+	}
+	d := testDaemon(t, cfg)
+	markHealthy(d, "primary")
+
+	// Three partial-window probes. All must defer; the daemon's
+	// cold-start carrier-only health must hold through every one.
+	// The LossRatio is varied so a buggy gate that triggered on
+	// "raw verdict bad" rather than "window not filled" would
+	// surface here.
+	partials := []float64{1.0, 0.5, 0.2}
+	for i, loss := range partials {
+		d.handleProbeResult(t.Context(), probe.ProbeResult{
+			Wan:    "primary",
+			Family: probe.FamilyV4,
+			Stats: probe.FamilyStats{
+				LossRatio: loss,
+				RTTMicros: 10_000,
+				// WindowFilled deliberately omitted (zero == false).
+			},
+		})
+		fs := d.wans["primary"].families[probe.FamilyV4]
+		if fs.cooked {
+			t.Fatalf("partial probe %d (loss=%v): cooked=true, want still uncooked", i, loss)
+		}
+		if !d.wans["primary"].healthy() {
+			t.Fatalf("partial probe %d (loss=%v): aggregate not healthy via carrier-only cold-start", i, loss)
+		}
+	}
+
+	// Fourth probe completes the Window, healthy. Cook fires.
+	d.handleProbeResult(t.Context(), probe.ProbeResult{
+		Wan:    "primary",
+		Family: probe.FamilyV4,
+		Stats: probe.FamilyStats{
+			LossRatio: 0, RTTMicros: 10_000,
+			WindowFilled: true,
+		},
+	})
+	fs := d.wans["primary"].families[probe.FamilyV4]
+	if !fs.cooked {
+		t.Error("after the filled Window: cooked=false, want true (gate should release)")
+	}
+	if !fs.healthy {
+		t.Error("after the filled Window with raw=true: family.healthy=false, want true")
 	}
 }
 
