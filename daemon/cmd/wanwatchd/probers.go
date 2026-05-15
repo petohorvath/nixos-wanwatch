@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"net"
 	"slices"
 	"time"
 
@@ -75,47 +74,25 @@ func identKeysFor(cfg *config.Config) []probe.IdentKey {
 	return keys
 }
 
-// familiesFromTargets walks a probe-targets list and reports which
-// IP families appear. Mirrors `wanwatch.probe.families` on the Nix
-// side — both use libnet's predicates conceptually; here we use
-// net.ParseIP since the daemon receives targets as strings.
-func familiesFromTargets(targets []string) struct{ v4, v6 bool } {
-	var out struct{ v4, v6 bool }
-	for _, t := range targets {
-		ip := net.ParseIP(t)
-		if ip == nil {
-			continue
-		}
-		if ip.To4() != nil {
-			out.v4 = true
-		} else {
-			out.v6 = true
-		}
+// familiesFromTargets reports which IP families the WAN serves
+// (which Pinger goroutines to spawn for it). Mirrors
+// `wanwatch.probe.families` on the Nix side — both reduce to "is
+// the per-family bucket non-empty?" now that the config layer keeps
+// the buckets disjoint.
+func familiesFromTargets(t config.Targets) struct{ v4, v6 bool } {
+	return struct{ v4, v6 bool }{
+		v4: len(t.V4) > 0,
+		v6: len(t.V6) > 0,
 	}
-	return out
 }
 
-// targetsFor selects the targets to probe for `wan` in `family`
-// by filtering `wan.Probe.Targets` to the literals of that family.
-// Mixed-family lists are the norm (a v4+v6 WAN declares both
-// upstream); the daemon spawns one pinger per (WAN, family) and
-// each pinger expects only same-family targets — handing it
-// cross-family literals trips `probe.Pinger.Run`'s assert.
-//
-// Per-family target lists (a future `probe.targetsV4 /
-// targetsV6` override) would replace this filter; tracked in
-// TODO.md.
+// targetsFor returns the probe targets for `wan` in `family` —
+// straight from the per-family bucket. The lib + config.Validate
+// enforce that each bucket only holds same-family literals, so no
+// runtime filtering is needed here.
 func targetsFor(wan config.Wan, family probe.Family) []string {
-	out := make([]string, 0, len(wan.Probe.Targets))
-	for _, t := range wan.Probe.Targets {
-		ip := net.ParseIP(t)
-		if ip == nil {
-			continue
-		}
-		isV4 := ip.To4() != nil
-		if (family == probe.FamilyV4) == isV4 {
-			out = append(out, t)
-		}
+	if family == probe.FamilyV4 {
+		return wan.Probe.Targets.V4
 	}
-	return out
+	return wan.Probe.Targets.V6
 }

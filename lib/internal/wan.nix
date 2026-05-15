@@ -21,8 +21,9 @@
                     owns the construction; users don't pre-build).
 
   The families the WAN handles are derived from `probe.targets`:
-  a v4 IP in the list means the WAN serves v4, a v6 IP means it
-  serves v6. There is no separate family declaration.
+  `targets.v4` non-empty means the WAN serves v4, `targets.v6`
+  non-empty means it serves v6. There is no separate family
+  declaration.
 
   ===== make =====
 

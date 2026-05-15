@@ -28,31 +28,29 @@ let
   dualStackInput = {
     name = "primary";
     interface = "eth0";
-    probe = {
-      targets = [
-        "1.1.1.1"
-        "2606:4700:4700::1111"
-      ];
+    probe.targets = {
+      v4 = [ "1.1.1.1" ];
+      v6 = [ "2606:4700:4700::1111" ];
     };
   };
 
   v4OnlyInput = {
     name = "primary";
     interface = "eth0";
-    probe.targets = [ "1.1.1.1" ];
+    probe.targets.v4 = [ "1.1.1.1" ];
   };
 
   v6OnlyInput = {
     name = "primary";
     interface = "eth0";
-    probe.targets = [ "2606:4700:4700::1111" ];
+    probe.targets.v6 = [ "2606:4700:4700::1111" ];
   };
 
   ptpInput = {
     name = "vpn";
     interface = "wg0";
     pointToPoint = true;
-    probe.targets = [ "1.1.1.1" ];
+    probe.targets.v4 = [ "1.1.1.1" ];
   };
 in
 {
@@ -127,7 +125,11 @@ in
   };
 
   testTargetsForwardedFromProbe = {
-    expr = builtins.length (wan.make dualStackInput).probe.targets;
+    expr =
+      let
+        t = (wan.make dualStackInput).probe.targets;
+      in
+      builtins.length t.v4 + builtins.length t.v6;
     expected = 2;
   };
 
@@ -202,7 +204,7 @@ in
   # ===== Error: wanInvalidProbe (forwarded from probe.tryMake) =====
 
   testForwardsProbeError = {
-    expr = errorMatches "wanInvalidProbe" (tryError (dualStackInput // { probe.targets = [ ]; }));
+    expr = errorMatches "wanInvalidProbe" (tryError (dualStackInput // { probe.targets = { }; }));
     expected = true;
   };
 
@@ -216,7 +218,7 @@ in
           name = "1bad"; # wanInvalidName
           interface = "eth 0"; # wanInvalidInterface
           pointToPoint = "yes"; # wanInvalidPointToPoint
-          probe.targets = [ "1.1.1.1" ]; # otherwise valid probe
+          probe.targets.v4 = [ "1.1.1.1" ]; # otherwise valid probe
         };
         kinds = [
           "wanInvalidName"

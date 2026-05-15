@@ -24,7 +24,7 @@ let
   # submodule sees `name = "value"`.
   baseConfig = {
     interface = "eth0";
-    probe.targets = [ "1.1.1.1" ];
+    probe.targets.v4 = [ "1.1.1.1" ];
   };
 in
 {
@@ -75,7 +75,10 @@ in
       interface = "eth0";
       pointToPoint = false;
       probeMethod = "icmp";
-      probeTargets = [ "1.1.1.1" ];
+      probeTargets = {
+        v4 = [ "1.1.1.1" ];
+        v6 = [ ];
+      };
     };
   };
 
@@ -104,7 +107,7 @@ in
       baseConfig
       // {
         probe = {
-          targets = [ "1.1.1.1" ];
+          targets.v4 = [ "1.1.1.1" ];
           method = "tcp";
         };
       }

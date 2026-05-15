@@ -65,12 +65,12 @@ pkgs.testers.runNixOSTest {
           primary = {
             interface = "wan0";
             pointToPoint = true;
-            probe.targets = [ "192.0.2.1" ];
+            probe.targets.v4 = [ "192.0.2.1" ];
           };
           backup = {
             interface = "wan1";
             pointToPoint = true;
-            probe.targets = [ "100.64.0.1" ];
+            probe.targets.v4 = [ "100.64.0.1" ];
           };
         };
         groups.home-uplink.members = [

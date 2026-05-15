@@ -86,7 +86,10 @@ func testCfg() *config.Config {
 				Name:      "primary",
 				Interface: "eth0",
 				Probe: config.Probe{
-					Targets: []string{"1.1.1.1", "2606:4700:4700::1111"},
+					Targets: config.Targets{
+						V4: []string{"1.1.1.1"},
+						V6: []string{"2606:4700:4700::1111"},
+					},
 				},
 			},
 			"backup": {
@@ -94,7 +97,9 @@ func testCfg() *config.Config {
 				Interface: "wwan0",
 				// v4-only WAN — only a v4 probe target.
 				Probe: config.Probe{
-					Targets: []string{"8.8.8.8"},
+					Targets: config.Targets{
+						V4: []string{"8.8.8.8"},
+					},
 				},
 			},
 		},

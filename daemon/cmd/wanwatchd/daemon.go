@@ -571,7 +571,7 @@ func (d *daemon) writeStateSnapshot() {
 				RTTSeconds:    float64(fs.stats.RTTMicros) / 1e6,
 				JitterSeconds: float64(fs.stats.JitterMicros) / 1e6,
 				LossRatio:     fs.stats.LossRatio,
-				Targets:       ws.cfg.Probe.Targets,
+				Targets:       targetsFor(ws.cfg, fam),
 			}
 		}
 		snap.Wans[ws.name] = state.Wan{

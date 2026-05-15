@@ -60,14 +60,14 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 | `pointToPoint` | bool | no (default `false`) | When true the daemon installs `scope link` default routes (PPP / WireGuard / GRE / tun); when false the daemon discovers the gateway via netlink from the kernel's main routing table at runtime. |
 | `probe` | object | yes | Probe configuration; shape below. |
 
-The families a WAN serves are derived from `probe.targets`: a v4 IP literal means the WAN serves v4, a v6 literal means it serves v6. There is no separate gateway / family declaration — the daemon learns the next-hop dynamically and surfaces it in [`state.json`](./daemon-state.md) under `wans.<name>.gateways.{v4,v6}`.
+The families a WAN serves are derived from `probe.targets`: a non-empty `targets.v4` means the WAN serves v4, a non-empty `targets.v6` means it serves v6. There is no separate gateway / family declaration — the daemon learns the next-hop dynamically and surfaces it in [`state.json`](./daemon-state.md) under `wans.<name>.gateways.{v4,v6}`.
 
 ## `wans.<name>.probe`
 
 ```json
 {
   "method": "icmp",
-  "targets": [ "1.1.1.1", "2606:4700:4700::1111" ],
+  "targets": { "v4": [ "1.1.1.1" ], "v6": [ "2606:4700:4700::1111" ] },
   "intervalMs": 1000,
   "timeoutMs": 1000,
   "windowSize": 10,
@@ -88,7 +88,7 @@ The families a WAN serves are derived from `probe.targets`: a v4 IP literal mean
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `method` | string | `"icmp"` | Probe method. v1: `icmp` only. |
-| `targets` | array<string> | required | IP literals — v4 or v6. Non-empty. |
+| `targets` | object | required | Per-family target lists: `{ "v4": [...], "v6": [...] }`. At least one of `v4` / `v6` must be non-empty; each item must be an IP literal of its bucket's family. |
 | `intervalMs` | int | `1000` | Time between cycles. |
 | `timeoutMs` | int | `1000` | Per-cycle read deadline. |
 | `windowSize` | int | `10` | Sliding-window capacity. |

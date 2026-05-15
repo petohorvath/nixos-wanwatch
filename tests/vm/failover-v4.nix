@@ -71,7 +71,7 @@ pkgs.testers.runNixOSTest {
             interface = "wan0";
             pointToPoint = true;
             probe = {
-              targets = [ "192.0.2.1" ];
+              targets.v4 = [ "192.0.2.1" ];
               # Stretch the probe loop so cooked verdicts don't
               # land during the test — carrier alone drives the
               # Decision under PLAN §8 cold-start.
@@ -87,7 +87,7 @@ pkgs.testers.runNixOSTest {
             interface = "wan1";
             pointToPoint = true;
             probe = {
-              targets = [ "100.64.0.1" ];
+              targets.v4 = [ "100.64.0.1" ];
               intervalMs = 600000;
               timeoutMs = 30000;
               hysteresis = {

@@ -62,7 +62,7 @@ pkgs.testers.runNixOSTest {
             interface = "wan0";
             pointToPoint = true;
             probe = {
-              targets = [ "2001:db8::1" ];
+              targets.v6 = [ "2001:db8::1" ];
               intervalMs = 600000;
               timeoutMs = 30000;
               hysteresis = {
@@ -75,7 +75,7 @@ pkgs.testers.runNixOSTest {
             interface = "wan1";
             pointToPoint = true;
             probe = {
-              targets = [ "2001:db8:1::1" ];
+              targets.v6 = [ "2001:db8:1::1" ];
               intervalMs = 600000;
               timeoutMs = 30000;
               hysteresis = {

@@ -77,7 +77,7 @@ pkgs.testers.runNixOSTest {
           interface = "wan0";
           pointToPoint = true;
           probe = {
-            targets = [ "192.0.2.1" ];
+            targets.v4 = [ "192.0.2.1" ];
             intervalMs = 600000;
             timeoutMs = 30000;
             hysteresis = {

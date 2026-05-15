@@ -6,12 +6,12 @@ This doc walks through that model end-to-end with a working configuration.
 
 ## A single WAN
 
-A WAN is an egress interface; the daemon learns its current default-route gateway from the kernel at runtime. v4-only, v6-only, and dual-stack are all valid — the families the WAN serves are derived from `probe.targets` (v4 literals mean it serves v4, v6 literals mean it serves v6).
+A WAN is an egress interface; the daemon learns its current default-route gateway from the kernel at runtime. v4-only, v6-only, and dual-stack are all valid — the families the WAN serves are derived from `probe.targets` (a non-empty `targets.v4` means it serves v4, a non-empty `targets.v6` means it serves v6).
 
 ```nix
 services.wanwatch.wans.primary = {
   interface = "eth0";
-  probe.targets = [ "1.1.1.1" "8.8.8.8" ];
+  probe.targets.v4 = [ "1.1.1.1" "8.8.8.8" ];
 };
 ```
 
@@ -21,7 +21,7 @@ For point-to-point links with no broadcast next-hop (PPP, WireGuard, GRE, tun), 
 services.wanwatch.wans.lte = {
   interface = "wwan0";
   pointToPoint = true;
-  probe.targets = [ "8.8.8.8" ];
+  probe.targets.v4 = [ "8.8.8.8" ];
 };
 ```
 
@@ -29,7 +29,7 @@ The Probe is the *configuration* of how the WAN is tested, not the test itself. 
 
 ```nix
 probe = {
-  targets = [ "1.1.1.1" "9.9.9.9" ];
+  targets.v4 = [ "1.1.1.1" "9.9.9.9" ];
   intervalMs = 500;
   windowSize = 20;
   thresholds = {

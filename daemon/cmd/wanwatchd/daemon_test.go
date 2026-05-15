@@ -97,7 +97,7 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 		Name:      "primary",
 		Interface: "eth0",
 		Probe: config.Probe{
-			Targets: []string{"1.1.1.1"},
+			Targets: config.Targets{V4: []string{"1.1.1.1"}},
 			Thresholds: config.Thresholds{
 				LossPctUp: 10, LossPctDown: 20,
 				RttMsUp: 100, RttMsDown: 200,
@@ -140,7 +140,7 @@ func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
 		Name:      "primary",
 		Interface: "eth0",
 		Probe: config.Probe{
-			Targets: []string{"1.1.1.1"},
+			Targets: config.Targets{V4: []string{"1.1.1.1"}},
 			Thresholds: config.Thresholds{
 				LossPctUp: 10, LossPctDown: 20,
 				RttMsUp: 100, RttMsDown: 200,
@@ -784,7 +784,10 @@ func TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate(t *testing.T) 
 		Name:      "primary",
 		Interface: "eth0",
 		Probe: config.Probe{
-			Targets:            []string{"1.1.1.1", "2606:4700:4700::1111"},
+			Targets: config.Targets{
+				V4: []string{"1.1.1.1"},
+				V6: []string{"2606:4700:4700::1111"},
+			},
 			Thresholds:         config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
 			Hysteresis:         config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
 			FamilyHealthPolicy: "any",
@@ -944,7 +947,10 @@ func TestRetryPendingApplyConverges(t *testing.T) {
 		Name:      "primary",
 		Interface: "eth0",
 		Probe: config.Probe{
-			Targets:    []string{"1.1.1.1", "2606:4700:4700::1111"},
+			Targets: config.Targets{
+				V4: []string{"1.1.1.1"},
+				V6: []string{"2606:4700:4700::1111"},
+			},
 			Thresholds: config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
 			Hysteresis: config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
 		},

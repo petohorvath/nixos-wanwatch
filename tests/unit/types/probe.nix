@@ -15,7 +15,7 @@ let
 
   # Minimum valid probe input — only `targets` is required.
   minimalProbe = {
-    targets = [ "1.1.1.1" ];
+    targets.v4 = [ "1.1.1.1" ];
   };
 in
 {
@@ -131,7 +131,10 @@ in
     expr = evalType types.probe minimalProbe;
     expected = {
       method = "icmp";
-      targets = [ "1.1.1.1" ];
+      targets = {
+        v4 = [ "1.1.1.1" ];
+        v6 = [ ];
+      };
       intervalMs = 500;
       timeoutMs = 1000;
       windowSize = 10;
@@ -149,18 +152,18 @@ in
     };
   };
 
-  testProbeAcceptsMixedFamilyTargets = {
+  testProbeAcceptsBothFamilies = {
     expr =
       (evalType types.probe {
-        targets = [
-          "1.1.1.1"
-          "2606:4700:4700::1111"
-        ];
+        targets = {
+          v4 = [ "1.1.1.1" ];
+          v6 = [ "2606:4700:4700::1111" ];
+        };
       }).targets;
-    expected = [
-      "1.1.1.1"
-      "2606:4700:4700::1111"
-    ];
+    expected = {
+      v4 = [ "1.1.1.1" ];
+      v6 = [ "2606:4700:4700::1111" ];
+    };
   };
 
   testProbeRejectsBadMethod = {
@@ -169,7 +172,14 @@ in
   };
 
   testProbeRejectsBadTarget = {
-    expr = evalTypeFails types.probe { targets = [ "not-an-ip" ]; };
+    expr = evalTypeFails types.probe { targets.v4 = [ "not-an-ip" ]; };
+    expected = true;
+  };
+
+  testProbeRejectsLegacyListTargets = {
+    # The pre-per-family shape (targets as a flat list) must fail
+    # type-check now — buckets are mandatory.
+    expr = evalTypeFails types.probe { targets = [ "1.1.1.1" ]; };
     expected = true;
   };
 
@@ -181,7 +191,7 @@ in
   testProbePreservesFullSpec = {
     expr = evalType types.probe {
       method = "icmp";
-      targets = [ "8.8.8.8" ];
+      targets.v4 = [ "8.8.8.8" ];
       intervalMs = 250;
       timeoutMs = 500;
       windowSize = 20;
@@ -199,7 +209,10 @@ in
     };
     expected = {
       method = "icmp";
-      targets = [ "8.8.8.8" ];
+      targets = {
+        v4 = [ "8.8.8.8" ];
+        v6 = [ ];
+      };
       intervalMs = 250;
       timeoutMs = 500;
       windowSize = 20;

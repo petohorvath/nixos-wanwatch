@@ -58,7 +58,7 @@ pkgs.testers.runNixOSTest {
           interface = "eth1";
           pointToPoint = true;
           probe = {
-            targets = [ "192.168.1.1" ];
+            targets.v4 = [ "192.168.1.1" ];
             # Long enough that the cold-start carrier Selection
             # lands before the first probe Window — see header.
             intervalMs = 1000;

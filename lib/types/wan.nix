@@ -73,9 +73,9 @@ let
           type = probeTypes.probe;
           description = ''
             Probe configuration for this WAN. The families the
-            WAN handles are derived from `probe.targets`: a v4
-            literal means v4 is served; a v6 literal means v6 is
-            served.
+            WAN handles are derived from `probe.targets`: a
+            non-empty `targets.v4` means v4 is served; a non-empty
+            `targets.v6` means v6 is served.
           '';
         };
       };

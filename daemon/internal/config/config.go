@@ -75,13 +75,22 @@ type Wan struct {
 // Probe mirrors `wanwatch.probe.toJSONValue`.
 type Probe struct {
 	Method             string     `json:"method"`
-	Targets            []string   `json:"targets"`
+	Targets            Targets    `json:"targets"`
 	IntervalMs         int        `json:"intervalMs"`
 	TimeoutMs          int        `json:"timeoutMs"`
 	WindowSize         int        `json:"windowSize"`
 	Thresholds         Thresholds `json:"thresholds"`
 	Hysteresis         Hysteresis `json:"hysteresis"`
 	FamilyHealthPolicy string     `json:"familyHealthPolicy"`
+}
+
+// Targets is the per-family probe-target list mirroring
+// `wanwatch.probe.toJSONValue.targets`. At least one of V4/V6 must
+// be non-empty — the Nix lib enforces this at render time and
+// Validate mirrors the check here.
+type Targets struct {
+	V4 []string `json:"v4"`
+	V6 []string `json:"v6"`
 }
 
 // Thresholds mirrors the nested probe.thresholds submodule.
@@ -197,8 +206,8 @@ func validateProbe(wanKey string, p Probe) error {
 	if p.Method != "icmp" {
 		return invalidf("wans[%q].probe.method = %q, want \"icmp\"", wanKey, p.Method)
 	}
-	if len(p.Targets) == 0 {
-		return invalidf("wans[%q].probe.targets is empty", wanKey)
+	if len(p.Targets.V4) == 0 && len(p.Targets.V6) == 0 {
+		return invalidf("wans[%q].probe.targets has no entries (both v4 and v6 empty)", wanKey)
 	}
 	if p.IntervalMs <= 0 {
 		return invalidf("wans[%q].probe.intervalMs = %d, want > 0", wanKey, p.IntervalMs)

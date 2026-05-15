@@ -43,64 +43,62 @@ func TestIdentKeysForIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestTargetsForFiltersByFamily(t *testing.T) {
+func TestTargetsForReturnsPerFamilyBucket(t *testing.T) {
 	t.Parallel()
 	wan := config.Wan{
 		Probe: config.Probe{
-			Targets: []string{"1.1.1.1", "2606:4700:4700::1111", "8.8.8.8", "not-an-ip"},
+			Targets: config.Targets{
+				V4: []string{"1.1.1.1", "8.8.8.8"},
+				V6: []string{"2606:4700:4700::1111"},
+			},
 		},
 	}
 
-	v4 := targetsFor(wan, probe.FamilyV4)
-	want4 := []string{"1.1.1.1", "8.8.8.8"}
-	if !equalUnorderedStrings(v4, want4) {
-		t.Errorf("targetsFor(v4) = %v, want %v", v4, want4)
+	if got := targetsFor(wan, probe.FamilyV4); !equalUnorderedStrings(got, []string{"1.1.1.1", "8.8.8.8"}) {
+		t.Errorf("targetsFor(v4) = %v, want [1.1.1.1 8.8.8.8]", got)
 	}
-
-	v6 := targetsFor(wan, probe.FamilyV6)
-	want6 := []string{"2606:4700:4700::1111"}
-	if !equalUnorderedStrings(v6, want6) {
-		t.Errorf("targetsFor(v6) = %v, want %v", v6, want6)
+	if got := targetsFor(wan, probe.FamilyV6); !equalUnorderedStrings(got, []string{"2606:4700:4700::1111"}) {
+		t.Errorf("targetsFor(v6) = %v, want [2606:4700:4700::1111]", got)
 	}
 }
 
-func TestTargetsForEmpty(t *testing.T) {
+func TestTargetsForEmptyBucket(t *testing.T) {
 	t.Parallel()
 	wan := config.Wan{Probe: config.Probe{}}
 	if got := targetsFor(wan, probe.FamilyV4); len(got) != 0 {
-		t.Errorf("targetsFor on empty Targets = %v, want []", got)
+		t.Errorf("targetsFor on empty Targets = %v, want empty", got)
+	}
+	if got := targetsFor(wan, probe.FamilyV6); len(got) != 0 {
+		t.Errorf("targetsFor on empty Targets = %v, want empty", got)
 	}
 }
 
-func TestTargetsForAllInvalid(t *testing.T) {
+func TestFamiliesFromTargets(t *testing.T) {
 	t.Parallel()
-	// Non-IP strings shouldn't crash and shouldn't be emitted.
-	wan := config.Wan{Probe: config.Probe{Targets: []string{"not-ip", "also.not"}}}
-	if got := targetsFor(wan, probe.FamilyV4); len(got) != 0 {
-		t.Errorf("targetsFor on non-IP input = %v, want []", got)
+	cases := []struct {
+		name string
+		t    config.Targets
+		v4   bool
+		v6   bool
+	}{
+		{"empty", config.Targets{}, false, false},
+		{"v4 only", config.Targets{V4: []string{"1.1.1.1"}}, true, false},
+		{"v6 only", config.Targets{V6: []string{"2606:4700:4700::1111"}}, false, true},
+		{
+			"both",
+			config.Targets{V4: []string{"1.1.1.1"}, V6: []string{"2606:4700:4700::1111"}},
+			true,
+			true,
+		},
 	}
-}
-
-// TestFamiliesFromTargetsSkipsNonIP: non-IP strings in the
-// targets list are silently dropped — the config layer should
-// have rejected them already, but the daemon doesn't trust its
-// input and must not crash on garbage.
-func TestFamiliesFromTargetsSkipsNonIP(t *testing.T) {
-	t.Parallel()
-	got := familiesFromTargets([]string{"not-an-ip", "1.1.1.1", "also.not"})
-	if !got.v4 {
-		t.Error("v4 = false; want true (1.1.1.1 should still count)")
-	}
-	if got.v6 {
-		t.Error("v6 = true; want false (no v6 literal)")
-	}
-}
-
-func TestFamiliesFromTargetsAllInvalid(t *testing.T) {
-	t.Parallel()
-	got := familiesFromTargets([]string{"", "abc", "256.256.256.256"})
-	if got.v4 || got.v6 {
-		t.Errorf("got = %+v, want both false (no valid IPs)", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := familiesFromTargets(tc.t)
+			if got.v4 != tc.v4 || got.v6 != tc.v6 {
+				t.Errorf("familiesFromTargets(%+v) = %+v, want {v4:%v v6:%v}", tc.t, got, tc.v4, tc.v6)
+			}
+		})
 	}
 }
 

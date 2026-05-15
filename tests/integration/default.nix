@@ -26,14 +26,14 @@ let
       wans = {
         primary = {
           interface = "eth0";
-          probe.targets = [
-            "1.1.1.1"
-            "2606:4700:4700::1111"
-          ];
+          probe.targets = {
+            v4 = [ "1.1.1.1" ];
+            v6 = [ "2606:4700:4700::1111" ];
+          };
         };
         backup = {
           interface = "wwan0";
-          probe.targets = [ "8.8.8.8" ];
+          probe.targets.v4 = [ "8.8.8.8" ];
         };
       };
       groups.home-uplink.members = [

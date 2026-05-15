@@ -20,15 +20,15 @@ let
   tryError = helpers.tryError probe;
 
   minimalInput = {
-    targets = [ "1.1.1.1" ];
+    targets.v4 = [ "1.1.1.1" ];
   };
 
   fullInput = {
     method = "icmp";
-    targets = [
-      "1.1.1.1"
-      "2606:4700:4700::1111"
-    ];
+    targets = {
+      v4 = [ "1.1.1.1" ];
+      v6 = [ "2606:4700:4700::1111" ];
+    };
     intervalMs = 250;
     timeoutMs = 200;
     windowSize = 20;
@@ -134,27 +134,27 @@ in
   # ===== Target parsing =====
 
   testTargetsParsedToLibnetValues = {
-    # Each target is parsed into a libnet ip value — the libnet
-    # `isIpv4` / `isIpv6` predicates recognise them.
-    expr = builtins.map (
-      t:
-      if libnet.ip.isIpv4 t then
-        "v4"
-      else if libnet.ip.isIpv6 t then
-        "v6"
-      else
-        "other"
-    ) (probe.make fullInput).targets;
-    expected = [
-      "v4"
-      "v6"
-    ];
+    # Each target is parsed into a libnet ip value of its bucket's
+    # family — the libnet `isIpv4` / `isIpv6` predicates recognise
+    # them and the buckets stay disjoint.
+    expr =
+      let
+        t = (probe.make fullInput).targets;
+      in
+      {
+        v4 = builtins.all libnet.ip.isIpv4 t.v4;
+        v6 = builtins.all libnet.ip.isIpv6 t.v6;
+      };
+    expected = {
+      v4 = true;
+      v6 = true;
+    };
   };
 
   testV4OnlyTargets = {
     expr = probe.families (
       probe.make {
-        targets = [
+        targets.v4 = [
           "1.1.1.1"
           "8.8.8.8"
         ];
@@ -169,7 +169,7 @@ in
   testV6OnlyTargets = {
     expr = probe.families (
       probe.make {
-        targets = [
+        targets.v6 = [
           "2606:4700:4700::1111"
           "2001:4860:4860::8888"
         ];
@@ -184,10 +184,10 @@ in
   testMixedFamilyTargets = {
     expr = probe.families (
       probe.make {
-        targets = [
-          "1.1.1.1"
-          "2606:4700:4700::1111"
-        ];
+        targets = {
+          v4 = [ "1.1.1.1" ];
+          v6 = [ "2606:4700:4700::1111" ];
+        };
       }
     );
     expected = {
@@ -202,7 +202,7 @@ in
     # Specifying only lossPctDown should leave the other three at their defaults.
     expr =
       (probe.make {
-        targets = [ "1.1.1.1" ];
+        targets.v4 = [ "1.1.1.1" ];
         thresholds = {
           lossPctDown = 50;
         };
@@ -218,7 +218,7 @@ in
   testPartialHysteresisMergeWithDefaults = {
     expr =
       (probe.make {
-        targets = [ "1.1.1.1" ];
+        targets.v4 = [ "1.1.1.1" ];
         hysteresis = {
           consecutiveUp = 8;
         };
@@ -232,22 +232,36 @@ in
   # ===== toJSONValue =====
 
   testToJSONValueStringifiesTargets = {
-    # Targets render as strings, not nested libnet structures.
-    expr = (probe.toJSONValue (probe.make { targets = [ "1.1.1.1" ]; })).targets;
-    expected = [ "1.1.1.1" ];
+    # Targets render as per-family lists of strings, not nested
+    # libnet structures.
+    expr = (probe.toJSONValue (probe.make { targets.v4 = [ "1.1.1.1" ]; })).targets;
+    expected = {
+      v4 = [ "1.1.1.1" ];
+      v6 = [ ];
+    };
   };
 
   # ===== Error: probeNoTargets =====
 
-  testRejectsEmptyTargetsList = {
+  testRejectsBothBucketsEmpty = {
     expr = errorMatches "probeNoTargets" (tryError {
-      targets = [ ];
+      targets = { };
+    });
+    expected = true;
+  };
+
+  testRejectsExplicitEmptyBuckets = {
+    expr = errorMatches "probeNoTargets" (tryError {
+      targets = {
+        v4 = [ ];
+        v6 = [ ];
+      };
     });
     expected = true;
   };
 
   testMakeThrowsOnEmptyTargets = {
-    expr = evalThrows (probe.make { targets = [ ]; });
+    expr = evalThrows (probe.make { targets = { }; });
     expected = true;
   };
 
@@ -255,17 +269,33 @@ in
 
   testRejectsInvalidTarget = {
     expr = errorMatches "probeInvalidTarget" (tryError {
-      targets = [ "not-an-ip" ];
+      targets.v4 = [ "not-an-ip" ];
     });
     expected = true;
   };
 
   testRejectsPartiallyInvalidTargets = {
     expr = errorMatches "probeInvalidTarget" (tryError {
-      targets = [
+      targets.v4 = [
         "1.1.1.1"
         "not-an-ip"
       ];
+    });
+    expected = true;
+  };
+
+  # ===== Error: probeTargetFamilyMismatch =====
+
+  testRejectsV6InV4Bucket = {
+    expr = errorMatches "probeTargetFamilyMismatch" (tryError {
+      targets.v4 = [ "2001:db8::1" ];
+    });
+    expected = true;
+  };
+
+  testRejectsV4InV6Bucket = {
+    expr = errorMatches "probeTargetFamilyMismatch" (tryError {
+      targets.v6 = [ "192.0.2.1" ];
     });
     expected = true;
   };
@@ -500,7 +530,7 @@ in
     expr =
       let
         err = tryError {
-          targets = [ ];
+          targets = { };
           method = "tcp";
           intervalMs = 0;
         };
@@ -527,7 +557,7 @@ in
   };
 
   testTryMakeErrOnInvalid = {
-    expr = (probe.tryMake { targets = [ ]; }).success;
+    expr = (probe.tryMake { targets = { }; }).success;
     expected = false;
   };
 
@@ -537,7 +567,7 @@ in
   };
 
   testTryMakeValueNullOnFailure = {
-    expr = (probe.tryMake { targets = [ ]; }).value;
+    expr = (probe.tryMake { targets = { }; }).value;
     expected = null;
   };
 

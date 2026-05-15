@@ -77,7 +77,7 @@ pkgs.testers.runNixOSTest {
             interface = "eth1";
             pointToPoint = true;
             probe = {
-              targets = [ "192.168.1.1" ];
+              targets.v4 = [ "192.168.1.1" ];
               intervalMs = 200;
               timeoutMs = 100;
               windowSize = 4;
@@ -100,7 +100,7 @@ pkgs.testers.runNixOSTest {
             interface = "eth2";
             pointToPoint = true;
             probe = {
-              targets = [ "192.168.2.1" ];
+              targets.v4 = [ "192.168.2.1" ];
               intervalMs = 200;
               timeoutMs = 100;
               windowSize = 4;

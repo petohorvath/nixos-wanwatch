@@ -28,7 +28,7 @@ const validConfig = `{
       "pointToPoint": false,
       "probe": {
         "method": "icmp",
-        "targets": ["1.1.1.1"],
+        "targets": { "v4": ["1.1.1.1"], "v6": [] },
         "intervalMs": 500,
         "timeoutMs": 1000,
         "windowSize": 10,
@@ -84,8 +84,11 @@ func TestParsePopulatesNestedFields(t *testing.T) {
 	if w.Probe.Method != "icmp" {
 		t.Errorf("Probe.Method = %q, want %q", w.Probe.Method, "icmp")
 	}
-	if got := len(w.Probe.Targets); got != 1 {
-		t.Errorf("len(Probe.Targets) = %d, want 1", got)
+	if got := len(w.Probe.Targets.V4); got != 1 {
+		t.Errorf("len(Probe.Targets.V4) = %d, want 1", got)
+	}
+	if got := len(w.Probe.Targets.V6); got != 0 {
+		t.Errorf("len(Probe.Targets.V6) = %d, want 0", got)
 	}
 	if w.Probe.Thresholds.LossPctDown != 30 {
 		t.Errorf("LossPctDown = %d, want 30", w.Probe.Thresholds.LossPctDown)
@@ -193,7 +196,7 @@ func TestValidateRejectsWanWithoutProbeTargets(t *testing.T) {
 	t.Parallel()
 	cfg := mustParse(t, validConfig)
 	w := cfg.Wans["primary"]
-	w.Probe.Targets = nil
+	w.Probe.Targets = Targets{}
 	cfg.Wans["primary"] = w
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("err = %v, want wrap of ErrInvalidConfig", err)

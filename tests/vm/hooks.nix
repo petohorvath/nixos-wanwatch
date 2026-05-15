@@ -88,10 +88,10 @@ pkgs.testers.runNixOSTest {
             interface = "wan0";
             pointToPoint = true;
             probe = {
-              targets = [
-                "192.0.2.1"
-                "2001:db8::1"
-              ];
+              targets = {
+                v4 = [ "192.0.2.1" ];
+                v6 = [ "2001:db8::1" ];
+              };
               intervalMs = 600000;
               timeoutMs = 30000;
               hysteresis = {
@@ -104,10 +104,10 @@ pkgs.testers.runNixOSTest {
             interface = "wan1";
             pointToPoint = true;
             probe = {
-              targets = [
-                "100.64.0.1"
-                "2001:db8:1::1"
-              ];
+              targets = {
+                v4 = [ "100.64.0.1" ];
+                v6 = [ "2001:db8:1::1" ];
+              };
               intervalMs = 600000;
               timeoutMs = 30000;
               hysteresis = {

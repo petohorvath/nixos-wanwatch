@@ -12,7 +12,7 @@
       enable = true;
       wans.primary = {
         interface = "eth0";
-        probe.targets = [ "1.1.1.1" ];
+        probe.targets.v4 = [ "1.1.1.1" ];
       };
       groups.home-uplink.members = [
         { wan = "primary"; priority = 1; }

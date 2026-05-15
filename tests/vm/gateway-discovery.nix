@@ -63,7 +63,7 @@ pkgs.testers.runNixOSTest {
           # pointToPoint = false (default) → daemon discovers
           # gateway via netlink. This is the path under test.
           probe = {
-            targets = [ "192.168.1.1" ];
+            targets.v4 = [ "192.168.1.1" ];
             intervalMs = 600000;
             timeoutMs = 30000;
             hysteresis = {

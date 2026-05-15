@@ -47,13 +47,13 @@ let
   primaryWan = wan.make {
     name = "primary";
     interface = "eth0";
-    probe.targets = [ "1.1.1.1" ];
+    probe.targets.v4 = [ "1.1.1.1" ];
   };
 
   backupWan = wan.make {
     name = "backup";
     interface = "wwan0";
-    probe.targets = [ "8.8.8.8" ];
+    probe.targets.v4 = [ "8.8.8.8" ];
   };
 
   homeGroup = group.make {

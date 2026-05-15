@@ -6,7 +6,8 @@
   value carries:
 
     method             — probing protocol; v1 supports "icmp" only
-    targets            — non-empty list of libnet.ip values
+    targets            — { v4, v6 }: per-family lists of libnet.ip
+                         values; at least one family non-empty
     intervalMs         — milliseconds between probe cycles
     timeoutMs          — per-probe timeout
     windowSize         — number of samples in the sliding window
@@ -15,8 +16,8 @@
     familyHealthPolicy — "all" | "any" — how per-family Health
                          combines into per-WAN Health (PLAN §5.4)
 
-  Required field: `targets` (at least one entry). Everything else
-  has a default; see `defaults` below.
+  Required field: `targets` with at least one of `v4`/`v6`
+  populated. Everything else has a default; see `defaults` below.
 
   ===== make =====
 
@@ -33,8 +34,11 @@
 
   Validation rules and error kinds:
 
-    probeNoTargets               — empty `targets`
+    probeNoTargets               — both `targets.v4` and
+                                   `targets.v6` empty
     probeInvalidTarget           — target string not a valid IP
+    probeTargetFamilyMismatch    — v4 literal in `targets.v6`, or
+                                   v6 literal in `targets.v4`
     probeInvalidMethod           — method ∉ {"icmp"}
     probeNonPositiveInterval     — intervalMs ≤ 0
     probeNonPositiveTimeout      — timeoutMs ≤ 0
@@ -55,8 +59,7 @@
 
   `method`, `targets`, `intervalMs`, `timeoutMs`, `windowSize`,
   `thresholds`, `hysteresis`, `familyHealthPolicy`, `families`
-  (derived: set of family flags present in targets, e.g.
-  `{ v4 = true; v6 = true; }`).
+  (derived: `{ v4 = targets.v4 != []; v6 = targets.v6 != []; }`).
 
   ===== Serialization =====
 
@@ -125,14 +128,44 @@ let
     check "probeInvalidMethod" (builtins.elem method validMethods)
       "method must be one of ${builtins.toJSON validMethods}; got ${builtins.toJSON method}";
 
+  # validateTargetBucket parses one per-family target list and
+  # checks both parseability and family-match. An empty bucket is
+  # fine here — the cross-bucket "at least one non-empty" check
+  # lives in validateTargets.
+  validateTargetBucket =
+    fam: familyPredicate: xs:
+    let
+      parsed = parseTargets xs;
+      parseErrors = builtins.map (lib.nameValuePair "probeInvalidTarget") parsed.errors;
+      mismatches = builtins.concatMap (
+        ip:
+        if familyPredicate ip then
+          [ ]
+        else
+          [
+            (lib.nameValuePair "probeTargetFamilyMismatch" "${libnet.ip.toString ip} in targets.${fam} is not a ${fam} address")
+          ]
+      ) parsed.parsed;
+    in
+    parseErrors ++ mismatches;
+
   validateTargets =
     targets:
-    if !(builtins.isList targets) then
-      check "probeInvalidTarget" false "targets must be a list of IP strings"
-    else if targets == [ ] then
-      check "probeNoTargets" false "targets must be non-empty"
+    if !(builtins.isAttrs targets) then
+      check "probeInvalidTarget" false "targets must be { v4 = [...]; v6 = [...]; }"
     else
-      builtins.map (lib.nameValuePair "probeInvalidTarget") (parseTargets targets).errors;
+      let
+        v4 = targets.v4 or [ ];
+        v6 = targets.v6 or [ ];
+        nonEmpty =
+          if v4 == [ ] && v6 == [ ] then
+            check "probeNoTargets" false "at least one of targets.v4 or targets.v6 must be non-empty"
+          else
+            [ ];
+      in
+      nonEmpty
+      ++ validateTargetBucket "v4" libnet.ip.isIpv4 v4
+      ++ validateTargetBucket "v6" libnet.ip.isIpv6 v6;
 
   validateInterval =
     interval:
@@ -202,16 +235,24 @@ let
 
   # ===== Aggregated validation + construction =====
 
-  mergeWithDefaults = user: {
-    method = user.method or defaults.method;
-    targets = user.targets or [ ];
-    intervalMs = user.intervalMs or defaults.intervalMs;
-    timeoutMs = user.timeoutMs or defaults.timeoutMs;
-    windowSize = user.windowSize or defaults.windowSize;
-    thresholds = defaults.thresholds // (user.thresholds or { });
-    hysteresis = defaults.hysteresis // (user.hysteresis or { });
-    familyHealthPolicy = user.familyHealthPolicy or defaults.familyHealthPolicy;
-  };
+  mergeWithDefaults =
+    user:
+    let
+      t = user.targets or { };
+    in
+    {
+      method = user.method or defaults.method;
+      targets = {
+        v4 = t.v4 or [ ];
+        v6 = t.v6 or [ ];
+      };
+      intervalMs = user.intervalMs or defaults.intervalMs;
+      timeoutMs = user.timeoutMs or defaults.timeoutMs;
+      windowSize = user.windowSize or defaults.windowSize;
+      thresholds = defaults.thresholds // (user.thresholds or { });
+      hysteresis = defaults.hysteresis // (user.hysteresis or { });
+      familyHealthPolicy = user.familyHealthPolicy or defaults.familyHealthPolicy;
+    };
 
   collectErrors =
     cfg:
@@ -243,7 +284,12 @@ let
       errors = collectErrors cfg;
     in
     if errors == [ ] then
-      tryOk (buildValue cfg (parseTargets cfg.targets).parsed)
+      tryOk (
+        buildValue cfg {
+          v4 = (parseTargets cfg.targets.v4).parsed;
+          v6 = (parseTargets cfg.targets.v6).parsed;
+        }
+      )
     else
       tryErr (formatErrors errors);
 
@@ -260,8 +306,8 @@ let
   # whether the probe's targets cover each family. Used by `wan.make`
   # to enforce the family-coupling invariant (PLAN §5.4).
   families = p: {
-    v4 = builtins.any libnet.ip.isIpv4 p.targets;
-    v6 = builtins.any libnet.ip.isIpv6 p.targets;
+    v4 = p.targets.v4 != [ ];
+    v6 = p.targets.v6 != [ ];
   };
 
   # ===== Serialization =====
@@ -279,7 +325,10 @@ let
       hysteresis
       familyHealthPolicy
       ;
-    targets = builtins.map libnet.ip.toString p.targets;
+    targets = {
+      v4 = builtins.map libnet.ip.toString p.targets.v4;
+      v6 = builtins.map libnet.ip.toString p.targets.v6;
+    };
   };
 in
 {

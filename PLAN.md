@@ -263,12 +263,11 @@ services.wanwatch = {
     # pointToPoint = false (default) — daemon discovers the
     # gateway via netlink. Set true for PPP / WireGuard / tun.
     probe = {
-      method  = "icmp";        # uses ICMP for v4 targets, ICMPv6 for v6 targets
-      targets = [              # family auto-detected from each address
-        "1.1.1.1"
-        "8.8.8.8"
-        "2606:4700:4700::1111"
-      ];
+      method  = "icmp";        # ICMP for v4 targets, ICMPv6 for v6 targets
+      targets = {              # per-family lists; at least one non-empty
+        v4 = [ "1.1.1.1" "8.8.8.8" ];
+        v6 = [ "2606:4700:4700::1111" ];
+      };
       familyHealthPolicy = "all";   # "all": WAN healthy iff every configured family healthy
                                     # "any": WAN healthy if any configured family healthy
       intervalMs = 500;
@@ -290,7 +289,7 @@ services.wanwatch = {
   wans.backup = {
     interface = "wwan0";
     pointToPoint = true;           # LTE / PPP — no broadcast next-hop
-    # probe.targets v4-only → WAN serves v4 only
+    # probe.targets.v4 only → WAN serves v4 only
     # …
   };
 
@@ -331,9 +330,10 @@ and may change if groups are added or removed.
 
 ### 5.4 Family derivation from probe targets
 
-A WAN's served families are derived from `probe.targets` — a v4
-literal means it serves v4, a v6 literal means it serves v6. There
-is no separate gateway / family declaration; the daemon discovers
+A WAN's served families are derived from `probe.targets` — a
+non-empty `targets.v4` means it serves v4, a non-empty `targets.v6`
+means it serves v6. There is no separate gateway / family
+declaration; the daemon discovers
 the next-hop dynamically from the kernel's main routing table
 (see §8 GatewayCache).
 

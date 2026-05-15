@@ -14,8 +14,8 @@
     probe                    — top-level submodule
 
   Defaults mirror `internal.probe.defaults` exactly so a config
-  consisting of only `targets = [ … ]` evaluates to the same shape
-  the value-type's `make` would produce.
+  consisting of only `targets = { v4 = [ … ]; }` evaluates to the
+  same shape the value-type's `make` would produce.
 
   Probe targets are stored as strings (libnet convention — option
   values stay as strings after merge; downstream code calls
@@ -115,17 +115,38 @@ let
         '';
       };
       targets = mkOption {
-        type = types.listOf probeTarget;
-        example = [
-          "1.1.1.1"
-          "2606:4700:4700::1111"
-        ];
+        type = types.submodule {
+          options = {
+            v4 = mkOption {
+              type = types.listOf probeTarget;
+              default = [ ];
+              description = ''
+                IPv4 probe targets. Each item must be a v4 IP literal —
+                a v6 literal here is rejected by `internal.probe.make`
+                with `probeTargetFamilyMismatch`.
+              '';
+            };
+            v6 = mkOption {
+              type = types.listOf probeTarget;
+              default = [ ];
+              description = ''
+                IPv6 probe targets. Each item must be a v6 IP literal —
+                a v4 literal here is rejected by `internal.probe.make`
+                with `probeTargetFamilyMismatch`.
+              '';
+            };
+          };
+        };
+        default = { };
+        example = {
+          v4 = [ "1.1.1.1" ];
+          v6 = [ "2606:4700:4700::1111" ];
+        };
         description = ''
-          IP targets to probe. Family is detected from each address
-          and dispatched to the matching probe socket (ICMP for v4,
-          ICMPv6 for v6). At least one target is required, and each
-          family the surrounding WAN has a gateway for must have at
-          least one matching target — see PLAN §5.4.
+          IP targets to probe, partitioned by family. At least one of
+          `v4` / `v6` must be non-empty. Each family the surrounding
+          WAN has a gateway for must have at least one matching
+          target — see PLAN §5.4.
         '';
       };
       intervalMs = mkOption {
