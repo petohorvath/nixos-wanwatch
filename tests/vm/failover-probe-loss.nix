@@ -149,8 +149,26 @@ pkgs.testers.runNixOSTest {
         )
 
 
-    def wait_for_wan_healthy(router, wan, timeout=15):
-        """Poll state.json until wans[wan].healthy == True.
+    def scrape(router):
+        """Fetch the Prometheus scrape body over the Unix socket."""
+        return router.succeed(
+            "${pkgs.curl}/bin/curl -s --unix-socket "
+            "/run/wanwatch/metrics.sock http://wanwatch/metrics"
+        )
+
+
+    def metric(body, series):
+        """Value of an exact `name{labels}` series, or 0.0 if absent —
+        Prometheus elides Vec series with no observations."""
+        prefix = series + " "
+        for line in body.splitlines():
+            if line.startswith(prefix):
+                return float(line[len(prefix):])
+        return 0.0
+
+
+    def wait_for_family_healthy(router, wan, timeout=15):
+        """Poll until wanwatch_wan_family_healthy{wan,family=v4} == 1.
 
         The cold-start carrier path (PLAN §8) can satisfy
         `wait_for_active(group, "primary")` the moment carrier comes
@@ -159,35 +177,35 @@ pkgs.testers.runNixOSTest {
         first probe sample may not have landed yet, and the assertion
         "active never reached 'backup'" 10s later wouldn't tell us
         whether the daemon mis-failed-over or whether backup was
-        never probe-healthy to begin with. Gate on probe health
-        explicitly so the scenario starts from a known-good state."""
+        never probe-healthy to begin with.
+
+        Reads the live Prometheus metric, not state.json — the latter
+        is a Decision snapshot (PLAN §5.5) and only gets rewritten
+        when the group's active member changes, so a backup whose
+        probes go healthy *without* dislodging the active primary
+        wouldn't appear healthy in state.json at all."""
+        series = (
+            'wanwatch_wan_family_healthy{family="v4",wan="' + wan + '"}'
+        )
         for _ in range(timeout * 10):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            if json.loads(out)["wans"][wan]["healthy"]:
+            if metric(scrape(router), series) == 1.0:
                 return
             router.execute("sleep 0.1")
         raise AssertionError(
-            f"wan {wan!r} never became probe-healthy; last state =\n{out}"
+            f"wan {wan!r} v4 family never became probe-healthy; "
+            f"last scrape =\n{scrape(router)}"
         )
 
 
     def health_decisions(router, group):
-        """Read the current value of
-        wanwatch_group_decisions_total{group,reason="health"} from
-        the scrape; returns 0 if the time series hasn't appeared
-        yet (Prometheus elides Vec series with no observations)."""
-        body = router.succeed(
-            "${pkgs.curl}/bin/curl -s --unix-socket "
-            "/run/wanwatch/metrics.sock http://wanwatch/metrics"
-        )
-        prefix = (
+        """Read wanwatch_group_decisions_total{group,reason="health"}
+        from the scrape; returns 0 if the time series hasn't appeared
+        yet."""
+        series = (
             'wanwatch_group_decisions_total{group="'
-            + group + '",reason="health"} '
+            + group + '",reason="health"}'
         )
-        for line in body.splitlines():
-            if line.startswith(prefix):
-                return float(line[len(prefix):])
-        return 0.0
+        return metric(scrape(router), series)
 
 
     start_all()
@@ -211,8 +229,8 @@ pkgs.testers.runNixOSTest {
     # the backup probe Window cooks, and step 3 would then time out
     # failing over to a backup that was never reachable in the first
     # place — a noise failure that masquerades as a daemon bug.
-    wait_for_wan_healthy(router, "primary")
-    wait_for_wan_healthy(router, "backup")
+    wait_for_family_healthy(router, "primary")
+    wait_for_family_healthy(router, "backup")
 
     # Snapshot the health-decisions counter before we inject loss —
     # the assertion below is "counter advanced", not "counter equal
