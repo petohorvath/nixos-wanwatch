@@ -149,6 +149,28 @@ pkgs.testers.runNixOSTest {
         )
 
 
+    def wait_for_wan_healthy(router, wan, timeout=15):
+        """Poll state.json until wans[wan].healthy == True.
+
+        The cold-start carrier path (PLAN §8) can satisfy
+        `wait_for_active(group, "primary")` the moment carrier comes
+        up on eth1, before any probe Window has cooked on *either*
+        WAN. Injecting netem at that point would race a backup whose
+        first probe sample may not have landed yet, and the assertion
+        "active never reached 'backup'" 10s later wouldn't tell us
+        whether the daemon mis-failed-over or whether backup was
+        never probe-healthy to begin with. Gate on probe health
+        explicitly so the scenario starts from a known-good state."""
+        for _ in range(timeout * 10):
+            out = router.succeed("cat /run/wanwatch/state.json")
+            if json.loads(out)["wans"][wan]["healthy"]:
+                return
+            router.execute("sleep 0.1")
+        raise AssertionError(
+            f"wan {wan!r} never became probe-healthy; last state =\n{out}"
+        )
+
+
     def health_decisions(router, group):
         """Read the current value of
         wanwatch_group_decisions_total{group,reason="health"} from
@@ -182,6 +204,15 @@ pkgs.testers.runNixOSTest {
     #    loop cooks both WANs as healthy. After convergence we
     #    expect Active=primary (lowest priority among healthy).
     wait_for_active(router, "primary")
+
+    # Pre-injection invariant: *both* WANs must be probe-healthy,
+    # not just carrier-up. Without this gate the wait_for_active
+    # above is satisfied by the cold-start carrier path long before
+    # the backup probe Window cooks, and step 3 would then time out
+    # failing over to a backup that was never reachable in the first
+    # place — a noise failure that masquerades as a daemon bug.
+    wait_for_wan_healthy(router, "primary")
+    wait_for_wan_healthy(router, "backup")
 
     # Snapshot the health-decisions counter before we inject loss —
     # the assertion below is "counter advanced", not "counter equal
