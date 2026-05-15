@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"path/filepath"
 	"testing"
 
@@ -51,9 +52,11 @@ func testDaemon(t *testing.T, cfg *config.Config) *daemon {
 	d := newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	// Default the apply seams to succeeding fakes: the sandbox has no
 	// CAP_NET_ADMIN, so the real netlink path can't run. Tests that
-	// exercise apply *failure* override d.writeRoute / d.ifindexOf.
+	// exercise an apply *failure* override the relevant seam.
 	d.ifindexOf = func(string) (int, error) { return 1, nil }
 	d.writeRoute = func(context.Context, apply.DefaultRoute) error { return nil }
+	d.interfaceAddrs = func(string) ([]net.IP, error) { return nil, nil }
+	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) { return 0, nil }
 	return d
 }
 
@@ -128,6 +131,46 @@ func TestInterfaceIndexUnknown(t *testing.T) {
 	// netlink ABI; we go further to dodge any test-VM quirk).
 	if _, err := interfaceIndex("wanwatch-test-no-such-iface"); err == nil {
 		t.Error("interfaceIndex(missing) = nil error, want non-nil")
+	}
+}
+
+func TestInterfaceAddrsLoopback(t *testing.T) {
+	t.Parallel()
+	// `lo` always exists, and all its addresses are loopback — so the
+	// global-unicast filter leaves nothing. Exercises the resolve +
+	// filter path end to end on a real interface.
+	addrs, err := interfaceAddrs("lo")
+	if err != nil {
+		t.Fatalf("interfaceAddrs(lo) = %v, want nil", err)
+	}
+	if len(addrs) != 0 {
+		t.Errorf("interfaceAddrs(lo) = %v, want empty (loopback filtered out)", addrs)
+	}
+}
+
+func TestInterfaceAddrsUnknown(t *testing.T) {
+	t.Parallel()
+	if _, err := interfaceAddrs("wanwatch-test-no-such-iface"); err == nil {
+		t.Error("interfaceAddrs(missing) = nil error, want non-nil")
+	}
+}
+
+func TestFilterGlobalUnicast(t *testing.T) {
+	t.Parallel()
+	mkNet := func(s string) *net.IPNet { return &net.IPNet{IP: net.ParseIP(s)} }
+	addrs := []net.Addr{
+		mkNet("192.0.2.1"),                           // global v4 — kept
+		mkNet("2001:db8::1"),                         // global v6 — kept
+		mkNet("127.0.0.1"),                           // loopback — dropped
+		mkNet("fe80::1"),                             // link-local — dropped
+		&net.IPAddr{IP: net.ParseIP("198.51.100.1")}, // not *net.IPNet — dropped
+	}
+	got := filterGlobalUnicast(addrs)
+	if len(got) != 2 {
+		t.Fatalf("filterGlobalUnicast = %v, want 2 (the globals)", got)
+	}
+	if !got[0].Equal(net.ParseIP("192.0.2.1")) || !got[1].Equal(net.ParseIP("2001:db8::1")) {
+		t.Errorf("filterGlobalUnicast = %v, want [192.0.2.1 2001:db8::1]", got)
 	}
 }
 

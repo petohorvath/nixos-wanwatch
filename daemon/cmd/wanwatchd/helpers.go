@@ -33,6 +33,41 @@ func interfaceIndex(name string) (int, error) {
 	return iface.Index, nil
 }
 
+// interfaceAddrs reports the global-unicast IP addresses configured
+// on `name` — the source addresses traffic egressing that interface
+// is SNATted to. The post-switch conntrack flush uses these to find
+// the vacated WAN's addresses.
+func interfaceAddrs(name string) ([]net.IP, error) {
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return nil, fmt.Errorf("InterfaceByName %q: %w", name, err)
+	}
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return nil, fmt.Errorf("interface %q addrs: %w", name, err)
+	}
+	return filterGlobalUnicast(addrs), nil
+}
+
+// filterGlobalUnicast narrows a net.Interface address list to the
+// global-unicast IPs, dropping loopback, link-local, and multicast —
+// conntrack entries are never pinned to those. Split from
+// interfaceAddrs so the filtering is testable without a real
+// interface.
+func filterGlobalUnicast(addrs []net.Addr) []net.IP {
+	out := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ipnet.IP.IsGlobalUnicast() {
+			out = append(out, ipnet.IP)
+		}
+	}
+	return out
+}
+
 // ifaceFor resolves an Active to its WAN's interface name via the
 // daemon's `wans` map. Returns "" when Active is absent or the WAN
 // isn't known — hook env vars treat empty string as "no value".

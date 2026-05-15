@@ -114,11 +114,10 @@ If no Member is healthy, the Group has no Selection — `state.json` shows `acti
 `Decision = Selection change`. When `selector.Select` returns an Active that differs from the previous Selection, the daemon runs, in order:
 
 1. `apply.WriteDefault` per family the new active serves — for point-to-point WANs the route is `scope link`; for normal WANs the daemon reads the discovered next-hop from its in-memory gateway cache. `RouteReplace` is idempotent, so a stale default in the same table is overwritten atomically. A cache miss (kernel hasn't installed a default on that link yet) skips the write; a subsequent route-discovery event triggers a reapply.
-2. `state.Writer.Write` — atomic tmpfile + rename. Readers see either the old or new file, never a partial one.
-3. `state.Runner.Run` — dispatches `/etc/wanwatch/hooks/{up,down,switch}.d/*` with the `WANWATCH_*` env vars from [`docs/specs/daemon-state.md`](./specs/daemon-state.md).
-4. Metrics — `wanwatch_group_decisions_total{group,reason}` increments; `wanwatch_group_active{group,wan}` updates.
-
-Conntrack flush (`apply.FlushBySource`) lives in the apply package but is not wired into the per-Decision path yet — see PLAN §12 OQ #3 for the v0.2 hook.
+2. `apply.FlushBySource` — flushes the conntrack entries pinned to the vacated WAN's source addresses, so flows that were SNATted out the old WAN re-establish via the new one instead of being black-holed by stale NAT state. Runs only on a switch (a WAN with a healthy successor), not a `down`. Best-effort: a failure increments `wanwatch_apply_op_errors_total{op="conntrack_flush"}` but never fails the Decision.
+3. `state.Writer.Write` — atomic tmpfile + rename. Readers see either the old or new file, never a partial one.
+4. `state.Runner.Run` — dispatches `/etc/wanwatch/hooks/{up,down,switch}.d/*` with the `WANWATCH_*` env vars from [`docs/specs/daemon-state.md`](./specs/daemon-state.md).
+5. Metrics — `wanwatch_group_decisions_total{group,reason}` increments; `wanwatch_group_active{group,wan}` updates.
 
 ## Where to go next
 

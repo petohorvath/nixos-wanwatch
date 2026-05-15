@@ -394,6 +394,144 @@ func TestRecomputeGroupSwitch(t *testing.T) {
 	}
 }
 
+func TestFlushSwitchedConntrackFlushesVacatedWAN(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+
+	var gotIface string
+	d.interfaceAddrs = func(iface string) ([]net.IP, error) {
+		gotIface = iface
+		return []net.IP{net.ParseIP("192.0.2.1"), net.ParseIP("2001:db8::1")}, nil
+	}
+	var flushed []probe.Family
+	d.flushConntrack = func(_ context.Context, family probe.Family, _ net.IP) (uint, error) {
+		flushed = append(flushed, family)
+		return 3, nil
+	}
+
+	g := d.groups["home"]
+	old := selector.Active{Wan: "primary", Has: true}
+	next := selector.Active{Wan: "backup", Has: true}
+	d.flushSwitchedConntrack(t.Context(), g, old, next)
+
+	if gotIface != "eth0" {
+		t.Errorf("interfaceAddrs called with %q, want eth0 (primary's iface)", gotIface)
+	}
+	if len(flushed) != 2 {
+		t.Fatalf("flushConntrack calls = %d, want 2 (one per family)", len(flushed))
+	}
+	if flushed[0] != probe.FamilyV4 || flushed[1] != probe.FamilyV6 {
+		t.Errorf("flushed families = %v, want [v4 v6]", flushed)
+	}
+}
+
+func TestFlushSwitchedConntrackSkipsNonSwitch(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	called := false
+	d.interfaceAddrs = func(string) ([]net.IP, error) {
+		called = true
+		return nil, nil
+	}
+
+	g := d.groups["home"]
+	primary := selector.Active{Wan: "primary", Has: true}
+	// down: a WAN is vacated but has no healthy successor — the old
+	// route stays, so a flush would only churn.
+	d.flushSwitchedConntrack(t.Context(), g, primary, selector.NoActive)
+	// up: nothing was vacated.
+	d.flushSwitchedConntrack(t.Context(), g, selector.NoActive, primary)
+
+	if called {
+		t.Error("interfaceAddrs called for a non-switch transition")
+	}
+}
+
+func TestFlushSwitchedConntrackMetersResolveFailure(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	d.interfaceAddrs = func(string) ([]net.IP, error) {
+		return nil, errors.New("flush test: no such interface")
+	}
+	flushCalled := false
+	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) {
+		flushCalled = true
+		return 0, nil
+	}
+
+	g := d.groups["home"]
+	old := selector.Active{Wan: "primary", Has: true}
+	next := selector.Active{Wan: "backup", Has: true}
+	d.flushSwitchedConntrack(t.Context(), g, old, next)
+
+	if flushCalled {
+		t.Error("flushConntrack called despite address-resolution failure")
+	}
+	if got := readCounter(t, d.metrics.ApplyOpErrors.WithLabelValues("home", "conntrack_flush")); got != 1 {
+		t.Errorf("ApplyOpErrors{home,conntrack_flush} = %v, want 1", got)
+	}
+}
+
+func TestFlushSwitchedConntrackMetersFlushFailure(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	d.interfaceAddrs = func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("192.0.2.1"), net.ParseIP("2001:db8::1")}, nil
+	}
+	calls := 0
+	d.flushConntrack = func(_ context.Context, family probe.Family, _ net.IP) (uint, error) {
+		calls++
+		if family == probe.FamilyV4 {
+			return 0, errors.New("flush test: ENOMEM")
+		}
+		return 5, nil
+	}
+
+	g := d.groups["home"]
+	old := selector.Active{Wan: "primary", Has: true}
+	next := selector.Active{Wan: "backup", Has: true}
+	d.flushSwitchedConntrack(t.Context(), g, old, next)
+
+	// A failure on one family must not abort the next.
+	if calls != 2 {
+		t.Errorf("flushConntrack calls = %d, want 2 (v4 failed, v6 still attempted)", calls)
+	}
+	if got := readCounter(t, d.metrics.ApplyOpErrors.WithLabelValues("home", "conntrack_flush")); got != 1 {
+		t.Errorf("ApplyOpErrors{home,conntrack_flush} = %v, want 1 (the v4 failure)", got)
+	}
+}
+
+// TestRecomputeGroupSwitchFlushesConntrack: a switch driven through
+// recomputeGroup → commitDecision flushes the vacated WAN's conntrack
+// entries; a cold-start "up" (nothing vacated) does not.
+func TestRecomputeGroupSwitchFlushesConntrack(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+
+	var flushedIfaces []string
+	d.interfaceAddrs = func(iface string) ([]net.IP, error) {
+		flushedIfaces = append(flushedIfaces, iface)
+		return []net.IP{net.ParseIP("192.0.2.1")}, nil
+	}
+	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) {
+		return 1, nil
+	}
+
+	g := d.groups["home"]
+	// Cold start → primary: an "up", nothing vacated.
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if len(flushedIfaces) != 0 {
+		t.Errorf("conntrack resolve on cold-start up = %v, want none", flushedIfaces)
+	}
+	// primary sickens → switch to backup: primary's iface is flushed.
+	markUnhealthy(d, "primary")
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if len(flushedIfaces) != 1 || flushedIfaces[0] != "eth0" {
+		t.Errorf("conntrack resolve on switch = %v, want [eth0]", flushedIfaces)
+	}
+}
+
 // TestRecomputeAffectedGroupsFansOut: a per-WAN health change
 // drives recomputeGroup on every group containing that WAN, and
 // only those groups. Builds two groups (home contains primary;

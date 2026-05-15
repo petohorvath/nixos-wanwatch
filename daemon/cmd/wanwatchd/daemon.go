@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
@@ -115,12 +116,15 @@ type daemon struct {
 	groups   map[string]*groupState
 	gateways *GatewayCache
 
-	// ifindexOf and writeRoute are the two syscall-touching seams of
-	// applyRoutes — newDaemon wires them to interfaceIndex and
-	// apply.WriteDefault; tests substitute fakes (no CAP_NET_ADMIN in
-	// the sandbox).
-	ifindexOf  func(name string) (int, error)
-	writeRoute func(ctx context.Context, r apply.DefaultRoute) error
+	// The syscall-touching seams of the apply path — newDaemon wires
+	// each to its production function; tests substitute fakes (the
+	// sandbox grants no CAP_NET_ADMIN). ifindexOf and writeRoute drive
+	// applyRoutes; interfaceAddrs and flushConntrack drive the
+	// post-switch conntrack flush.
+	ifindexOf      func(name string) (int, error)
+	writeRoute     func(ctx context.Context, r apply.DefaultRoute) error
+	interfaceAddrs func(name string) ([]net.IP, error)
+	flushConntrack func(ctx context.Context, family probe.Family, ip net.IP) (uint, error)
 }
 
 // newDaemon constructs the runtime state from `cfg` — the per-WAN
@@ -136,12 +140,14 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 			MaxHooks: maxHooksPerEvent,
 			Timeout:  time.Duration(cfg.Global.HookTimeoutMs) * time.Millisecond,
 		},
-		logger:     logger,
-		wans:       make(map[string]*wanState, len(cfg.Wans)),
-		groups:     make(map[string]*groupState, len(cfg.Groups)),
-		gateways:   NewGatewayCache(),
-		ifindexOf:  interfaceIndex,
-		writeRoute: apply.WriteDefault,
+		logger:         logger,
+		wans:           make(map[string]*wanState, len(cfg.Wans)),
+		groups:         make(map[string]*groupState, len(cfg.Groups)),
+		gateways:       NewGatewayCache(),
+		ifindexOf:      interfaceIndex,
+		writeRoute:     apply.WriteDefault,
+		interfaceAddrs: interfaceAddrs,
+		flushConntrack: apply.FlushBySource,
 	}
 	for name, wan := range cfg.Wans {
 		ws := &wanState{
@@ -352,8 +358,51 @@ func (d *daemon) commitDecision(ctx context.Context, g *groupState) {
 		g.activeSince = &now
 	}
 	d.updateGroupActiveGauge(g)
+	d.flushSwitchedConntrack(ctx, g, old, next)
 	d.writeStateSnapshot()
 	d.runHooks(ctx, g, old, next)
+}
+
+// flushSwitchedConntrack clears the conntrack entries pinned to the
+// vacated WAN's source addresses, so flows that were SNATted out the
+// old WAN re-establish via the new one instead of being black-holed
+// until their conntrack entries time out.
+//
+// Switch-only: it runs when both old and next are present. On a
+// `down` there is no healthy successor and the old default route is
+// left in place, so a flush would only churn. Best-effort per
+// PLAN §6.1 — a resolve or flush failure is logged and metered but
+// never fails the Decision; the routes have already converged.
+func (d *daemon) flushSwitchedConntrack(ctx context.Context, g *groupState, old, next selector.Active) {
+	if !old.Has || !next.Has {
+		return
+	}
+	ws, ok := d.wans[old.Wan]
+	if !ok {
+		return
+	}
+	addrs, err := d.interfaceAddrs(ws.cfg.Interface)
+	if err != nil {
+		d.logger.Warn("conntrack flush: resolve vacated WAN addresses",
+			"group", g.cfg.Name, "wan", old.Wan, "iface", ws.cfg.Interface, "err", err)
+		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "conntrack_flush").Inc()
+		return
+	}
+	for _, ip := range addrs {
+		family := probe.FamilyV4
+		if ip.To4() == nil {
+			family = probe.FamilyV6
+		}
+		n, err := d.flushConntrack(ctx, family, ip)
+		if err != nil {
+			d.logger.Warn("conntrack flush",
+				"group", g.cfg.Name, "wan", old.Wan, "family", family, "ip", ip, "err", err)
+			d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "conntrack_flush").Inc()
+			continue
+		}
+		d.logger.Info("conntrack flushed",
+			"group", g.cfg.Name, "wan", old.Wan, "family", family, "ip", ip, "entries", n)
+	}
 }
 
 // retryPendingApply re-attempts commitDecision for any group whose
