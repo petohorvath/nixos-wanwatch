@@ -104,12 +104,6 @@ func TestRunHonorsTimeout(t *testing.T) {
 	results := r.Run(context.Background(), HookContext{Event: EventSwitch})
 	elapsed := time.Since(start)
 
-	// Surface elapsed, err, exit code, and output unconditionally so a
-	// CI failure tells us *why* the script returned fast — not just
-	// that TimedOut was false.
-	t.Logf("elapsed=%v TimedOut=%v ExitCode=%d Err=%v Output=%q",
-		elapsed, results[0].TimedOut, results[0].ExitCode, results[0].Err, results[0].Output)
-
 	if elapsed > 2*time.Second {
 		t.Errorf("Run took %v — timeout did not fire", elapsed)
 	}
@@ -371,13 +365,6 @@ func TestRunCapturesOutput(t *testing.T) {
 
 	r := Runner{Dir: dir}
 	results := r.Run(context.Background(), HookContext{Event: EventDown})
-
-	// Surface ExitCode/Err/Output/Duration unconditionally so a CI
-	// failure points at the actual cause (typical flake: cmd.Run
-	// returns a non-ExitError fork/exec error and Output is empty).
-	t.Logf("Duration=%v ExitCode=%d Err=%v Output=%q",
-		results[0].Duration, results[0].ExitCode, results[0].Err, results[0].Output)
-
 	if results[0].ExitCode != 3 {
 		t.Errorf("ExitCode = %d, want 3", results[0].ExitCode)
 	}
@@ -401,13 +388,7 @@ func TestRunBoundsOutput(t *testing.T) {
 	r := Runner{Dir: dir}
 	results := r.Run(context.Background(), HookContext{Event: EventUp})
 
-	// Surface ExitCode/Err/Output-len/Duration on every run so a CI
-	// failure points at the actual cause. The full Output is binary
-	// zeros (NULs) so it's not useful in the log — its length is.
 	out := results[0].Output
-	t.Logf("Duration=%v ExitCode=%d Err=%v len(Output)=%d",
-		results[0].Duration, results[0].ExitCode, results[0].Err, len(out))
-
 	if len(out) > maxHookOutput+64 {
 		t.Errorf("Output len = %d, want <= maxHookOutput (%d) + marker", len(out), maxHookOutput)
 	}
