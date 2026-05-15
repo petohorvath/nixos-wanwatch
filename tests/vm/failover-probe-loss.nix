@@ -38,10 +38,14 @@
 pkgs.testers.runNixOSTest {
   name = "wanwatch-failover-probe-loss";
 
-  # Auto-IP assigns 192.168.<vlan>.<idx+1> per node within each
-  # VLAN, sorted by attribute name:
-  #   VLAN 1: isp1 → .1, router → .2
-  #   VLAN 2: isp2 → .1, router → .2
+  # Auto-IP: the NixOS test driver indexes nodes *globally*
+  # (alphabetical), not per-VLAN, so each node carries the same
+  # last octet on every VLAN it joins.
+  #   isp1   → idx 1 → 192.168.1.1
+  #   isp2   → idx 2 → 192.168.2.2
+  #   router → idx 3 → 192.168.1.3 + 192.168.2.3
+  # Probe targets below reflect that — primary aims at .1 (isp1's
+  # VLAN-1 address) and backup at .2 (isp2's VLAN-2 address).
   nodes = {
     isp1 =
       { lib, ... }:
@@ -101,7 +105,7 @@ pkgs.testers.runNixOSTest {
               interface = "eth2";
               pointToPoint = true;
               probe = {
-                targets.v4 = [ "192.168.2.1" ];
+                targets.v4 = [ "192.168.2.2" ];
                 intervalMs = 200;
                 timeoutMs = 100;
                 windowSize = 4;
@@ -229,8 +233,13 @@ pkgs.testers.runNixOSTest {
     # that looks like a daemon bug. Block here until *router →
     # both ISPs* L3 reachability is real, then let the gate
     # actually measure the daemon.
-    router.wait_until_succeeds("ping -c 1 -W 1 192.168.1.1")
-    router.wait_until_succeeds("ping -c 1 -W 1 192.168.2.1")
+    # `timeout=30` is generous on a healthy run (the ping for the
+    # working ISP returns in ~0.2s) but bounds the damage when the
+    # ping target is genuinely wrong — without it, the test driver
+    # falls back to its 900s default and one bad scenario burns 15
+    # minutes of CI time before failing.
+    router.wait_until_succeeds("ping -c 1 -W 1 192.168.1.1", timeout=30)
+    router.wait_until_succeeds("ping -c 1 -W 1 192.168.2.2", timeout=30)
 
     # 1. Primary wins on cold-start carrier health, then the probe
     #    loop cooks both WANs as healthy. After convergence we
