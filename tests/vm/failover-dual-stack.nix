@@ -137,9 +137,20 @@ pkgs.testers.runNixOSTest {
 
     wait_for_active(router, "primary")
 
+    # wait_for_active means state.json shows active=primary, but
+    # `ip link set wan0 up` also nudges systemd-networkd to
+    # reconfigure wan0, and the kernel-side route can briefly
+    # disappear around that reconfigure. Poll for the route to
+    # land before asserting on its shape.
     table = router.succeed(
         "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
     ).strip()
+    router.wait_until_succeeds(
+        f"ip -4 route show table {table} | grep -q ' dev wan0'", timeout=10
+    )
+    router.wait_until_succeeds(
+        f"ip -6 route show table {table} | grep -q ' dev wan0'", timeout=10
+    )
     v4 = router.succeed(f"ip -4 route show table {table}")
     v6 = router.succeed(f"ip -6 route show table {table}")
     assert "wan0" in v4 and "via" not in v4, f"initial v4 table (want scope-link via wan0):\n{v4}"
@@ -150,6 +161,12 @@ pkgs.testers.runNixOSTest {
 
     wait_for_active(router, "backup")
 
+    router.wait_until_succeeds(
+        f"ip -4 route show table {table} | grep -q ' dev wan1'", timeout=10
+    )
+    router.wait_until_succeeds(
+        f"ip -6 route show table {table} | grep -q ' dev wan1'", timeout=10
+    )
     v4 = router.succeed(f"ip -4 route show table {table}")
     v6 = router.succeed(f"ip -6 route show table {table}")
     assert "wan1" in v4 and "via" not in v4, f"failover v4 table (want scope-link via wan1):\n{v4}"

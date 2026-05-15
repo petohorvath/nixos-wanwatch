@@ -143,9 +143,19 @@ pkgs.testers.runNixOSTest {
 
     # 2. Default route in the group's table is a scope-link route
     #    out of wan0 (point-to-point: no gateway, no `via`).
+    #
+    #    wait_for_active fires the moment state.json shows
+    #    active=primary, but `ip link set wan0 up` also kicks
+    #    systemd-networkd into reconfiguring wan0; the kernel-side
+    #    route can briefly disappear and re-appear around that
+    #    reconfigure. Poll for the route to be in place rather
+    #    than racing networkd.
     table = router.succeed(
         "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
     ).strip()
+    router.wait_until_succeeds(
+        f"ip -4 route show table {table} | grep -q ' dev wan0'", timeout=10
+    )
     route = router.succeed(f"ip -4 route show table {table}")
     assert "wan0" in route and "via" not in route, (
         f"initial table {table} route mismatch (want scope-link via wan0):\n{route}"
@@ -163,6 +173,9 @@ pkgs.testers.runNixOSTest {
     wait_for_active(router, "backup")
 
     # 5. New default route is a scope-link route out of wan1.
+    router.wait_until_succeeds(
+        f"ip -4 route show table {table} | grep -q ' dev wan1'", timeout=10
+    )
     route = router.succeed(f"ip -4 route show table {table}")
     assert "wan1" in route and "via" not in route, (
         f"failover-table {table} route mismatch (want scope-link via wan1):\n{route}"
