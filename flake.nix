@@ -2,17 +2,22 @@
   description = "nixos-wanwatch — multi-WAN monitoring and failover for NixOS";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # `nixpkgs` is pinned to the current stable channel — modern
+    # Nix convention is plain `nixpkgs` = stable, opt-into-unstable
+    # via a second input. `forAllSystems` uses this for `lib` and
+    # `legacyPackages`, so every default output (packages, lib,
+    # modules, the default `vm-*` checks) builds against stable.
+    # Sibling-flake inputs (libnet, nftzones, nftypes, treefmt-nix,
+    # git-hooks) follow this via `inputs.nixpkgs.follows = "nixpkgs"`
+    # so their lib outputs pin against stable too.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # A second nixpkgs pinned to the current stable channel. Used
-    # exclusively by the `vm-stable-*` flake checks, which boot
-    # NixOS VMs built against stable so kernel / systemd-networkd
-    # / iproute2 regressions that hit unstable first don't ship
-    # silently to stable users. Sibling-flake inputs (libnet,
-    # nftzones, nftypes) continue to follow `nixpkgs` (unstable)
-    # because their lib outputs are pure-Nix and don't depend on
-    # any nixpkgs.lib API delta between channels.
-    nixpkgs-stable.url = "github:NixOS/nixpkgs/nixos-25.11";
+    # A second nixpkgs pinned to nixos-unstable. Consulted only by
+    # the `vm-unstable-*` flake checks (via `unstablePkgsFor`),
+    # which boot the VM scenarios against unstable to surface
+    # kernel / systemd-networkd / iproute2 issues that stable will
+    # pick up next.
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # nix-libnet provides IP/CIDR/interface validation primitives
     # used throughout `lib/`. Pinned to the GitHub default so a
@@ -55,7 +60,7 @@
     {
       self,
       nixpkgs,
-      nixpkgs-stable,
+      nixpkgs-unstable,
       libnet,
       nftzones,
       treefmt-nix,
@@ -157,10 +162,10 @@
           };
         };
 
-      # Per-channel pkgs lookup. `nixpkgs` is the unstable input
-      # everything else uses; `nixpkgs-stable` is consulted only
-      # for the `vm-stable-*` checks.
-      stablePkgsFor = system: nixpkgs-stable.legacyPackages.${system};
+      # Per-channel pkgs lookup. `nixpkgs` (stable) is what
+      # forAllSystems uses by default; `nixpkgs-unstable` is consulted
+      # only for the `vm-unstable-*` checks.
+      unstablePkgsFor = system: nixpkgs-unstable.legacyPackages.${system};
 
       # mkVmChecks returns the full set of VM scenarios built
       # against `pkgs`. Used twice from `checks`: once with the
@@ -433,13 +438,13 @@
           # only.
           #
           # Every scenario is materialized against both the
-          # unstable nixpkgs and the current stable channel
-          # (`vm-*` vs `vm-stable-*`). Stable catches regressions
-          # before they reach release users; unstable surfaces
-          # the newer-kernel / newer-systemd issues stable will
-          # pick up next.
+          # current stable channel and unstable (`vm-*` vs
+          # `vm-unstable-*`). The default `vm-*` set catches what
+          # release users will see; `vm-unstable-*` surfaces the
+          # newer-kernel / newer-systemd issues stable will pick
+          # up next.
           vmChecksWithPrefix "vm-" (mkVmChecks pkgs)
-          // vmChecksWithPrefix "vm-stable-" (mkVmChecks (stablePkgsFor pkgs.stdenv.hostPlatform.system))
+          // vmChecksWithPrefix "vm-unstable-" (mkVmChecks (unstablePkgsFor pkgs.stdenv.hostPlatform.system))
         )
       );
 

@@ -183,10 +183,10 @@ jobs:
   # would refuse to start without `/dev/kvm`.
   #
   # Matrixed over two nixpkgs channels:
-  #   - "unstable" → checks.x86_64-linux.vm-<scenario>
-  #   - "stable"   → checks.x86_64-linux.vm-stable-<scenario>
-  # Stable catches regressions before they ship to release users;
-  # unstable surfaces the newer-kernel / newer-systemd issues
+  #   - "stable"   → checks.x86_64-linux.vm-<scenario>
+  #   - "unstable" → checks.x86_64-linux.vm-unstable-<scenario>
+  # The default `vm-*` set catches what release users will see;
+  # `vm-unstable-*` surfaces the newer-kernel / newer-systemd issues
   # stable will pick up next. Independent jobs so each gets its
   # own /nix/store cache and a single channel's failure is
   # obvious in the run status.
@@ -202,10 +202,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - channel: unstable
-            prefix: vm-
           - channel: stable
-            prefix: vm-stable-
+            prefix: vm-
+          - channel: unstable
+            prefix: vm-unstable-
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
