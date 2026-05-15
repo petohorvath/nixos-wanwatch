@@ -24,7 +24,6 @@
 */
 {
   lib,
-  libnet,
   primitives,
   internal,
   memberTypes,

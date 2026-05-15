@@ -13,9 +13,6 @@ let
   };
   inherit (wanwatch) selector group;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalThrows;
-
   # Build a one-line group input quickly. Members default to
   # priority = (index + 1) so the order of the list is also the
   # default priority order.

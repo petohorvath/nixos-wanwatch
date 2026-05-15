@@ -47,8 +47,6 @@
   `group.toJSONValue` and through it in the daemon-config render.
 */
 {
-  lib,
-  libnet,
   internal,
 }:
 let

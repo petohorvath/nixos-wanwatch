@@ -20,8 +20,6 @@
   for any given name can shift if the surrounding group set changes.
 */
 {
-  lib,
-  libnet,
   internal,
 }:
 {

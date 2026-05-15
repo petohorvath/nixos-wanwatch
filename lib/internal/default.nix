@@ -33,7 +33,6 @@ let
   };
 
   member = import ./member.nix {
-    inherit lib libnet;
     internal = { inherit primitives; };
   };
 
@@ -43,17 +42,16 @@ let
   };
 
   group = import ./group.nix {
-    inherit lib libnet;
+    inherit lib;
     internal = { inherit primitives member; };
   };
 
   selector = import ./selector.nix {
-    inherit lib libnet;
-    internal = { inherit member; };
+    inherit lib;
   };
 
   config = import ./config.nix {
-    inherit lib libnet;
+    inherit lib;
     internal = {
       inherit
         wan
@@ -65,17 +63,14 @@ let
   };
 
   allocator = import ./allocator.nix {
-    inherit lib libnet;
-    internal = { inherit primitives; };
+    inherit lib;
   };
 
   marks = import ./marks.nix {
-    inherit lib libnet;
     internal = { inherit allocator; };
   };
 
   tables = import ./tables.nix {
-    inherit lib libnet;
     internal = { inherit allocator; };
   };
 

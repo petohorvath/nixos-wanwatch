@@ -103,8 +103,19 @@
               enable = true;
               package = (treefmtFor pkgs).config.build.wrapper;
             };
-            statix.enable = true;
-            deadnix.enable = true;
+            # statix and deadnix scan the whole repo on every commit
+            # instead of just the staged files — debt accumulates fast
+            # when an unstaged file's regression slips past the hook.
+            statix = {
+              enable = true;
+              pass_filenames = false;
+              entry = "${pkgs.statix}/bin/statix check .";
+            };
+            deadnix = {
+              enable = true;
+              pass_filenames = false;
+              entry = "${pkgs.deadnix}/bin/deadnix --fail .";
+            };
             go-vet = {
               enable = true;
               name = "go vet (daemon)";

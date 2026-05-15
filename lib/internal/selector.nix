@@ -49,12 +49,8 @@
 */
 {
   lib,
-  libnet,
-  internal,
 }:
 let
-  inherit (internal) member;
-
   primaryBackup =
     group: memberHealth:
     let

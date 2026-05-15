@@ -51,8 +51,6 @@
 */
 {
   lib,
-  libnet,
-  internal,
 }:
 let
   # ===== Hex helpers =====

@@ -17,7 +17,7 @@
                    thresholds, hysteresis counters.
     pctInt       — integer in [0, 100]. Used for loss thresholds.
 */
-{ lib, libnet }:
+{ lib }:
 let
   inherit (lib) types;
 in

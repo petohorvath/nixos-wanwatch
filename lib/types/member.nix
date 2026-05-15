@@ -15,7 +15,6 @@
 */
 {
   lib,
-  libnet,
   primitives,
   internal,
 }:

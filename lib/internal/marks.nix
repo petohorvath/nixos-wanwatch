@@ -19,8 +19,6 @@
   when the surrounding group set changes.
 */
 {
-  lib,
-  libnet,
   internal,
 }:
 {

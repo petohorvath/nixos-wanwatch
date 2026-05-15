@@ -56,7 +56,6 @@
 */
 {
   lib,
-  libnet,
   internal,
 }:
 let

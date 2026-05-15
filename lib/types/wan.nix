@@ -25,7 +25,6 @@
   lib,
   libnet,
   primitives,
-  internal,
   probeTypes,
 }:
 let

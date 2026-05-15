@@ -24,7 +24,7 @@
   internal,
 }:
 let
-  primitives = import ./primitives.nix { inherit lib libnet; };
+  primitives = import ./primitives.nix { inherit lib; };
   probe = import ./probe.nix {
     inherit
       lib
@@ -36,7 +36,6 @@ let
   member = import ./member.nix {
     inherit
       lib
-      libnet
       primitives
       internal
       ;
@@ -46,14 +45,12 @@ let
       lib
       libnet
       primitives
-      internal
       ;
     probeTypes = probe;
   };
   group = import ./group.nix {
     inherit
       lib
-      libnet
       primitives
       internal
       ;
