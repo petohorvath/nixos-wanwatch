@@ -14,6 +14,28 @@ import (
 // writeHook writes an executable shell script at <eventDir>/<name>.
 // `script` is the bash body (without shebang); the test util adds
 // the shebang and sets 0o755. Returns the full path.
+//
+// The os.WriteFile call is wrapped in syscall.ForkLock.RLock() to
+// dodge a known Go fork-inheritance race: an os.WriteFile opens
+// the destination FD with O_CLOEXEC, but O_CLOEXEC only closes the
+// FD at execve — not at fork. If another goroutine forks while we
+// have the FD open for writing, the child inherits a writable copy
+// and holds it through its own fork→execve window. During that
+// window the kernel rejects execve on the same file with ETXTBSY
+// ("text file busy"), so any test that does writeHook + r.Run in
+// parallel with a fork-heavy sibling test occasionally flakes with
+// `Err = fork/exec …: text file busy` and (0.00s) test duration.
+//
+// syscall.ForkLock.RLock blocks any concurrent fork (Go's
+// exec.Cmd.Start takes ForkLock.Lock() before fork — see
+// syscall/exec_unix.go) until the WriteFile completes and the FD
+// is closed. By the time the lock is released, no inheritable
+// writable FD exists, and subsequent forks can execve the script
+// freely.
+//
+// This is a non-canonical use of ForkLock (its documented purpose
+// is FD-allocation/O_CLOEXEC races, see syscall/exec_unix.go:19);
+// in practice it serializes exactly what we need.
 func writeHook(t *testing.T, eventDir, name, script string) string {
 	t.Helper()
 	if err := os.MkdirAll(eventDir, 0o755); err != nil {
@@ -21,7 +43,10 @@ func writeHook(t *testing.T, eventDir, name, script string) string {
 	}
 	full := filepath.Join(eventDir, name)
 	body := "#!/bin/sh\n" + script + "\n"
-	if err := os.WriteFile(full, []byte(body), 0o755); err != nil {
+	syscall.ForkLock.RLock()
+	err := os.WriteFile(full, []byte(body), 0o755)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		t.Fatalf("WriteFile %s: %v", full, err)
 	}
 	return full
@@ -283,7 +308,12 @@ func TestRunCapturesNonExitError(t *testing.T) {
 	// `execve` returns ENOENT, which Go surfaces as a PathError
 	// rather than an ExitError.
 	body := "#!/this/interpreter/does/not/exist\n:\n"
-	if err := os.WriteFile(filepath.Join(eventDir, "broken.sh"), []byte(body), 0o755); err != nil {
+	// ForkLock wrap — see writeHook docstring for the ETXTBSY race
+	// rationale. Same shape: 0o755 file + concurrent exec.
+	syscall.ForkLock.RLock()
+	err := os.WriteFile(filepath.Join(eventDir, "broken.sh"), []byte(body), 0o755)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
