@@ -338,20 +338,7 @@
                 internal/state:94
                 EOF
 
-                # `-parallel 2` caps how many `t.Parallel()` tests
-                # in a single package run concurrently. Under `-cover`
-                # the test binary carries enough coverage-counter
-                # overhead that GitHub-hosted runners flake on the
-                # fork-heavy hook tests (`internal/state` shells out
-                # to `/bin/sh` for every hook): `cmd.Run()` returns a
-                # non-ExitError before the child runs at all, with a
-                # 0.00s test duration and empty captured output. The
-                # plain `daemon` check (`go test -v ./...`, no cover)
-                # never flakes — so the trigger is coverage overhead +
-                # parallel forks, not the test logic. Capping
-                # in-package parallelism keeps the coverage numbers
-                # the same; only the wall time grows.
-                go test -parallel 2 -cover ./internal/... > coverage.out 2>&1 || {
+                go test -cover ./internal/... > coverage.out 2>&1 || {
                     cat coverage.out
                     echo "coverage: go test failed" >&2
                     exit 1
