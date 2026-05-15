@@ -765,14 +765,17 @@ func TestHandleProbeResultUnknownFamilyNoOp(t *testing.T) {
 	})
 }
 
-// TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate:
+// TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate:
 // for a dual-stack WAN under familyHealthPolicy=any, a single
 // family going unhealthy doesn't move the aggregate (the other
-// family is still healthy via cold-start). That is not a Decision,
-// so per PLAN §5.5 state.json is not republished — it is a
-// Decision snapshot, and the live per-family view is the
-// Prometheus endpoint, not state.json.
-func TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate(t *testing.T) {
+// family is still healthy via cold-start). No Decision fires, but
+// the per-family `healthy` field in state.json *does* change — so
+// per PLAN §5.5 state.json is republished anyway: it mirrors live
+// per-family Health, not just Decisions. Prior to the family-flip
+// republish this case left state.json stale relative to the
+// Prometheus view, and made it impossible to use state.json to
+// answer "is family X probe-healthy yet?" before a Decision lands.
+func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) {
 	t.Parallel()
 	cfg := testCfg()
 	// any-policy: aggregate stays true as long as ≥1 family is
@@ -805,12 +808,12 @@ func TestHandleProbeResultNoRepublishOnFamilyFlipWithoutAggregate(t *testing.T) 
 	if !d.wans["primary"].healthy() {
 		t.Error("aggregate flipped under `any` despite v6 still uncooked")
 	}
-	// No Decision fired, so state.json must not be written — it is a
-	// Decision snapshot (PLAN §5.5), not a live mirror. testDaemon
-	// skips bootstrap, so the file never existed; a republish on
-	// this path would have created it.
-	if _, err := os.Stat(d.cfg.Global.StatePath); err == nil {
-		t.Error("state.json was written on a non-Decision family flip")
+	// No Decision fired, but the per-family verdict transitioned —
+	// state.json must be rewritten so consumers see the live v4
+	// health. testDaemon skips bootstrap, so the file's mere
+	// existence proves the family-flip republish happened.
+	if _, err := os.Stat(d.cfg.Global.StatePath); err != nil {
+		t.Errorf("state.json not written on family flip: %v", err)
 	}
 }
 

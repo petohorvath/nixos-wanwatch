@@ -253,12 +253,15 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	if nowHealthy != prevHealthy {
 		d.recomputeAffectedGroups(ctx, r.Wan, reasonHealth)
 	}
-	// A per-family verdict can transition without moving the
-	// aggregate (e.g. v4 drops while v6 holds under
-	// familyHealthPolicy=any). That is not a Decision, so state.json
-	// is deliberately not republished — it is a Decision snapshot
-	// (PLAN §5.5), and the live per-family view is the Prometheus
-	// endpoint, updated above via recordProbeMetrics.
+	// Republish state.json on any per-family verdict transition.
+	// A family flip that *does* move the aggregate has already
+	// been captured by commitDecision via recomputeAffectedGroups
+	// above; one that doesn't (e.g. v4 drops while v6 holds under
+	// familyHealthPolicy=any) wouldn't otherwise update state.json
+	// at all, leaving wans[<name>].families[<f>].healthy stale
+	// relative to the live Prometheus view. PLAN §5.5: state.json
+	// mirrors per-family Health, not just Decisions.
+	d.writeStateSnapshot()
 }
 
 // handleLinkEvent updates per-WAN carrier/operstate. Carrier-down
@@ -271,6 +274,7 @@ func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 			continue
 		}
 		prevCarrier := ws.carrier
+		prevOperstate := ws.operstate
 		prevHealthy := ws.healthy()
 		ws.carrier = e.Carrier
 		ws.operstate = e.Operstate
@@ -283,6 +287,16 @@ func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 
 		if ws.healthy() != prevHealthy {
 			d.recomputeAffectedGroups(ctx, ws.name, reasonCarrier)
+		}
+		// Republish state.json on any carrier/operstate transition.
+		// LinkSubscriber dedupes upstream so a fresh event always
+		// represents a real change, but a change that doesn't move
+		// ws.healthy() (e.g. operstate down → dormant) wouldn't fire
+		// recomputeAffectedGroups and so wouldn't otherwise update
+		// state.json — leaving the wans[<name>].carrier/operstate
+		// fields drifted from reality.
+		if prevCarrier != ws.carrier || prevOperstate != ws.operstate {
+			d.writeStateSnapshot()
 		}
 		return
 	}
@@ -553,6 +567,13 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 		// needs no further action.
 		_ = d.applyRoutes(ctx, g, want.Wan, probe.Family(e.Family))
 	}
+	// Republish state.json on any gateway-cache mutation. A change
+	// that completes a pending Decision was captured by
+	// commitDecision above; everything else (a new gateway on the
+	// already-active WAN, a gateway disappearing on the standby)
+	// wouldn't otherwise update state.json, leaving the
+	// wans[<name>].gateways[v4|v6] fields stale.
+	d.writeStateSnapshot()
 }
 
 // writeStateSnapshot serializes the runtime state into the form

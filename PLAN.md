@@ -376,10 +376,21 @@ Three artifacts comprise the daemon's public contract:
    (`schema: 1`). Written by the NixOS module, read by the daemon at
    startup. Full schema in `docs/specs/daemon-config.md`.
 2. **State file** `/run/wanwatch/state.json` — schema versioned
-   (`schema: 1`). Written atomically (tmpfile + rename) once a
-   Decision's routes have converged in the kernel, plus an initial
-   publish at startup. Consumers (Telegraf, custom scripts,
-   `wanwatchctl`) read it. Full schema in `docs/specs/daemon-state.md`.
+   (`schema: 1`). Written atomically (tmpfile + rename) on any
+   observable state transition — a per-family Health verdict
+   flips, a WAN's carrier/operstate changes, the kernel's
+   gateway-cache mutates on a watched interface, or a Decision's
+   routes converge in the kernel — plus an initial publish at
+   startup. Consumers (Telegraf, custom scripts, `wanwatchctl`)
+   read it. Full schema in `docs/specs/daemon-state.md`.
+
+   Per-probe-sample stats (`rttSeconds`, `jitterSeconds`,
+   `lossRatio`) are *not* republished every cycle — they belong on
+   the Prometheus endpoint and would otherwise turn state.json
+   into a multi-write-per-second hot path. State.json snapshots
+   them at each transition, which is enough for consumers that
+   want a consistent "what's the daemon's current view" read but
+   need to query the metrics endpoint for live trend data.
 3. **Hook env vars** — when invoking `/etc/wanwatch/hooks/{up,down,switch}.d/*`:
 
    ```
