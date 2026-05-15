@@ -114,12 +114,12 @@
             statix = {
               enable = true;
               pass_filenames = false;
-              entry = "${pkgs.statix}/bin/statix check .";
+              entry = "${pkgs.lib.getExe pkgs.statix} check .";
             };
             deadnix = {
               enable = true;
               pass_filenames = false;
-              entry = "${pkgs.deadnix}/bin/deadnix --fail .";
+              entry = "${pkgs.lib.getExe pkgs.deadnix} --fail .";
             };
             go-vet = {
               enable = true;
