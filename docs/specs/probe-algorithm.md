@@ -98,11 +98,14 @@ FamilyStats{
     RTTMicros:    mean(t.RTTMicros    for t in nonEmptyTargets),
     JitterMicros: mean(t.JitterMicros for t in nonEmptyTargets),
     LossRatio:    mean(t.LossRatio    for t in nonEmptyTargets),
+    WindowFilled: every target's window has wrapped at least once,
     PerTarget:    all targets (including empty),
 }
 ```
 
 Targets with empty windows still appear in `PerTarget` (as zeros) so the Prometheus label set stays stable through daemon startup — Prometheus dislikes labels that appear and disappear.
+
+`WindowFilled` is the signal the daemon's cold-start gate keys on (PLAN §8): hysteresis only seeds once *every* per-target window is full, so a Lost first Sample (the probe loop fires before the route to the target has converged) doesn't drag the seed verdict unhealthy and produce a spurious down→up Decision pair when probes catch up.
 
 ## What this is NOT
 

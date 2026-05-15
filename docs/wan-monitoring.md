@@ -92,7 +92,7 @@ Each declared (WAN, family) tuple produces an independent Healthy verdict. The v
 | `"all"` (default) | every probed family must be healthy |
 | `"any"` | at least one probed family must be healthy |
 
-The cold-start path treats uncooked families (no ProbeResult yet) as a healthy vote — see [`docs/selector.md`](./selector.md).
+The cold-start path treats uncooked families (no full probe Window yet) as a healthy vote — see [`docs/selector.md`](./selector.md).
 
 ## Groups and Strategies
 

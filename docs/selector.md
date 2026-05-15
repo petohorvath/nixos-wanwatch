@@ -116,7 +116,9 @@ func (h *HysteresisState) Observe(observed bool, up, down int) bool {
 
 ### Cold-start path
 
-Until the first `ProbeResult` lands for a family, that family's `familyState.cooked` flag is `false`. `combineFamilies` treats an uncooked family as a healthy vote — `carrier=up` alone is enough to mark the WAN healthy and fire an initial Decision. Once the first sample arrives, the hysteresis-gated verdict takes over.
+Until the first *full* probe Window cooks for a family, that family's `familyState.cooked` flag is `false`. `combineFamilies` treats an uncooked family as a healthy vote — `carrier=up` alone is enough to mark the WAN healthy and fire an initial Decision. Once a full Window lands (`FamilyStats.WindowFilled = true`), the hysteresis-gated verdict takes over via `Hysteresis.Seed` and subsequent `ProbeResult`s feed `Hysteresis.Observe`.
+
+The "first *full* Window" qualifier matters: emitting on every probe Sample (as the daemon used to) lets a Lost first Sample seed the hysteresis unhealthy, so a healthy WAN flaps down→up once probes converge — a spurious Decision pair PLAN §8 expressly wants to avoid. Waiting for a filled Window means we evaluate a stable verdict, not a one-off transient.
 
 This honors PLAN §8: "health is unknown but carrier is at least known". Without it, a freshly-booted daemon would publish no Selection until probes finished accumulating samples.
 

@@ -40,14 +40,6 @@ the apply would make hooks part of the apply transaction, which PLAN
 first. `daemon/cmd/wanwatchd/daemon.go` (runHooks / commitDecision),
 PLAN §5.5 env-var contract.
 
-### Per-family probe targets
-
-Today the same `probe.targets` list feeds both families; the daemon
-splits by IP literal at runtime. Some operators want disjoint target
-lists per family (e.g. only ping their ISP's v4 anycast, not its
-flaky v6 endpoint). Add `probe.targetsV4` / `probe.targetsV6` as
-optional overrides of the merged list. `daemon/cmd/wanwatchd/daemon.go:101`.
-
 ### Conntrack flush on Decision
 
 `apply.FlushBySource` is implemented + tested but not wired into the
@@ -157,18 +149,22 @@ implementation is mechanical.
 
 ## tracking — waiting on upstream
 
-### Bump nixpkgs once go1.26.3+ lands
+### Bump nixpkgs once Go stdlib `net` fix lands
 
 `.github/workflows/audit.yml`'s `govulncheck` job stays red on
-GO-2026-4971 — a Windows-only panic in `net.Dial` /
-`net.ListenPacket` introduced in `net@go1.26.2` and fixed in
-`net@go1.26.3`. The daemon is Linux-only so the call paths are
-unreachable in practice, but govulncheck flags any reachable
-import of the affected functions regardless of build target.
+GO-2026-4971 — a Windows-only panic in `net.Dial` and
+`net.LookupPort` when handling NUL bytes. govulncheck reports
+`Found in: net@go1.25.9`, `Fixed in: net@go1.25.10` against our
+nixos-25.11 pin (stable's current Go is 1.25.9); the `nixos-unstable`
+channel ships Go 1.26.2 which is also flagged (fixed somewhere on the
+1.26.x branch). The daemon is Linux-only so the call paths are
+unreachable in practice, but govulncheck flags any reachable import
+of the affected functions regardless of build target.
 
-Resolution is a `nix flake update nixpkgs` once `nixos-unstable`
-ships go1.26.3+. No code change on our side; verify by running
-the audit workflow afterwards and watching the run go green.
+Resolution is a `nix flake update nixpkgs` once the channel we pin
+ships the fixed point release (1.25.10+ on stable, or 1.26.3+ on
+unstable). No code change on our side; verify by re-dispatching
+the audit workflow and watching the govulncheck job go green.
 
 ---
 

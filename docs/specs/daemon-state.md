@@ -6,6 +6,18 @@ The JSON snapshot the daemon publishes to `services.wanwatch.global.statePath` (
 
 Produced by `daemon/internal/state/state.go`; the on-disk shape exactly matches `State` and `State.Wans/Groups` value types.
 
+## When `state.json` is rewritten
+
+The daemon republishes on every observable state transition, not just on Selection changes. Specifically:
+
+- **Bootstrap** — once at daemon start, before any event is processed. Gives early consumers a consistent view of the configured WANs/Groups even before the first probe Sample.
+- **Decision commit** — when a group's `active` member changes and the routes have converged in the kernel. Fires the hooks immediately after.
+- **Per-family Health transition** — when a `(WAN, family)` flips its `healthy` verdict. A flip that doesn't move the WAN aggregate (e.g. v4 drops while v6 holds under `familyHealthPolicy=any`) would otherwise be invisible in `state.json`.
+- **Carrier / operstate change** — any rtnetlink LinkEvent that mutates `wans[<name>].carrier` or `wans[<name>].operstate`.
+- **Gateway-cache mutation** — any default-route Add/Del on a watched interface that changes `wans[<name>].gateways.{v4,v6}`.
+
+Per-probe-sample stats (`rttSeconds`, `jitterSeconds`, `lossRatio`) are *not* republished every cycle — those belong on the Prometheus metrics endpoint, and a multi-write-per-second `state.json` would dwarf the rest of the daemon's I/O. `state.json` snapshots them at each transition, which is enough for the "consistent current view" use case; consumers that want live trend data should scrape `/run/wanwatch/metrics.sock` instead.
+
 ## Top-level shape
 
 ```json
