@@ -71,7 +71,7 @@ in
         # `unix://SOCK` with `/metrics` implied as the HTTP path
         # (Telegraf's documented default).
         urls = [ "unix://${cfg.global.metricsSocket}" ];
-        interval = tcfg.interval;
+        inherit (tcfg) interval;
         namepass = [ "wanwatch_*" ];
       }
     ];

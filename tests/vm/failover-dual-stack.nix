@@ -53,9 +53,11 @@ pkgs.testers.runNixOSTest {
           ];
         };
       };
-      networking.useNetworkd = true;
-      networking.useDHCP = false;
-      networking.firewall.enable = lib.mkForce false;
+      networking = {
+        useNetworkd = true;
+        useDHCP = false;
+        firewall.enable = lib.mkForce false;
+      };
 
       environment.systemPackages = [
         pkgs.jq

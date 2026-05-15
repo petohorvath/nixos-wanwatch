@@ -28,19 +28,25 @@ pkgs.testers.runNixOSTest {
 
       boot.kernelModules = [ "dummy" ];
 
-      systemd.network.netdevs."10-wan0".netdevConfig = {
-        Kind = "dummy";
-        Name = "wan0";
+      systemd = {
+        network.netdevs."10-wan0".netdevConfig = {
+          Kind = "dummy";
+          Name = "wan0";
+        };
+        network.networks."20-wan0" = {
+          matchConfig.Name = "wan0";
+          networkConfig.LinkLocalAddressing = "no";
+          linkConfig.RequiredForOnline = "no";
+          address = [ "192.0.2.10/24" ];
+        };
+        # telegraf needs the StateDirectory to write to.
+        services.telegraf.serviceConfig.StateDirectory = "telegraf";
       };
-      systemd.network.networks."20-wan0" = {
-        matchConfig.Name = "wan0";
-        networkConfig.LinkLocalAddressing = "no";
-        linkConfig.RequiredForOnline = "no";
-        address = [ "192.0.2.10/24" ];
+      networking = {
+        useNetworkd = true;
+        useDHCP = false;
+        firewall.enable = lib.mkForce false;
       };
-      networking.useNetworkd = true;
-      networking.useDHCP = false;
-      networking.firewall.enable = lib.mkForce false;
 
       environment.systemPackages = [ pkgs.jq ];
 
@@ -92,8 +98,6 @@ pkgs.testers.runNixOSTest {
         };
       };
 
-      # telegraf needs the StateDirectory to write to.
-      systemd.services.telegraf.serviceConfig.StateDirectory = "telegraf";
     };
 
   testScript = ''

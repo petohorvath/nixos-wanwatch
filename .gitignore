@@ -2,6 +2,11 @@
 result
 result-*
 
+# git-hooks.nix regenerates .pre-commit-config.yaml on every
+# `nix develop`; the source of truth is `preCommitCheckFor` in
+# flake.nix.
+.pre-commit-config.yaml
+
 # direnv
 .direnv/
 

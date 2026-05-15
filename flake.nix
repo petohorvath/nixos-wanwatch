@@ -29,14 +29,26 @@
     # nix-nftzones is only used by the nftzones-integration VM
     # scenario (tests/vm/nftzones-integration.nix). Same
     # local-dev override pattern as libnet.
-    nftzones.url = "github:petohorvath/nix-nftzones";
-    nftzones.inputs.nixpkgs.follows = "nixpkgs";
-    nftzones.inputs.libnet.follows = "libnet";
-    nftzones.inputs.nftypes.url = "github:petohorvath/nix-nftypes";
-    nftzones.inputs.nftypes.inputs.nixpkgs.follows = "nixpkgs";
+    nftzones = {
+      url = "github:petohorvath/nix-nftzones";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        libnet.follows = "libnet";
+        nftypes.url = "github:petohorvath/nix-nftypes";
+        nftypes.inputs.nixpkgs.follows = "nixpkgs";
+      };
+    };
 
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # git-hooks.nix (formerly cachix/pre-commit-hooks.nix) installs
+    # the pre-commit framework into .git/hooks on `nix develop` and
+    # runs the hooks declared in `preCommitCheckFor` below: fast
+    # checks at commit time, the heavy nix-flake-check / golangci-lint
+    # run at push time.
+    git-hooks.url = "github:cachix/git-hooks.nix";
+    git-hooks.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
@@ -47,6 +59,7 @@
       libnet,
       nftzones,
       treefmt-nix,
+      git-hooks,
     }:
     let
       systems = [
@@ -59,6 +72,68 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
       treefmtFor = pkgs: treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
+
+      # preCommitCheckFor builds the git-hooks.nix hook set for `pkgs`.
+      # Two stages, declared in one place so the lock-step between
+      # what runs locally and what CI gates stays visible.
+      #
+      #   pre-commit (fast, ~1–2 s on a warm cache):
+      #     - treefmt    — nixfmt + gofumpt + goimports
+      #     - statix     — Nix anti-pattern lint
+      #     - deadnix    — unused-binding lint
+      #     - go-vet     — daemon-side go vet ./...
+      #
+      #   pre-push (heavy, ~10–15 s on a warm cache):
+      #     - go-lint    — full golangci-lint suite
+      #     - nix-checks — `nix build` of unit + integration + race +
+      #                    coverage; same gates CI runs, so a regression
+      #                    is caught before it leaves the laptop.
+      #
+      # `nix-checks` is Linux-only — the race + coverage + daemon
+      # derivations are gated `optionalAttrs isLinux` in `checks`.
+      preCommitCheckFor =
+        pkgs:
+        let
+          inherit (pkgs.stdenv.hostPlatform) system;
+        in
+        git-hooks.lib.${system}.run {
+          src = ./.;
+          hooks = {
+            treefmt = {
+              enable = true;
+              package = (treefmtFor pkgs).config.build.wrapper;
+            };
+            statix.enable = true;
+            deadnix.enable = true;
+            go-vet = {
+              enable = true;
+              name = "go vet (daemon)";
+              description = "go vet ./... in the daemon module.";
+              entry = "${pkgs.runtimeShell} -c 'cd daemon && ${pkgs.go}/bin/go vet ./...'";
+              files = "^daemon/.*\\.go$";
+              pass_filenames = false;
+            };
+            go-lint = {
+              enable = true;
+              name = "golangci-lint (daemon)";
+              description = "Full golangci-lint suite on the daemon module.";
+              entry = "${pkgs.runtimeShell} -c 'cd daemon && ${pkgs.golangci-lint}/bin/golangci-lint run ./...'";
+              files = "^daemon/.*\\.go$";
+              pass_filenames = false;
+              stages = [ "pre-push" ];
+            };
+          }
+          // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            nix-checks = {
+              enable = true;
+              name = "nix flake checks (unit + integration + race + coverage)";
+              description = "Build the Nix unit, integration, daemon race, and Go coverage gates.";
+              entry = "${pkgs.runtimeShell} -c 'nix build --no-link .#checks.${system}.unit .#checks.${system}.integration .#checks.${system}.race .#checks.${system}.coverage'";
+              pass_filenames = false;
+              stages = [ "pre-push" ];
+            };
+          };
+        };
 
       # Per-channel pkgs lookup. `nixpkgs` is the unstable input
       # everything else uses; `nixpkgs-stable` is consulted only
@@ -159,6 +234,7 @@
             inherit pkgs;
             libnet = libnet.lib.withLib pkgs.lib;
           };
+          pre-commit = preCommitCheckFor pkgs;
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           daemon =
@@ -322,7 +398,6 @@
           # outputs are well-formed.
           integration = import ./tests/integration {
             inherit pkgs;
-            wanwatch = self.lib;
             nixosModule = self.nixosModules.default;
             telegrafModule = self.nixosModules.telegraf;
           };
@@ -361,10 +436,22 @@
             pkgs.gotools
             pkgs.golangci-lint
             pkgs.gofumpt
+            # Nix linters surfaced for both the pre-commit hook and
+            # for manual runs (`statix check`, `deadnix`).
+            pkgs.statix
+            pkgs.deadnix
           ];
+          preCommit = preCommitCheckFor pkgs;
         in
         {
-          default = pkgs.mkShell { packages = base; };
+          # The pre-commit shellHook installs .git/hooks/{pre-commit,
+          # pre-push} on every `nix develop` entry — declarative
+          # config means a fresh clone is fully wired by one
+          # `nix develop`.
+          default = pkgs.mkShell {
+            packages = base;
+            inherit (preCommit) shellHook;
+          };
         }
       );
     };

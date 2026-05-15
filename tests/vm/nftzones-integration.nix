@@ -61,9 +61,26 @@ pkgs.testers.runNixOSTest {
           address = [ "192.168.10.1/24" ];
         };
       };
-      networking.useNetworkd = true;
-      networking.useDHCP = false;
-      networking.firewall.enable = lib.mkForce false;
+      networking = {
+        useNetworkd = true;
+        useDHCP = false;
+        firewall.enable = lib.mkForce false;
+        nftables.enable = true;
+        nftzones.enable = true;
+        nftzones.tables.fw = {
+          family = "inet";
+          zones = {
+            lan.interfaces = [ "lan0" ];
+            wan-home.interfaces = [ "wan0" ];
+          };
+          # Stamp the wanwatch-allocated mark on LAN-sourced
+          # forwarded traffic. PLAN §6.2's canonical example.
+          sroutes.lan-via-home = {
+            from = [ "lan" ];
+            rule = [ (mangle meta.mark config.services.wanwatch.marks.home-uplink) ];
+          };
+        };
+      };
 
       environment.systemPackages = [
         pkgs.jq
@@ -92,22 +109,6 @@ pkgs.testers.runNixOSTest {
             priority = 1;
           }
         ];
-      };
-
-      networking.nftables.enable = true;
-      networking.nftzones.enable = true;
-      networking.nftzones.tables.fw = {
-        family = "inet";
-        zones = {
-          lan.interfaces = [ "lan0" ];
-          wan-home.interfaces = [ "wan0" ];
-        };
-        # Stamp the wanwatch-allocated mark on LAN-sourced
-        # forwarded traffic. PLAN §6.2's canonical example.
-        sroutes.lan-via-home = {
-          from = [ "lan" ];
-          rule = [ (mangle meta.mark config.services.wanwatch.marks.home-uplink) ];
-        };
       };
     };
 

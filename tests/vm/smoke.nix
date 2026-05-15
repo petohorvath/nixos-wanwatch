@@ -54,8 +54,14 @@ pkgs.testers.runNixOSTest {
           address = [ "100.64.0.10/24" ];
         };
       };
-      networking.useNetworkd = true;
-      networking.useDHCP = false;
+      networking = {
+        useNetworkd = true;
+        useDHCP = false;
+        # Disable the default firewall — the test asserts that the
+        # daemon's fwmark rules land in the kernel, and a stateful
+        # firewall would muddy the route lookup.
+        firewall.enable = lib.mkForce false;
+      };
 
       environment.systemPackages = [ pkgs.jq ];
 
@@ -85,10 +91,6 @@ pkgs.testers.runNixOSTest {
         ];
       };
 
-      # Disable the default firewall — the test asserts that the
-      # daemon's fwmark rules land in the kernel, and a stateful
-      # firewall would muddy the route lookup.
-      networking.firewall.enable = lib.mkForce false;
     };
 
   testScript = ''

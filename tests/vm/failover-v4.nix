@@ -55,9 +55,11 @@ pkgs.testers.runNixOSTest {
           address = [ "100.64.0.10/24" ];
         };
       };
-      networking.useNetworkd = true;
-      networking.useDHCP = false;
-      networking.firewall.enable = lib.mkForce false;
+      networking = {
+        useNetworkd = true;
+        useDHCP = false;
+        firewall.enable = lib.mkForce false;
+      };
 
       environment.systemPackages = [
         pkgs.jq

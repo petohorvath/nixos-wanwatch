@@ -9,7 +9,6 @@
 */
 {
   pkgs,
-  wanwatch,
   nixosModule,
   telegrafModule,
 }:
@@ -59,7 +58,7 @@ let
   # resolve to real implementations rather than tripping "option
   # does not exist".
   evaluated = import (pkgs.path + "/nixos/lib/eval-config.nix") {
-    system = pkgs.stdenv.hostPlatform.system;
+    inherit (pkgs.stdenv.hostPlatform) system;
     modules = [
       nixosModule
       baseConfig
@@ -79,7 +78,7 @@ let
   # exists; the wanwatch telegraf module references
   # services.telegraf.extraConfig + telegraf user group membership.
   withTelegraf = import (pkgs.path + "/nixos/lib/eval-config.nix") {
-    system = pkgs.stdenv.hostPlatform.system;
+    inherit (pkgs.stdenv.hostPlatform) system;
     modules = [
       nixosModule
       telegrafModule

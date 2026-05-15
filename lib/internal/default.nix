@@ -38,7 +38,7 @@ let
   };
 
   wan = import ./wan.nix {
-    inherit lib libnet;
+    inherit libnet;
     internal = { inherit primitives probe; };
   };
 

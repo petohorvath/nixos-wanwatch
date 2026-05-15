@@ -31,10 +31,12 @@ let
   ];
 
   valueTypes = {
-    probe = wanwatch.probe;
-    member = wanwatch.member;
-    wan = wanwatch.wan;
-    group = wanwatch.group;
+    inherit (wanwatch)
+      probe
+      member
+      wan
+      group
+      ;
   };
 
   mkPresenceTest = typeName: module: fnName: {

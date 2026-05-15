@@ -42,93 +42,95 @@ pkgs.testers.runNixOSTest {
   # VLAN, sorted by attribute name:
   #   VLAN 1: isp1 → .1, router → .2
   #   VLAN 2: isp2 → .1, router → .2
-  nodes.isp1 =
-    { lib, ... }:
-    {
-      virtualisation.vlans = [ 1 ];
-      networking.firewall.enable = lib.mkForce false;
-    };
-  nodes.isp2 =
-    { lib, ... }:
-    {
-      virtualisation.vlans = [ 2 ];
-      networking.firewall.enable = lib.mkForce false;
-    };
-
-  nodes.router =
-    { lib, ... }:
-    {
-      imports = [ nixosModule ];
-      virtualisation.vlans = [
-        1
-        2
-      ];
-      networking.firewall.enable = lib.mkForce false;
-
-      environment.systemPackages = [
-        pkgs.jq
-        pkgs.iproute2
-      ];
-
-      services.wanwatch = {
-        enable = true;
-        wans = {
-          primary = {
-            interface = "eth1";
-            pointToPoint = true;
-            probe = {
-              targets.v4 = [ "192.168.1.1" ];
-              intervalMs = 200;
-              timeoutMs = 100;
-              windowSize = 4;
-              # Loose RTT bounds so this scenario only exercises
-              # the loss-driven path; degraded latency is not
-              # under test here. (Up < Down is a lib invariant.)
-              thresholds = {
-                lossPctDown = 25;
-                lossPctUp = 5;
-                rttMsDown = 5000;
-                rttMsUp = 4000;
-              };
-              hysteresis = {
-                consecutiveDown = 2;
-                consecutiveUp = 2;
-              };
-            };
-          };
-          backup = {
-            interface = "eth2";
-            pointToPoint = true;
-            probe = {
-              targets.v4 = [ "192.168.2.1" ];
-              intervalMs = 200;
-              timeoutMs = 100;
-              windowSize = 4;
-              thresholds = {
-                lossPctDown = 25;
-                lossPctUp = 5;
-                rttMsDown = 5000;
-                rttMsUp = 4000;
-              };
-              hysteresis = {
-                consecutiveDown = 2;
-                consecutiveUp = 2;
-              };
-            };
-          };
-        };
-        groups.home-uplink.members = [
-          {
-            wan = "primary";
-            priority = 1;
-          }
-          {
-            wan = "backup";
-            priority = 2;
-          }
-        ];
+  nodes = {
+    isp1 =
+      { lib, ... }:
+      {
+        virtualisation.vlans = [ 1 ];
+        networking.firewall.enable = lib.mkForce false;
       };
-    };
+    isp2 =
+      { lib, ... }:
+      {
+        virtualisation.vlans = [ 2 ];
+        networking.firewall.enable = lib.mkForce false;
+      };
+
+    router =
+      { lib, ... }:
+      {
+        imports = [ nixosModule ];
+        virtualisation.vlans = [
+          1
+          2
+        ];
+        networking.firewall.enable = lib.mkForce false;
+
+        environment.systemPackages = [
+          pkgs.jq
+          pkgs.iproute2
+        ];
+
+        services.wanwatch = {
+          enable = true;
+          wans = {
+            primary = {
+              interface = "eth1";
+              pointToPoint = true;
+              probe = {
+                targets.v4 = [ "192.168.1.1" ];
+                intervalMs = 200;
+                timeoutMs = 100;
+                windowSize = 4;
+                # Loose RTT bounds so this scenario only exercises
+                # the loss-driven path; degraded latency is not
+                # under test here. (Up < Down is a lib invariant.)
+                thresholds = {
+                  lossPctDown = 25;
+                  lossPctUp = 5;
+                  rttMsDown = 5000;
+                  rttMsUp = 4000;
+                };
+                hysteresis = {
+                  consecutiveDown = 2;
+                  consecutiveUp = 2;
+                };
+              };
+            };
+            backup = {
+              interface = "eth2";
+              pointToPoint = true;
+              probe = {
+                targets.v4 = [ "192.168.2.1" ];
+                intervalMs = 200;
+                timeoutMs = 100;
+                windowSize = 4;
+                thresholds = {
+                  lossPctDown = 25;
+                  lossPctUp = 5;
+                  rttMsDown = 5000;
+                  rttMsUp = 4000;
+                };
+                hysteresis = {
+                  consecutiveDown = 2;
+                  consecutiveUp = 2;
+                };
+              };
+            };
+          };
+          groups.home-uplink.members = [
+            {
+              wan = "primary";
+              priority = 1;
+            }
+            {
+              wan = "backup";
+              priority = 2;
+            }
+          ];
+        };
+      };
+  };
 
   testScript = ''
     import json

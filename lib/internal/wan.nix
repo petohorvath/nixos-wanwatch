@@ -54,7 +54,6 @@
   daemon-config JSON.
 */
 {
-  lib,
   libnet,
   internal,
 }:
@@ -66,7 +65,7 @@ let
     isValidName
     ;
   formatErrors = internal.primitives.formatErrors "wan.make";
-  probe = internal.probe;
+  inherit (internal) probe;
 
   # ===== Field-level validators =====
 
@@ -115,9 +114,7 @@ let
     ++ validateProbeResult probeResult;
 
   buildValue = cfg: probeResult: {
-    name = cfg.name;
-    interface = cfg.interface;
-    pointToPoint = cfg.pointToPoint;
+    inherit (cfg) name interface pointToPoint;
     probe = probeResult.value;
   };
 

@@ -48,7 +48,7 @@ let
   resolved = wanwatch.config.resolveAllocations groupValues;
 
   renderedConfig = wanwatch.config.toJSON {
-    global = cfg.global;
+    inherit (cfg) global;
     wans = wanValues;
     groups = groupValues;
   };
@@ -210,7 +210,7 @@ in
     users.users = lib.mkIf (cfg.user == "wanwatch") {
       wanwatch = {
         isSystemUser = true;
-        group = cfg.group;
+        inherit (cfg) group;
         description = "wanwatch multi-WAN failover daemon";
       };
     };

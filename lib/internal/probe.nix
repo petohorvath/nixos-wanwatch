@@ -267,14 +267,16 @@ let
     ++ validateFamilyHealthPolicy cfg.familyHealthPolicy;
 
   buildValue = cfg: parsedTargets: {
-    method = cfg.method;
+    inherit (cfg)
+      method
+      intervalMs
+      timeoutMs
+      windowSize
+      thresholds
+      hysteresis
+      familyHealthPolicy
+      ;
     targets = parsedTargets;
-    intervalMs = cfg.intervalMs;
-    timeoutMs = cfg.timeoutMs;
-    windowSize = cfg.windowSize;
-    thresholds = cfg.thresholds;
-    hysteresis = cfg.hysteresis;
-    familyHealthPolicy = cfg.familyHealthPolicy;
   };
 
   tryMake =

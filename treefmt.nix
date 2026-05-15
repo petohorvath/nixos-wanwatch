@@ -12,9 +12,11 @@
 _: {
   projectRootFile = "flake.nix";
 
-  programs.nixfmt.enable = true;
-  programs.gofumpt.enable = true;
-  programs.goimports.enable = true;
+  programs = {
+    nixfmt.enable = true;
+    gofumpt.enable = true;
+    goimports.enable = true;
+  };
 
   settings.global.excludes = [
     "LICENSE"
