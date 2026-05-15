@@ -149,5 +149,6 @@ func internetChecksum(b []byte) uint16 {
 	for sum>>16 != 0 {
 		sum = (sum & 0xFFFF) + (sum >> 16)
 	}
+	//nolint:gosec // G115: after the carry-fold above, sum is in [0, 0xFFFF].
 	return ^uint16(sum)
 }
