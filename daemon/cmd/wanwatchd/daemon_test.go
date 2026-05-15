@@ -1069,3 +1069,83 @@ func TestApplyRoutesErrorContract(t *testing.T) {
 		t.Errorf("apply_route_errors_total{home,v4} = %v, want 1", n)
 	}
 }
+
+func TestApplyRoutesExplicitFamilyWritesOnlyThat(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	// Seed both families' gateways so the filtered call has something
+	// to write — otherwise both families would soft-skip and the
+	// assertion below couldn't distinguish "filtered" from "skipped".
+	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.gateways.Set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
+	var fams []probe.Family
+	d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
+		fams = append(fams, r.Family)
+		return nil
+	}
+
+	if err := d.applyRoutes(t.Context(), d.groups["home"], "primary", probe.FamilyV4); err != nil {
+		t.Fatalf("applyRoutes(primary, v4) = %v, want nil", err)
+	}
+	if len(fams) != 1 || fams[0] != probe.FamilyV4 {
+		t.Errorf("written families = %v, want [v4]", fams)
+	}
+}
+
+func TestApplyRoutesExplicitFamilySkipsUnprobed(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	writes := countWrites(d)
+	// backup is v4-only in testCfg (its only target is 8.8.8.8), so
+	// passing FamilyV6 must be a no-op — the daemon has no route to
+	// maintain for an unprobed family.
+	if err := d.applyRoutes(t.Context(), d.groups["home"], "backup", probe.FamilyV6); err != nil {
+		t.Errorf("applyRoutes(backup, v6) = %v, want nil (unprobed family is a no-op)", err)
+	}
+	if *writes != 0 {
+		t.Errorf("writes = %d, want 0 (unprobed family must not call writeRoute)", *writes)
+	}
+}
+
+// TestHandleRouteEventRewritesOnlyEventFamily: a route event for one
+// family rewrites that family's default route and not the other.
+// RouteReplace is idempotent so a full rewrite would be harmless,
+// but per-family halves the netlink syscall count under flap.
+func TestHandleRouteEventRewritesOnlyEventFamily(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	markHealthy(d, "primary", "backup")
+
+	// Both families have a cached gateway up front so the cold-start
+	// commit's per-family writes can all land.
+	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.gateways.Set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
+
+	var written []probe.Family
+	d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
+		written = append(written, r.Family)
+		return nil
+	}
+
+	g := d.groups["home"]
+	d.recomputeGroup(t.Context(), g, reasonHealth)
+	if got := len(written); got != 2 {
+		t.Fatalf("cold-start writes = %d (families %v), want 2 (both)", got, written)
+	}
+
+	// A v4 RouteEvent must rewrite only v4.
+	cold := len(written)
+	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
+		Op:      rtnl.RouteEventAdd,
+		Iface:   "eth0",
+		Family:  rtnl.RouteFamilyV4,
+		Gateway: net.ParseIP("192.0.2.2"), // distinct → changed=true
+	})
+	after := written[cold:]
+	if len(after) != 1 {
+		t.Fatalf("RouteEvent writes = %d (families %v), want 1 (just v4)", len(after), after)
+	}
+	if after[0] != probe.FamilyV4 {
+		t.Errorf("RouteEvent rewrote family %v, want FamilyV4", after[0])
+	}
+}

@@ -177,15 +177,6 @@ the audit workflow afterwards and watching the run go green.
 Captured during reviews; deemed not worth blocking the original
 work, but flagged for later.
 
-### Per-family reapply on RouteEvent
-
-`handleRouteEvent` rewrites both families of the active WAN on any
-single-family route change. `RouteReplace` is idempotent so the
-extra netlink syscall is harmless, but tracking per-family dirty
-state would halve the syscalls under flap.
-`daemon/cmd/wanwatchd/daemon.go:291` (applyRoutes loop),
-`daemon.go:343` (reapply driver).
-
 ### Split `rtnl` into `rtnl/link` + `rtnl/route`
 
 The two subscriber types share zero symbols. Splitting the package

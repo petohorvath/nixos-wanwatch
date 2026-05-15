@@ -418,10 +418,16 @@ func (d *daemon) retryPendingApply(ctx context.Context, wan string) {
 	}
 }
 
-// applyRoutes writes the default route per probed family of the
-// new active WAN. PointToPoint WANs get scope-link routes (no
-// gateway needed). Non-PtP WANs use the gateway the GatewayCache
-// learned from the kernel's main routing table.
+// applyRoutes writes the default route per family of the active
+// WAN. With no `families` argument it writes every family the WAN
+// probes (commitDecision's full pass); handleRouteEvent passes a
+// single family — the one whose gateway changed — to skip the
+// netlink work for families that didn't. Families the WAN doesn't
+// probe are skipped either way.
+//
+// PointToPoint WANs get scope-link routes (no gateway needed);
+// non-PtP WANs use the gateway the GatewayCache learned from the
+// kernel's main routing table.
 //
 // It returns an error if any family *hard*-fails — the ifindex
 // lookup, or a netlink write — so commitDecision can hold the
@@ -429,7 +435,7 @@ func (d *daemon) retryPendingApply(ctx context.Context, wan string) {
 // is *not* a failure: that write is intentionally deferred (PLAN
 // §6), and handleRouteEvent reapplies it once the gateway is
 // discovered.
-func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan string) error {
+func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan string, families ...probe.Family) error {
 	ws, ok := d.wans[activeWan]
 	if !ok {
 		return fmt.Errorf("apply routes: unknown wan %q", activeWan)
@@ -440,8 +446,13 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "ifindex_lookup").Inc()
 		return fmt.Errorf("apply routes: ifindex %q: %w", ws.cfg.Interface, err)
 	}
-	var failed int
-	for fam := range ws.families {
+
+	// writeOne does the per-family route build + write + error
+	// handling — extracted as a closure so the full-pass and the
+	// single-family RouteEvent reapply share one body. Returns true
+	// on a hard write failure, false on a soft skip (no cached
+	// gateway) or success.
+	writeOne := func(fam probe.Family) bool {
 		famLabel := fam.String()
 		route := apply.DefaultRoute{
 			Family:  fam,
@@ -457,7 +468,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
 					"group", g.cfg.Name, "wan", activeWan, "family", famLabel,
 					"iface", ws.cfg.Interface)
-				continue
+				return false
 			}
 			route.Gateway = gw
 		}
@@ -467,7 +478,29 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 		if err != nil {
 			d.logger.Error("route write", "group", g.cfg.Name, "family", famLabel, "err", err)
 			d.metrics.ApplyRouteErrors.WithLabelValues(g.cfg.Name, famLabel).Inc()
-			failed++
+			return true
+		}
+		return false
+	}
+
+	var failed int
+	if len(families) == 0 {
+		for fam := range ws.families {
+			if writeOne(fam) {
+				failed++
+			}
+		}
+	} else {
+		// Explicit family set (the RouteEvent reapply path) — skip
+		// families the WAN doesn't probe; the daemon has no route to
+		// maintain for an unprobed family.
+		for _, fam := range families {
+			if _, probesIt := ws.families[fam]; !probesIt {
+				continue
+			}
+			if writeOne(fam) {
+				failed++
+			}
 		}
 	}
 	if failed > 0 {
@@ -482,11 +515,9 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 // (and if the gateway differs from the prior entry, kicks a
 // reapply); RTM_DELROUTE clears the entry.
 //
-// The reapply path is intentionally non-discriminating: it
-// rewrites every family of the active WAN, not just the one that
-// changed. RouteReplace is idempotent so re-writing a known-good
-// route costs one extra netlink syscall — cheaper than tracking
-// per-family dirty state.
+// The reapply rewrites only the family whose gateway changed —
+// RouteReplace is idempotent so a full rewrite would be harmless,
+// but per-family halves the netlink syscall count under flap.
 func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	prev, hadPrev := d.gateways.Get(e.Iface, e.Family)
 	switch e.Op {
@@ -516,11 +547,11 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 			d.commitDecision(ctx, g)
 			continue
 		}
-		// Already converged; a gateway change just needs the routes
-		// rewritten. applyRoutes logs its own per-family failures and
-		// the health pipeline handles a vanished interface, so a
-		// failure here needs no further action.
-		_ = d.applyRoutes(ctx, g, want.Wan)
+		// Already converged; rewrite just the family whose gateway
+		// changed. applyRoutes logs its own failures and the health
+		// pipeline handles a vanished interface, so a failure here
+		// needs no further action.
+		_ = d.applyRoutes(ctx, g, want.Wan, probe.Family(e.Family))
 	}
 }
 
