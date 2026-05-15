@@ -218,6 +218,20 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip link set eth1 up")
     router.succeed("ip link set eth2 up")
 
+    # Pin the network setup before any probe assertion: wanwatchd
+    # starts in parallel with networkd, so it can begin its probe
+    # loop before the router's eth2 has its VLAN-2 IP or before
+    # isp2 finishes booting. On a fast machine the sliding window
+    # converges anyway; under GitHub-runner load the first dozen
+    # probes can all be unanswered, and a hysteresis with
+    # consecutiveUp=2 keeps the WAN unhealthy long enough that the
+    # 15s probe-healthy gate below times out — a false negative
+    # that looks like a daemon bug. Block here until *router →
+    # both ISPs* L3 reachability is real, then let the gate
+    # actually measure the daemon.
+    router.wait_until_succeeds("ping -c 1 -W 1 192.168.1.1")
+    router.wait_until_succeeds("ping -c 1 -W 1 192.168.2.1")
+
     # 1. Primary wins on cold-start carrier health, then the probe
     #    loop cooks both WANs as healthy. After convergence we
     #    expect Active=primary (lowest priority among healthy).
