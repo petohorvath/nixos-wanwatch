@@ -128,7 +128,18 @@
               enable = true;
               name = "golangci-lint (daemon)";
               description = "Full golangci-lint suite on the daemon module.";
-              entry = "${pkgs.runtimeShell} -c 'cd daemon && ${pkgs.golangci-lint}/bin/golangci-lint run ./...'";
+              # golangci-lint shells out to `go env`, `go list`, etc.,
+              # so the hook needs `go` (and gcc for the cgo-bound race
+              # path) on PATH — the user's invocation shell may not be
+              # `nix develop`.
+              entry = ''
+                ${pkgs.runtimeShell} -c 'export PATH="${
+                  pkgs.lib.makeBinPath [
+                    pkgs.go
+                    pkgs.gcc
+                  ]
+                }:$PATH" && cd daemon && ${pkgs.golangci-lint}/bin/golangci-lint run ./...'
+              '';
               files = "^daemon/.*\\.go$";
               pass_filenames = false;
               stages = [ "pre-push" ];
