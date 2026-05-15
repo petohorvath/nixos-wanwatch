@@ -77,6 +77,12 @@ func TestRunHonorsTimeout(t *testing.T) {
 	results := r.Run(context.Background(), HookContext{Event: EventSwitch})
 	elapsed := time.Since(start)
 
+	// Surface elapsed, err, exit code, and output unconditionally so a
+	// CI failure tells us *why* the script returned fast — not just
+	// that TimedOut was false.
+	t.Logf("elapsed=%v TimedOut=%v ExitCode=%d Err=%v Output=%q",
+		elapsed, results[0].TimedOut, results[0].ExitCode, results[0].Err, results[0].Output)
+
 	if elapsed > 2*time.Second {
 		t.Errorf("Run took %v — timeout did not fire", elapsed)
 	}
