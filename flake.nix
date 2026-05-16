@@ -171,63 +171,44 @@
       # against `pkgs`. Used twice from `checks`: once with the
       # unstable `pkgs` (the historical default) and once with the
       # stable channel's pkgs.
-      mkVmChecks = pkgs: {
-        smoke = import ./tests/vm/smoke.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
+      #
+      # `scenario` lifts the repeated `import ./tests/vm/<name>.nix
+      # { inherit pkgs; nixosModule = self.nixosModules.default; }`
+      # boilerplate; extras are merged in for scenarios needing the
+      # telegraf or nftzones modules.
+      mkVmChecks =
+        pkgs:
+        let
+          scenario =
+            name: extras:
+            import (./tests/vm + "/${name}.nix") (
+              {
+                inherit pkgs;
+                nixosModule = self.nixosModules.default;
+              }
+              // extras
+            );
+        in
+        {
+          smoke = scenario "smoke" { };
+          failover-v4 = scenario "failover-v4" { };
+          failover-v6 = scenario "failover-v6" { };
+          failover-dual-stack = scenario "failover-dual-stack" { };
+          failover-probe-loss = scenario "failover-probe-loss" { };
+          failover-probe-loss-v6 = scenario "failover-probe-loss-v6" { };
+          cold-start = scenario "cold-start" { };
+          recovery = scenario "recovery" { };
+          hooks = scenario "hooks" { };
+          metrics = scenario "metrics" {
+            telegrafModule = self.nixosModules.telegraf;
+          };
+          family-health-policy = scenario "family-health-policy" { };
+          gateway-discovery = scenario "gateway-discovery" { };
+          nftzones-integration = scenario "nftzones-integration" {
+            nftzonesModule = nftzones.nixosModules.default;
+            nftypes = nftzones.inputs.nftypes.lib;
+          };
         };
-        failover-v4 = import ./tests/vm/failover-v4.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        failover-v6 = import ./tests/vm/failover-v6.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        failover-dual-stack = import ./tests/vm/failover-dual-stack.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        failover-probe-loss = import ./tests/vm/failover-probe-loss.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        failover-probe-loss-v6 = import ./tests/vm/failover-probe-loss-v6.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        cold-start = import ./tests/vm/cold-start.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        recovery = import ./tests/vm/recovery.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        hooks = import ./tests/vm/hooks.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        metrics = import ./tests/vm/metrics.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-          telegrafModule = self.nixosModules.telegraf;
-        };
-        family-health-policy = import ./tests/vm/family-health-policy.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        gateway-discovery = import ./tests/vm/gateway-discovery.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-        };
-        nftzones-integration = import ./tests/vm/nftzones-integration.nix {
-          inherit pkgs;
-          nixosModule = self.nixosModules.default;
-          nftzonesModule = nftzones.nixosModules.default;
-          nftypes = nftzones.inputs.nftypes.lib;
-        };
-      };
 
       # Flatten {name = drv;} → {vm-${name} = drv;} for one
       # channel's worth of VM scenarios.
