@@ -1013,9 +1013,15 @@ a specific commit and explained in the body.
 ### 11.6 Modern Nix — flake first
 
 - `flake.nix` is the canonical entry point. No `default.nix` at root.
-- Outputs: `lib.<system>`, `nixosModules.{default,telegraf}`,
+- Outputs: `lib` (system-agnostic — see below), `nixosModules.{default,telegraf}`,
   `packages.<system>.{wanwatchd,default}`, `checks.<system>.*`,
   `formatter.<system>`, `devShells.<system>.default`.
+- The `lib` output is intentionally **not** wrapped in `forAllSystems`.
+  It operates on Nix values (validators, allocators, JSON renderers)
+  and inherits `nixpkgs.lib` at import time — a per-system wrapping
+  would yield the same attrset for every system. Consumers wanting
+  the lib bound against a different nixpkgs's `lib` can call
+  `import (wanwatch + "/lib") { lib = …; libnet = …; }` directly.
 - Inputs minimal and pinned, each with
   `.inputs.nixpkgs.follows = "nixpkgs"`.
 - No `flake-utils` / `flake-parts`. Hand-written `forAllSystems`
