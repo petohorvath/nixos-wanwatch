@@ -1,34 +1,64 @@
 /*
-  failover-probe-loss-v6 — IPv6 counterpart of failover-probe-loss.
-  Same VLAN-on-the-test-driver topology and same netem-driven loss
-  injection, but the probes ride ICMPv6 over manually-assigned ULA
-  addresses (the test driver only auto-IPs v4).
+  failover-probe-loss-v6 — IPv6 counterpart of failover-probe-loss,
+  extended into a multi-phase probe-pipeline workout. Probes ride
+  ICMPv6 over manually-assigned ULA addresses (the test driver only
+  auto-IPs v4); netem at the egress qdisc drives the loss scenarios.
 
   Exists because the other v6 scenarios (failover-v6, recovery,
   failover-dual-stack) all use dummy interfaces with
   intervalMs=600000 — they are carrier-driven, so they never
   exercise the v6 probe + threshold + hysteresis chain on a real
   packet path. Without this scenario, a regression in the
-  golang.org/x/net/icmp v6 socket bind, the v6 RTT statistics, or
-  the v6 branch of combineFamilies would slip through CI.
+  golang.org/x/net/icmp v6 socket bind, the v6 RTT statistics, the
+  v6 branch of combineFamilies, or the per-target → per-family
+  aggregator would slip through.
 
-  Topology mirrors failover-probe-loss.nix:
+  Topology:
 
     isp1 ─── VLAN 1 ─── eth1 ┐
                               ├── router
     isp2 ─── VLAN 2 ─── eth2 ┘
 
-  v6 plan (added imperatively after boot — the test driver does not
-  auto-assign v6):
+  v6 plan (added imperatively after boot — two addresses per ISP so
+  the per-target aggregation phase has somewhere to break a target
+  without losing the whole WAN):
 
-    isp1   eth1   fd00:1::1/64
-    isp2   eth1   fd00:2::1/64
+    isp1   eth1   fd00:1::1/64 + fd00:1::2/64
+    isp2   eth1   fd00:2::1/64 + fd00:2::2/64
     router eth1   fd00:1::3/64
     router eth2   fd00:2::3/64
 
-  Sequence: identical to failover-probe-loss but on v6 — cook both
-  probes healthy, netem 100 % loss on eth1, assert switch to backup
-  with reason="health", clear netem, assert primary takes back over.
+  Tunings — single windowSize/hysteresis set across all phases so
+  the daemon's behaviour is comparable phase-to-phase:
+
+    intervalMs  200        ⇒ 5 cycles/sec
+    timeoutMs   100
+    windowSize  10         ⇒ window cooks in ~2s
+    consecDown  3          ⇒ failover after ~600ms of stable verdict
+    consecUp    3          ⇒ recovery after ~600ms of stable verdict
+    lossPctDown 25
+    lossPctUp    5
+    rttMsDown   5000       (loose — RTT not exercised)
+    rttMsUp     4000
+
+  Phases (linear, each lands in a known healthy state for the next):
+
+    A  Cold-start cook + 100% netem ⇒ failover to backup
+    B  Clear netem ⇒ primary recovery
+    C  100% netem for ~2 cycles ⇒ window damping holds the verdict;
+       no Decision recorded (blip suppression)
+    D  Band-pass:
+         D1  50% netem ⇒ above lossPctDown ⇒ failover
+         D2  15% netem ⇒ between lossPctUp and lossPctDown ⇒
+             verdict held unhealthy, backup stays active
+         D3  0% netem ⇒ below lossPctUp ⇒ recovery
+    E  Per-target aggregation: delete fd00:1::2 from isp1 ⇒
+       primary's per-(WAN,family) loss averages to 50% across the
+       two targets ⇒ failover; restore ⇒ recovery
+    F  Daemon restart: systemctl restart wanwatch.service ⇒
+       state.json is republished from bootstrap; the cold-start
+       carrier path keeps primary active without a probe-driven
+       Decision.
 */
 {
   pkgs,
@@ -74,10 +104,13 @@ pkgs.testers.runNixOSTest {
               interface = "eth1";
               pointToPoint = true;
               probe = {
-                targets.v6 = [ "fd00:1::1" ];
+                targets.v6 = [
+                  "fd00:1::1"
+                  "fd00:1::2"
+                ];
                 intervalMs = 200;
                 timeoutMs = 100;
-                windowSize = 4;
+                windowSize = 10;
                 thresholds = {
                   lossPctDown = 25;
                   lossPctUp = 5;
@@ -85,8 +118,8 @@ pkgs.testers.runNixOSTest {
                   rttMsUp = 4000;
                 };
                 hysteresis = {
-                  consecutiveDown = 2;
-                  consecutiveUp = 2;
+                  consecutiveDown = 3;
+                  consecutiveUp = 3;
                 };
               };
             };
@@ -94,10 +127,13 @@ pkgs.testers.runNixOSTest {
               interface = "eth2";
               pointToPoint = true;
               probe = {
-                targets.v6 = [ "fd00:2::1" ];
+                targets.v6 = [
+                  "fd00:2::1"
+                  "fd00:2::2"
+                ];
                 intervalMs = 200;
                 timeoutMs = 100;
-                windowSize = 4;
+                windowSize = 10;
                 thresholds = {
                   lossPctDown = 25;
                   lossPctUp = 5;
@@ -105,8 +141,8 @@ pkgs.testers.runNixOSTest {
                   rttMsUp = 4000;
                 };
                 hysteresis = {
-                  consecutiveDown = 2;
-                  consecutiveUp = 2;
+                  consecutiveDown = 3;
+                  consecutiveUp = 3;
                 };
               };
             };
@@ -131,6 +167,7 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import json
+    import time
 
 
     def wait_for_active(router, want, timeout=10):
@@ -179,6 +216,25 @@ pkgs.testers.runNixOSTest {
         return metric(scrape(router), series)
 
 
+    def loss_ratio(router, wan, family="v6"):
+        state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+        return state["wans"][wan]["families"][family]["lossRatio"]
+
+
+    def assert_unchanged_for(router, group, seconds, what):
+        """Sample the health_decisions counter at start + after
+        `seconds`; raise if it advanced. Used to pin "no Decision
+        happened in this window" rather than wait for a thing that
+        shouldn't happen."""
+        before = health_decisions(router, group)
+        router.execute(f"sleep {seconds}")
+        after = health_decisions(router, group)
+        assert after == before, (
+            f"{what}: health-decisions advanced {before} → {after} "
+            f"in {seconds}s — expected unchanged"
+        )
+
+
     start_all()
     isp1.wait_for_unit("multi-user.target")
     isp2.wait_for_unit("multi-user.target")
@@ -195,71 +251,153 @@ pkgs.testers.runNixOSTest {
     router.succeed("sysctl -w net.ipv6.conf.eth2.accept_dad=0")
 
     isp1.succeed("ip -6 addr add fd00:1::1/64 dev eth1")
+    isp1.succeed("ip -6 addr add fd00:1::2/64 dev eth1")
     isp2.succeed("ip -6 addr add fd00:2::1/64 dev eth1")
+    isp2.succeed("ip -6 addr add fd00:2::2/64 dev eth1")
     router.succeed("ip -6 addr add fd00:1::3/64 dev eth1")
     router.succeed("ip -6 addr add fd00:2::3/64 dev eth2")
 
     router.succeed("ip link set eth1 up")
     router.succeed("ip link set eth2 up")
 
-    # Pin L3 reachability before any probe assertion (see the v4
-    # scenario for the long-form rationale — same race here on v6).
-    router.wait_until_succeeds("ping -6 -c 1 -W 1 fd00:1::1", timeout=30)
-    router.wait_until_succeeds("ping -6 -c 1 -W 1 fd00:2::1", timeout=30)
+    # Pin L3 reachability for every target before any probe
+    # assertion (see failover-probe-loss.nix for the long-form race
+    # rationale — same applies here on v6).
+    for target in ("fd00:1::1", "fd00:1::2", "fd00:2::1", "fd00:2::2"):
+        router.wait_until_succeeds(f"ping -6 -c 1 -W 1 {target}", timeout=30)
 
-    # 1. Primary wins on cold-start carrier health.
+    # ==== Phase A — cold-start cook + 100% loss ⇒ failover ====
+
     wait_for_active(router, "primary")
-
-    # 2. Pre-injection: both WANs must be probe-healthy on v6, not
-    #    just carrier-up — otherwise step 4's "failover to backup"
-    #    races a backup whose v6 Window hasn't cooked yet.
     wait_for_wan_healthy(router, "primary")
     wait_for_wan_healthy(router, "backup")
 
-    before = health_decisions(router, "home-uplink")
-
-    # 3. 100 % packet loss on the primary uplink — netem at the
-    #    egress qdisc drops every outbound packet (family-agnostic),
-    #    so v6 ICMP echoes never reach isp1.
+    before_a = health_decisions(router, "home-uplink")
     router.succeed("tc qdisc add dev eth1 root netem loss 100%")
-
-    # 4. Failover within ~consecutiveDown * intervalMs + apply
-    #    overhead; 10s is generous.
     wait_for_active(router, "backup")
-
-    # 5. The Decision was probe-driven, not carrier-driven.
-    after = health_decisions(router, "home-uplink")
-    assert after > before, (
-        f"health-reason decisions did not advance: {before} → {after}\n"
-        f"(failover may have fired via carrier instead — that would "
-        f"indicate a regression in the v6 probe path)"
+    after_a = health_decisions(router, "home-uplink")
+    assert after_a > before_a, (
+        f"phase A: health-decisions did not advance: {before_a} → {after_a}"
+    )
+    assert loss_ratio(router, "primary") >= 0.5, (
+        f"phase A: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≥ 0.5"
     )
 
-    # state.json should reflect the per-family observation: v6
-    # lossRatio at or near 1.0, primary's v6 family healthy=false.
-    state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-    v6 = state["wans"]["primary"]["families"]["v6"]
-    assert v6["healthy"] is False, (
-        f"primary v6 still healthy after 100% loss: {v6}"
-    )
-    assert v6["lossRatio"] >= 0.5, (
-        f"primary v6 lossRatio = {v6['lossRatio']}, want ≥ 0.5"
-    )
+    # ==== Phase B — clear netem ⇒ recovery ====
 
-    # 6. Recovery: clear netem and assert primary takes back over.
-    #    Pins the v6 consecutiveUp arm of the hysteresis state
-    #    machine — the gap PLAN §9.4 promises recovery.nix covers,
-    #    but recovery.nix is carrier-driven and v4-only.
     router.succeed("tc qdisc del dev eth1 root")
     wait_for_active(router, "primary")
+    assert loss_ratio(router, "primary") <= 0.10, (
+        f"phase B: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≤ 0.10"
+    )
 
-    state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-    v6 = state["wans"]["primary"]["families"]["v6"]
-    assert v6["healthy"] is True, (
-        f"primary v6 didn't recover after netem cleared: {v6}"
+    # ==== Phase C — blip suppression ====
+    #
+    # 100% netem for ~2 cycles (400ms) puts 2 lost samples into the
+    # primary's per-target windows. With windowSize=10 that's 20%
+    # loss aggregated — below the 25% lossPctDown threshold — so the
+    # verdict stays healthy and no Decision should fire. Tests the
+    # combined window-damping + hysteresis suppression of a brief
+    # network blip.
+
+    router.succeed("tc qdisc add dev eth1 root netem loss 100%")
+    router.execute("sleep 0.4")
+    router.succeed("tc qdisc del dev eth1 root")
+    # Let things settle, then prove the counter didn't advance over
+    # a follow-up window of equal length to the consec filter
+    # (3 cycles = 600ms).
+    assert_unchanged_for(router, "home-uplink", seconds=1.5,
+                         what="phase C blip suppression")
+    state_c = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+    assert state_c["groups"]["home-uplink"]["active"] == "primary", (
+        f"phase C: active = {state_c['groups']['home-uplink']['active']!r}, want 'primary' (no Decision should have fired)"
     )
-    assert v6["lossRatio"] <= 0.10, (
-        f"primary v6 lossRatio = {v6['lossRatio']}, want ≤ 0.10 post-recovery"
+
+    # ==== Phase D — band-pass threshold ====
+    #
+    # D1: 50% netem (above lossPctDown=25) ⇒ failover.
+    # D2: 15% netem (between lossPctUp=5 and lossPctDown=25) ⇒
+    #     verdict held unhealthy by the band-pass; backup stays active.
+    # D3: 0% netem (below lossPctUp) ⇒ recovery.
+
+    # D1 — fail
+    router.succeed("tc qdisc add dev eth1 root netem loss 50%")
+    wait_for_active(router, "backup", timeout=15)
+    # Soft window: 50% configured loss can give anywhere from 30%
+    # to 70% over a 10-sample window — assert "above the 25%
+    # threshold," not an exact value.
+    assert loss_ratio(router, "primary") >= 0.25, (
+        f"phase D1: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≥ 0.25"
     )
+
+    # D2 — stays unhealthy in the band-pass region
+    router.succeed("tc qdisc change dev eth1 root netem loss 15%")
+    # Let the window refill several times with the new rate, then
+    # prove no Decision flipped the active member back.
+    assert_unchanged_for(router, "home-uplink", seconds=3,
+                         what="phase D2 band-pass hold")
+    state_d2 = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+    assert state_d2["groups"]["home-uplink"]["active"] == "backup", (
+        f"phase D2: active = {state_d2['groups']['home-uplink']['active']!r}, want 'backup' (verdict must hold in band-pass)"
+    )
+
+    # D3 — clear ⇒ recovery
+    router.succeed("tc qdisc del dev eth1 root")
+    wait_for_active(router, "primary", timeout=15)
+    assert loss_ratio(router, "primary") <= 0.10, (
+        f"phase D3: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≤ 0.10"
+    )
+
+    # ==== Phase E — per-target aggregation ====
+    #
+    # Delete fd00:1::2 from isp1: primary's probes split — fd00:1::1
+    # responds, fd00:1::2 doesn't. With Aggregate's unweighted mean
+    # across two targets, per-(WAN, family) loss averages to ~50%
+    # ⇒ above lossPctDown ⇒ failover. A regression in the
+    # aggregator (e.g. min instead of mean) would let the WAN stay
+    # healthy and this would never trigger.
+
+    isp1.succeed("ip -6 addr del fd00:1::2/64 dev eth1")
+    wait_for_active(router, "backup", timeout=15)
+    # Aggregate should be in [0.3, 0.7] (one target ~0%, one ~100%
+    # averaged). Loose so window noise doesn't flake the assertion.
+    lr_e = loss_ratio(router, "primary")
+    assert 0.3 <= lr_e <= 0.7, (
+        f"phase E: primary v6 lossRatio = {lr_e}, want in [0.3, 0.7] "
+        f"(one of two targets unreachable)"
+    )
+
+    isp1.succeed("ip -6 addr add fd00:1::2/64 dev eth1")
+    router.wait_until_succeeds("ping -6 -c 1 -W 1 fd00:1::2", timeout=10)
+    wait_for_active(router, "primary", timeout=15)
+
+    # ==== Phase F — daemon restart ====
+    #
+    # systemctl restart wanwatch.service ⇒ the daemon starts fresh.
+    # Cold-start carrier path keeps primary active (carrier is up,
+    # health unknown), so the active member shouldn't change. After
+    # probes converge, primary becomes probe-healthy again. The
+    # health-decisions counter SHOULD reset to 0 (per-process
+    # metric) and only increment if a probe-driven Decision fires —
+    # which it shouldn't on a clean restart.
+
+    router.succeed("systemctl restart wanwatch.service")
+    router.wait_for_unit("wanwatch.service")
+    router.wait_for_file("/run/wanwatch/state.json")
+    # state.json is republished on bootstrap; the file existing
+    # right after the unit reports active proves the writer ran.
+
+    # Active member survives the restart via the cold-start carrier
+    # path (no probe Window yet, but carrier=up keeps the high-
+    # priority member selected).
+    state_f = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+    assert state_f["groups"]["home-uplink"]["active"] == "primary", (
+        f"phase F: active = {state_f['groups']['home-uplink']['active']!r}, want 'primary' (cold-start carrier path)"
+    )
+
+    # Probes converge again — the WAN flips back to probe-healthy
+    # within the window-cook time (~2s) + consecUp (600ms).
+    wait_for_wan_healthy(router, "primary", timeout=15)
+    wait_for_wan_healthy(router, "backup", timeout=15)
   '';
 }
