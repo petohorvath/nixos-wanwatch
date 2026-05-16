@@ -211,6 +211,81 @@ that raced an empty table), or a metric value off by one
 (scrape that raced an Inc call), or an empty file (stat that
 raced a write).
 
+### `gateway-discovery-v6` flake: networkd-install vs Prime race
+
+The v6 gateway-discovery scenario can flake on slower CI runners.
+Pattern: systemd-networkd installs the v6 default route some
+milliseconds *after* wanwatchd's `rtnl.RouteSubscriber.Prime`
+returns (`primed=0` in the daemon log), then the subscription's
+`Run` is supposed to catch the RTM_NEWROUTE — and it *usually*
+does, but on at least one observed CI run it didn't, and
+`state.json`'s `wans.uplink.gateways.v6` never surfaced
+`fd00:1::1`.
+
+Root cause analysis is incomplete. Three plausible mechanisms:
+
+1. **Prime/Run gap.** Between `RouteList(family=v6)` returning and
+   `RouteSubscribeWithOptions` actually wiring the netlink
+   subscription, an RTM_NEWROUTE could fire and be missed. The
+   netlink library's `Subscribe` should be synchronous w.r.t. its
+   bind, but a v6-only race here would explain the symptom.
+2. **netlink decoder.** The library decodes the v6 default
+   route's `Gw` as `nil` on the unstable channel's newer kernel,
+   so `gatewayCache.string(...)` returns `""` and the test
+   predicate (`== "fd00:1::1"`) never matches. Newer kernels'
+   RTA_VIA / RTA_MULTIPATH encoding for v6 defaults is a plausible
+   trigger.
+3. **Subscription doesn't cover RTNLGRP_IPV6_ROUTE.** The library
+   defaults seem to cover both v4 and v6 multicast groups but I
+   haven't read the code to confirm. A regression in the library
+   pinning could narrow that silently.
+
+Diagnostic is already in place: `tests/vm/gateway-discovery-v6.nix`
+dumps `state.json`, `ip -6 route show table all`, and the last
+50 lines of the daemon journal on a `wait_for` timeout. Next
+time it flakes, those three sections distinguish:
+
+- empty `state.json` v6 gateway + kernel route present + no
+  daemon "route event" log → option 1 or 3 (subscription gap)
+- `gateways.v6 == ""` populated in state.json + daemon log shows
+  the route event with `gw=<nil>` → option 2 (decoder)
+
+Fix candidates depending on which leg:
+
+- Option 1: after `Prime` returns, immediately do a second
+  `RouteList` and emit any routes that weren't in the first dump
+  — closes the gap at the cost of a second syscall.
+- Option 2: replace the netlink library's Gw decode with a
+  manual RTA_GATEWAY parse for v6, or update the library pin.
+- Option 3: explicitly set `Groups = RTNLGRP_IPV4_ROUTE |
+  RTNLGRP_IPV6_ROUTE` in `RouteSubscribeOptions` rather than
+  relying on the default.
+
+`tests/vm/nftzones-integration.nix` lost a race on the unstable
+channel when an extended sibling scenario added enough parallel
+CPU pressure to delay the daemon's carrier → Decision → route-
+write pipeline past the test's implicit 1.5s grace window. The
+test was asserting on `ip -4 route show table <T>` directly after
+`ip link set wan0 up` — fix was a `wait_until_succeeds` poll on
+the route landing.
+
+Same race shape likely exists elsewhere. The signature is "after
+a state change the test induces (carrier flip, hook drop, netem
+add/remove), assert on something the daemon *eventually* mutates,
+without a `wait_until_succeeds` or `wait_for_active`-style poll
+in between." A bug-for-bug walk through `tests/vm/*.nix` looking
+for that pattern would convert latent flakes into either fast-
+failing tests or correctly-synchronised ones. Candidate audit
+targets: any assertion on `ip route show`, `ip rule show`,
+`nft list ruleset`, `stat /run/wanwatch/...`, or scrape metrics
+that follows a state-changing `succeed(...)` without an
+explicit wait.
+
+Signature in CI logs: `FIB table does not exist` (route check
+that raced an empty table), or a metric value off by one
+(scrape that raced an Inc call), or an empty file (stat that
+raced a write).
+
 ---
 
 ## considered — not currently planned
