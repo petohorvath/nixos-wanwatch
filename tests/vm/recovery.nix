@@ -147,11 +147,15 @@ pkgs.testers.runNixOSTest {
     # latest state.json was rewritten, not that the metric counter's
     # second Inc has surfaced — poll the metric to its expected
     # value rather than reading a single snapshot.
+    # awk note: `exit N` inside a pattern action does NOT exit
+    # immediately — it transfers control to the END block, whose
+    # `exit 1` then overrides. Use a flag and let the END block be
+    # the only exit point.
     router.wait_until_succeeds(
         "${pkgs.curl}/bin/curl -s --unix-socket /run/wanwatch/metrics.sock "
         "http://wanwatch/metrics | "
         "awk '/^wanwatch_group_decisions_total\\{group=\"home-uplink\",reason=\"carrier\"\\}/ "
-        "{ if ($2+0 >= 2) exit 0 } END { exit 1 }'",
+        "{ if ($2+0 >= 2) found=1 } END { exit !found }'",
         timeout=10,
     )
   '';
