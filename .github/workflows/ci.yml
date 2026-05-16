@@ -191,11 +191,14 @@ jobs:
   # own /nix/store cache and a single channel's failure is
   # obvious in the run status.
   #
-  # All scenarios build in one `nix build` invocation so the
-  # NixOS-test machinery and shared store paths are realized once,
-  # not ten times. `--keep-going` keeps building the rest after a
-  # single scenario failure so a CI run reports every broken
-  # scenario, not just the first.
+  # Scenarios are enumerated dynamically from the flake's own
+  # `checks.<system>` attrs — adding a new VM scenario to
+  # `mkVmChecks` in flake.nix picks it up here automatically, no
+  # CI edit required. All scenarios still build in one
+  # `nix build` invocation so the NixOS-test machinery and shared
+  # store paths are realized once, not 15+ times. `--keep-going`
+  # keeps building the rest after a single scenario failure so a
+  # CI run reports every broken scenario, not just the first.
   vm:
     name: vm tests (${{ matrix.channel }})
     strategy:
@@ -240,17 +243,27 @@ jobs:
           purge-primary-key: never
       - name: Build VM checks
         run: |
-          PFX=${{ matrix.prefix }}
-          nix build --print-build-logs --keep-going \
-            .#checks.x86_64-linux.${PFX}smoke \
-            .#checks.x86_64-linux.${PFX}failover-v4 \
-            .#checks.x86_64-linux.${PFX}failover-v6 \
-            .#checks.x86_64-linux.${PFX}failover-dual-stack \
-            .#checks.x86_64-linux.${PFX}failover-probe-loss \
-            .#checks.x86_64-linux.${PFX}cold-start \
-            .#checks.x86_64-linux.${PFX}recovery \
-            .#checks.x86_64-linux.${PFX}hooks \
-            .#checks.x86_64-linux.${PFX}metrics \
-            .#checks.x86_64-linux.${PFX}family-health-policy \
-            .#checks.x86_64-linux.${PFX}gateway-discovery \
-            .#checks.x86_64-linux.${PFX}nftzones-integration
+          PFX='${{ matrix.prefix }}'
+          # Enumerate every checks.x86_64-linux.<PFX>* attribute via
+          # the flake's own attrNames. `select($pfx != "vm-" or
+          # (startswith("vm-unstable-") | not))` is the
+          # cross-channel guard: when PFX=vm-, a bare
+          # startswith("vm-") would also match every vm-unstable-*
+          # attribute, so we exclude the longer prefix explicitly.
+          TARGETS=$(nix eval --json .#checks.x86_64-linux \
+            --apply 'builtins.attrNames' \
+            | jq -r --arg pfx "$PFX" '
+                .[]
+                | select(startswith($pfx))
+                | select($pfx != "vm-" or (startswith("vm-unstable-") | not))
+                | ".#checks.x86_64-linux." + .
+              ')
+          if [ -z "$TARGETS" ]; then
+            echo "::error::no VM scenarios matched prefix '$PFX'"
+            exit 1
+          fi
+          echo "Building $(echo "$TARGETS" | wc -l) ${PFX} scenarios:"
+          echo "$TARGETS" | sed 's/^/  /'
+          # shellcheck disable=SC2086  # word-splitting is intentional —
+          # each target is a separate nix build argument.
+          nix build --print-build-logs --keep-going $TARGETS
