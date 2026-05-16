@@ -198,6 +198,7 @@
           failover-probe-loss-v6 = scenario "failover-probe-loss-v6" { };
           cold-start = scenario "cold-start" { };
           recovery = scenario "recovery" { };
+          recovery-v6 = scenario "recovery-v6" { };
           hooks = scenario "hooks" { };
           metrics = scenario "metrics" {
             telegrafModule = self.nixosModules.telegraf;
