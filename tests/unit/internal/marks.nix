@@ -40,15 +40,49 @@ in
     expected = true;
   };
 
-  testAllocateIsDeterministic = {
+  testAllocateOrderInvariant = {
+    # The allocator sorts its input internally, so list-order
+    # permutations must produce identical outputs. Replaces the
+    # tautological `allocate names == allocate names` self-equality
+    # check this slot used to hold.
     expr =
       let
-        names = [
+        a = marks.allocate [
+          "home"
+          "guest"
+          "iot"
+        ];
+        b = marks.allocate [
+          "iot"
           "home"
           "guest"
         ];
       in
-      marks.allocate names == marks.allocate names;
+      a == b;
+    expected = true;
+  };
+
+  testAllocateAppendPreservesExisting = {
+    # Adding a name that sorts after every existing one must leave
+    # every existing assignment unchanged — the algorithm processes
+    # names in sorted order, so a late append cannot displace
+    # earlier entries even on hash collision. Pins the
+    # "displacement is local" half of PLAN §12 OQ #2.
+    expr =
+      let
+        base = marks.allocate [
+          "alpha"
+          "beta"
+          "gamma"
+        ];
+        after = marks.allocate [
+          "alpha"
+          "beta"
+          "gamma"
+          "zulu"
+        ];
+      in
+      base.alpha == after.alpha && base.beta == after.beta && base.gamma == after.gamma;
     expected = true;
   };
 

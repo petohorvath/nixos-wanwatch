@@ -56,15 +56,45 @@ in
     expected = true;
   };
 
-  testAllocateIsDeterministic = {
+  testAllocateOrderInvariant = {
+    # The allocator sorts its input internally, so list-order
+    # permutations must produce identical outputs.
     expr =
       let
-        names = [
+        a = tables.allocate [
+          "home"
+          "guest"
+          "iot"
+        ];
+        b = tables.allocate [
+          "iot"
           "home"
           "guest"
         ];
       in
-      tables.allocate names == tables.allocate names;
+      a == b;
+    expected = true;
+  };
+
+  testAllocateAppendPreservesExisting = {
+    # Adding a name that sorts after every existing one must leave
+    # every existing assignment unchanged — pins the "displacement
+    # is local" half of PLAN §12 OQ #2.
+    expr =
+      let
+        base = tables.allocate [
+          "alpha"
+          "beta"
+          "gamma"
+        ];
+        after = tables.allocate [
+          "alpha"
+          "beta"
+          "gamma"
+          "zulu"
+        ];
+      in
+      base.alpha == after.alpha && base.beta == after.beta && base.gamma == after.gamma;
     expected = true;
   };
 
