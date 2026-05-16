@@ -49,8 +49,6 @@
        no Decision recorded (blip suppression)
     D  Band-pass:
          D1  50% netem ⇒ above lossPctDown ⇒ failover
-         D2  15% netem ⇒ between lossPctUp and lossPctDown ⇒
-             verdict held unhealthy, backup stays active
          D3  0% netem ⇒ below lossPctUp ⇒ recovery
     E  Per-target aggregation: delete fd00:1::2 from isp1 ⇒
        primary's per-(WAN,family) loss averages to 50% across the
@@ -215,20 +213,6 @@ pkgs.testers.runNixOSTest {
         return metric(scrape(router), series)
 
 
-    def assert_unchanged_for(router, group, seconds, what):
-        """Sample the health_decisions counter at start + after
-        `seconds`; raise if it advanced. Used to pin "no Decision
-        happened in this window" rather than wait for a thing that
-        shouldn't happen."""
-        before = health_decisions(router, group)
-        router.execute(f"sleep {seconds}")
-        after = health_decisions(router, group)
-        assert after == before, (
-            f"{what}: health-decisions advanced {before} → {after} "
-            f"in {seconds}s — expected unchanged"
-        )
-
-
     start_all()
     isp1.wait_for_unit("multi-user.target")
     isp2.wait_for_unit("multi-user.target")
@@ -329,8 +313,6 @@ pkgs.testers.runNixOSTest {
     # ==== Phase D — band-pass threshold ====
     #
     # D1: 50% netem (above lossPctDown=25) ⇒ failover.
-    # D2: 15% netem (between lossPctUp=5 and lossPctDown=25) ⇒
-    #     verdict held unhealthy by the band-pass; backup stays active.
     # D3: 0% netem (below lossPctUp) ⇒ recovery.
 
     # D1 — fail
@@ -346,16 +328,34 @@ pkgs.testers.runNixOSTest {
         timeout=10,
     )
 
-    # D2 — stays unhealthy in the band-pass region
-    router.succeed("tc qdisc change dev eth1 root netem loss 15%")
-    # Let the window refill several times with the new rate, then
-    # prove no Decision flipped the active member back.
-    assert_unchanged_for(router, "home-uplink", seconds=3,
-                         what="phase D2 band-pass hold")
-    state_d2 = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-    assert state_d2["groups"]["home-uplink"]["active"] == "backup", (
-        f"phase D2: active = {state_d2['groups']['home-uplink']['active']!r}, want 'backup' (verdict must hold in band-pass)"
-    )
+    # ==== Phase D2 — band-pass hold (REMOVED) ====
+    #
+    # Originally tested that 15% netem (between lossPctUp=5 and
+    # lossPctDown=25) leaves the held-unhealthy verdict alone —
+    # active stays "backup," no Decision counter advance over a
+    # 3-second window. In practice the test was sample-variance-
+    # bound and flaked on the unstable channel:
+    #
+    #   - Window aggregates over 10 samples per target across 2
+    #     targets. With 15% per-packet loss, P(0/10 losses on a
+    #     single target) = 0.85^10 ≈ 0.197; P(both targets 0/10
+    #     simultaneously) ≈ 0.039. A single such cycle returns
+    #     `raw=true` from the band-pass evaluator (ratio below
+    #     lossPctUp=5 ⇒ healthy).
+    #   - consecutiveUp=3 needs three consecutive 0-loss windows
+    #     — but sliding windows are correlated (only the newest
+    #     sample changes), so the conditional probability of three
+    #     in a row given the first is ≈ 0.85^4 ≈ 0.522. Per-cycle
+    #     start probability ≈ 0.020; over a 13-cycle (3s) window:
+    #     ~23% flake rate. CI captured this on
+    #     https://github.com/petohorvath/nixos-wanwatch/actions/runs/25958981356.
+    #
+    # Fixing it would need windowSize≈25 or a per-test selector
+    # tuning — both inflate every other phase's runtime
+    # proportionally. The band-pass HOLD property is real and is
+    # exercised deterministically by Go-side unit tests in
+    # internal/selector/hysteresis_test.go (cf. Phase C's removal
+    # for the same reasoning).
 
     # D3 — clear ⇒ recovery
     router.succeed("tc qdisc del dev eth1 root")
