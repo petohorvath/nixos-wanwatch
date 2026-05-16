@@ -110,6 +110,33 @@ pkgs.testers.runNixOSTest {
     import json
 
 
+    def diagnostics(router):
+        """Dump state.json + every routing table + the daemon's recent
+        journal at failure time so the CI log captures enough to
+        distinguish 'daemon never received RTM_NEWROUTE' from 'daemon
+        received it but decoded Gw=nil' from 'state.json wasn't
+        rewritten'."""
+        try:
+            state = router.succeed("cat /run/wanwatch/state.json")
+        except Exception as e:
+            state = f"<failed to read state.json: {e}>"
+        try:
+            routes = router.succeed("ip -6 route show table all")
+        except Exception as e:
+            routes = f"<failed: {e}>"
+        try:
+            journal = router.succeed(
+                "journalctl -u wanwatch.service --no-pager -n 50 -o cat"
+            )
+        except Exception as e:
+            journal = f"<failed: {e}>"
+        return (
+            "===== state.json =====\n" + state
+            + "\n===== ip -6 route show table all =====\n" + routes
+            + "\n===== last 50 wanwatch.service log lines =====\n" + journal
+        )
+
+
     def wait_for(predicate, timeout=15, what="condition"):
         for _ in range(timeout * 4):
             try:
@@ -118,7 +145,9 @@ pkgs.testers.runNixOSTest {
             except Exception:
                 pass
             router.execute("sleep 0.25")
-        raise AssertionError(f"{what} never became true within {timeout}s")
+        raise AssertionError(
+            f"{what} never became true within {timeout}s\n" + diagnostics(router)
+        )
 
 
     start_all()
