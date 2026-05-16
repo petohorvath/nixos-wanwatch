@@ -192,6 +192,10 @@
           inherit pkgs;
           nixosModule = self.nixosModules.default;
         };
+        failover-probe-loss-v6 = import ./tests/vm/failover-probe-loss-v6.nix {
+          inherit pkgs;
+          nixosModule = self.nixosModules.default;
+        };
         cold-start = import ./tests/vm/cold-start.nix {
           inherit pkgs;
           nixosModule = self.nixosModules.default;
