@@ -12,8 +12,8 @@ Three layers, bottom-up: pure-Nix library, NixOS module, Go daemon. The library 
 ┌────────────────────────────────────────────────────────────┐
 │ lib/ — pure Nix                                            │
 │   internal/{wan,probe,group,member}.make / .tryMake        │
-│   internal/{marks,tables}.allocate (deterministic hash)    │
-│   internal/config.render → JSON                            │
+│   types/primitives.{fwmark,routingTableId} validation      │
+│   internal/config.render → JSON (+ duplicate assertions)   │
 └──────────────────┬─────────────────────────────────────────┘
                    │ rendered config.json
                    ▼
@@ -56,18 +56,16 @@ lib/internal/
   probe.nix          — value type + threshold/hysteresis sub-types
   wan.nix            — value type; families derived from probe.targets
   member.nix         — per-Group attributes (priority, weight)
-  group.nix          — value type, strategy enum, mark/table
-  marks.nix          — deterministic int allocator
-  tables.nix         — same, in a different range
+  group.nix          — value type, strategy enum, mark/table validators
   selector.nix       — pure Nix mirror of the Go selector
-  config.nix         — JSON renderer + resolveAllocations
+  config.nix         — JSON renderer + duplicate-mark/table assertion
 ```
 
-`lib/types/<name>.nix` exposes NixOS option types for each value type. `wanwatch.types.<name>` is the flattened surface module consumers reach for.
+`lib/types/<name>.nix` exposes NixOS option types for each value type. `wanwatch.types.<name>` is the flattened surface module consumers reach for; `wanwatch.types.fwmark` / `routingTableId` validate the `[1000, 32767]` integer range groups must declare.
 
 ### `modules/`
 
-`wanwatch.nix` declares `services.wanwatch.*`, rounds user input through `wanwatch.<type>.make` to get tagged values, runs `config.resolveAllocations` to auto-fill marks/tables (with cross-explicit collision detection), and renders `/etc/wanwatch/config.json`.
+`wanwatch.nix` declares `services.wanwatch.*`, rounds user input through `wanwatch.<type>.make` to get tagged values, runs `config.resolveAllocations` to assert no two groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json`.
 
 Cross-module outputs:
 

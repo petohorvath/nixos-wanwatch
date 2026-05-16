@@ -37,9 +37,9 @@ ip route add default via 192.0.2.1 dev eth0 table 100
 iptables -t mangle -A PREROUTING -i br-lan -j MARK --set-mark 100
 ```
 
-| Adopted | The mechanism. wanwatch automates exactly this — auto-allocates the integers, writes the rules, owns the route table. |
+| Adopted | The mechanism. wanwatch validates the user-declared integers, writes the rules, owns the route table. |
 |---|---|
-| Rejected | The static, hand-tuned numbers. Two configs in two files referencing magic `100` is the failure mode wanwatch's `marks.<group>` outputs solve. |
+| Rejected | Re-typing the same integer in two files. wanwatch's `services.wanwatch.marks.<group>` re-exposes the user-declared int as a read-only attribute so downstream modules reference by name — no drift between firewall rule and route-installer. |
 | Rejected | iptables — wanwatch composes with nftables (via nftzones or raw `networking.nftables.tables`). iptables is fine in principle; nftables is the NixOS default. |
 
 ## netifd / hotplug.d on OpenWrt

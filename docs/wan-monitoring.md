@@ -99,11 +99,17 @@ The cold-start path treats uncooked families (no full probe Window yet) as a hea
 A Group is an ordered list of Members under a Strategy. Members reference a WAN by name and carry per-Group attributes (priority, weight).
 
 ```nix
-services.wanwatch.groups.home-uplink.members = [
-  { wan = "primary"; priority = 1; }
-  { wan = "backup";  priority = 2; }
-];
+services.wanwatch.groups.home-uplink = {
+  members = [
+    { wan = "primary"; priority = 1; }
+    { wan = "backup";  priority = 2; }
+  ];
+  mark  = 1000;
+  table = 1000;
+};
 ```
+
+`mark` and `table` are required integers in `[1000, 32767]` (typed as `wanwatch.types.{fwmark,routingTableId}`). They identify the Group on the firewall and routing-policy side — the daemon installs `ip rule add fwmark <mark> table <table>` once at startup and owns the contents of that routing table thereafter. The module re-exposes both as `services.wanwatch.{marks,tables}.<group>` so downstream modules (`nftzones`, hand-rolled nftables) reference them by name rather than re-typing the integer.
 
 The v1 Strategy is `primary-backup`: among healthy Members, pick the one with the lowest `priority`; ties broken by lexicographic WAN name. `weight` is reserved for v2's multi-active strategies and is ignored today.
 

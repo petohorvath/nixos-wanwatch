@@ -119,8 +119,8 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 | `name` | string | yes | Must match the attribute key. |
 | `members` | array<object> | yes | Non-empty; no duplicate `wan` references. |
 | `strategy` | string | yes | v1: `"primary-backup"`. |
-| `table` | int | yes | Routing-table id. Auto-allocated (`null` in user input ⇒ resolved by `tables.allocate`). |
-| `mark` | int | yes | fwmark. Auto-allocated by `marks.allocate`. |
+| `table` | int | yes | Routing-table id. User-required integer in `[1000, 32767]` (type `wanwatch.types.routingTableId`). |
+| `mark` | int | yes | fwmark. User-required integer in `[1000, 32767]` (type `wanwatch.types.fwmark`). |
 
 ## `groups.<name>.members[]`
 
@@ -144,7 +144,7 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 |---|---|
 | Option types (`lib/types/`) | Wrong field types, enum mismatch, malformed IP literals (via libnet). |
 | `wanwatch.<type>.tryMake` | Cross-field invariants (family coupling, duplicate members, threshold ordering). |
-| `config.resolveAllocations` | Mark / table collisions between explicit and auto-allocated values. |
+| `config.resolveAllocations` | Mark / table duplicates across groups. |
 | `daemon/internal/config/Validate` | Structural sanity after deserialization: name/key agreement, dangling `member.wan` references, empty paths in `global`. |
 
 ## Compatibility policy

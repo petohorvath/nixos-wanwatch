@@ -42,10 +42,14 @@ Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides whic
               probe.targets.v4 = [ "1.1.1.1" ];
             };
 
-            groups.home-uplink.members = [
-              { wan = "primary"; priority = 1; }
-              { wan = "backup";  priority = 2; }
-            ];
+            groups.home-uplink = {
+              members = [
+                { wan = "primary"; priority = 1; }
+                { wan = "backup";  priority = 2; }
+              ];
+              mark  = 1000;   # required — wanwatch.types.fwmark (1000..32767)
+              table = 1000;   # required — wanwatch.types.routingTableId (1000..32767)
+            };
           };
         })
       ];
@@ -54,13 +58,13 @@ Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides whic
 }
 ```
 
-`config.services.wanwatch.marks.home-uplink` and `.tables.home-uplink` expose the auto-allocated fwmark / routing-table id for downstream firewall configs. See [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
+`config.services.wanwatch.marks.home-uplink` and `.tables.home-uplink` re-expose the user-declared fwmark / routing-table id as read-only attributes so downstream firewall configs can reference them by name. See [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
 
 ## Components
 
 | Layer | Where | Role |
 |---|---|---|
-| Pure-Nix library | `lib/` | Typed values (`wan`, `probe`, `group`, `member`), validation, mark/table allocators, pure selector. |
+| Pure-Nix library | `lib/` | Typed values (`wan`, `probe`, `group`, `member`), validation, typed fwmark/routing-table-id primitives, pure selector. |
 | NixOS module | `modules/` | `services.wanwatch.*` option surface, JSON renderer, hardened systemd unit. |
 | Go daemon | `daemon/` | `wanwatchd` — probe goroutines, rtnl subscriber, selector + hysteresis, netlink apply, state writer, hook runner, Prometheus endpoint. |
 

@@ -34,13 +34,17 @@ The table id is *shared* across families: v4 uses `table <table>` in the v4 RIB;
       pointToPoint = true;
       probe.targets.v4 = [ "8.8.8.8" ];
     };
-    groups.home-uplink.members = [
-      { wan = "primary"; priority = 1; }
-      { wan = "backup";  priority = 2; }
-    ];
+    groups.home-uplink = {
+      members = [
+        { wan = "primary"; priority = 1; }
+        { wan = "backup";  priority = 2; }
+      ];
+      mark  = 1000;
+      table = 1000;
+    };
   };
 
-  # nftzones — references the allocated mark by name
+  # nftzones — references the user-declared mark by name
   networking.nftzones.tables.fw = {
     family = "inet";
     zones = {
@@ -66,10 +70,10 @@ The table id is *shared* across families: v4 uses `table <table>` in the v4 RIB;
 
 What this configures:
 
-1. `wanwatch.marks.home-uplink` evaluates to an int (e.g. `100`) deterministically from the group name.
-2. The `mangle` rule in nftzones renders to `meta mark set 0x64` in the loaded nftables ruleset.
-3. The wanwatchd daemon, at startup, adds `ip rule add fwmark 0x64 table 100` and the v6 equivalent.
-4. On every Decision, wanwatchd rewrites table `100`'s default route per family to the active member's gateway.
+1. `wanwatch.marks.home-uplink` is the integer the user wrote on `services.wanwatch.groups.home-uplink.mark` — re-exposed as a read-only output so downstream modules reference by name.
+2. The `mangle` rule in nftzones renders to `meta mark set 0x3e8` (= 1000) in the loaded nftables ruleset.
+3. The wanwatchd daemon, at startup, adds `ip rule add fwmark 0x3e8 table 1000` and the v6 equivalent.
+4. On every Decision, wanwatchd rewrites table `1000`'s default route per family to the active member's gateway.
 5. The nftzones snat rule masquerades LAN-origin traffic in the `wan-home` zone. Because the SNAT applies in the wan zone (regardless of which interface in that zone), it follows the daemon's route changes for free.
 
 ## What changes on a Decision
@@ -77,37 +81,48 @@ What this configures:
 ```
 Before failover:                After failover:
 ip rule:                        ip rule:                  (unchanged)
-  fwmark 0x64 lookup 100          fwmark 0x64 lookup 100
+  fwmark 0x3e8 lookup 1000        fwmark 0x3e8 lookup 1000
 
-ip route table 100:             ip route table 100:
+ip route table 1000:            ip route table 1000:
   default via 192.0.2.1 eth0      default via 100.64.0.1 wwan0
-ip -6 route table 100:          ip -6 route table 100:
+ip -6 route table 1000:         ip -6 route table 1000:
   default via 2001:db8::1 eth0    default via 2001:db8::1 wwan0  (if backup has v6)
                                   (no v6 default at all)         (if backup has only v4)
 
 nft rule (sroutes.lan-via-home): nft rule:                 (unchanged)
-  meta mark set 0x64              meta mark set 0x64
+  meta mark set 0x3e8             meta mark set 0x3e8
 ```
 
 Only the route changes. The mark, the rule, and the nftables ruleset are all stable.
 
 ## Why per-name, not per-int
 
-A typical "fwmark routing" how-to assigns marks manually (`100` for one uplink, `200` for another) and references them as integers across files. Two failure modes:
+A typical "fwmark routing" how-to assigns marks manually and threads the integer literal through every downstream file:
+
+```nft
+table inet fw {
+  chain forward { ... meta mark set 100 ... }
+}
+# ip rule add fwmark 100 table 100
+# ip route add default via 192.0.2.1 dev eth0 table 100
+```
+
+Two failure modes:
 
 1. **Drift**: someone bumps the mark in one file and forgets the other.
 2. **Collision**: a third config (e.g. WireGuard, Tailscale, Calico) picks the same integer.
 
-wanwatch sidesteps both:
+wanwatch sidesteps both by keeping the integer in one place — `services.wanwatch.groups.<group>.mark` — and re-exposing it as `services.wanwatch.marks.<group>` for cross-module reference:
 
-- The mark is generated from the Group's name via SHA-256. Same name everywhere → same mark, by construction.
-- `config.resolveAllocations` detects collisions between auto-allocated and user-explicit values at module-eval time and refuses to render.
+- Same name everywhere → same int, by construction.
+- `config.resolveAllocations` asserts no two groups share a `mark` or `table` at module-eval time and refuses to render on duplicate.
+- The `wanwatch.types.fwmark` / `routingTableId` types pin the integer to `[1000, 32767]`, well clear of the kernel-reserved tables `{253, 254, 255}` and the small-integer space ad-hoc scripts often use.
 
 ## Cross-references
 
 | File | What |
 |---|---|
-| `lib/internal/config.nix:resolveAllocations` | Mark / table auto-assignment + collision detection. |
+| `lib/internal/config.nix:resolveAllocations` | Cross-group duplicate-mark / duplicate-table detection. |
 | `lib/internal/marks.nix` / `tables.nix` | Allocators (hash + linear probe). |
 | `daemon/internal/apply/rule.go:EnsureRule` | Installs the fwmark policy rules at startup. |
 | `daemon/internal/apply/route.go:WriteDefault` | Rewrites the table's default on every Decision. |
