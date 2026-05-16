@@ -177,6 +177,15 @@ pkgs.testers.runNixOSTest {
 
     # 3. The daemon wrote the default route into the group's table
     # — a scope-link route out of wan0 (point-to-point, no gateway).
+    # The route lands after the daemon observes the carrier-up event
+    # we triggered above and the cold-start Decision pipeline
+    # commits; under runner CPU pressure (e.g. when neighbouring
+    # heavy VM tests are scheduled on the same host) that takes
+    # longer than the four assertions above. Poll explicitly rather
+    # than racing the kernel's empty-FIB-table error.
+    router.wait_until_succeeds(
+        f"ip -4 route show table {table} | grep -q ' dev wan0'", timeout=15
+    )
     route = router.succeed(f"ip -4 route show table {table}")
     assert "wan0" in route and "via" not in route, (
         f"table {table} default route mismatch (want scope-link via wan0):\n{route}"
