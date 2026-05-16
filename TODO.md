@@ -22,6 +22,23 @@ Status legend:
 Small CLI for status queries: `wanwatchctl status`, `wanwatchctl group <name>`.
 Reads `state.json`; no privileged ops. PLAN §12 OQ #8.
 
+### Migrate `wanwatch.types.{fwmark,routingTableId}` to nix-libnet
+
+Both types currently live in `lib/types/primitives.nix` because
+landing them in libnet first would have meant a two-repo
+coordination. They're not wanwatch-specific — they're kernel
+networking primitives that nftzones (currently validating
+`meta mark set N` as raw int), systemd-networkd modules, and any
+hand-rolled rule config could share.
+
+Migration: add `fwmark` and `routingTableId` (same definitions) to
+`nix-libnet/lib/types/primitives.nix`; bump the libnet flake input
+here; switch `lib/types/primitives.nix` to
+`inherit (libnet.types) fwmark routingTableId;`; remove the local
+definitions. Wanwatch consumer API stays identical
+(`wanwatch.types.fwmark` keeps resolving — to the libnet
+definition instead of the local one).
+
 ### Pre-apply hooks
 
 Add a `<hooksDir>/pre-{up,down,switch}.d/*` tier that fires *before*

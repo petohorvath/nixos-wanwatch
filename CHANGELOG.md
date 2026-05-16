@@ -6,6 +6,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ### Changed
 
+- **API break — `groups.<name>.mark` and `groups.<name>.table` are now required.** The hash + linear-probe auto-allocator (`lib/internal/{allocator,marks,tables}.nix`) was removed; users must declare both integers explicitly per group. Both fields are typed as `wanwatch.types.fwmark` / `wanwatch.types.routingTableId` — `lib.types.ints.between 1000 32767`, so the kernel-reserved tables (`253`/`254`/`255`) and small-integer values commonly used by ad-hoc scripts are excluded by construction. The NixOS module asserts no duplicate marks or tables across groups at eval time. `services.wanwatch.marks.<group>` and `.tables.<group>` outputs remain (read-only echoes of the user's input) so downstream consumers (nftzones, hand-rolled nftables) keep referencing them by name. Migration: per group, add `mark = N; table = N;` with any value in `1000..32767`; collisions surface as eval errors and can be resolved by picking different integers. Rationale: the auto-allocator's "function of the full group-name set" semantic meant adding a new group could silently shift another group's mark, surprising operators downstream; explicit declaration eliminates this and removes ~200 LOC + tests.
 - **API break — `wans.<name>.gateways` removed.** Replaced by a single `pointToPoint` bool (default `false`). For broadcast links the daemon now discovers the default-route next-hop dynamically via netlink (`RTNLGRP_IPV4_ROUTE` + `RTNLGRP_IPV6_ROUTE`) from the kernel's main routing table. For point-to-point links (PPP, WireGuard, GRE, tun) set `pointToPoint = true` and the daemon installs `scope link` default routes — no gateway needed.
 - A WAN's served families are now derived solely from `probe.targets` (v4 literals ⇒ serves v4; v6 literals ⇒ serves v6). No separate gateway declaration to keep in sync; family-coupling validation is therefore retired.
 - New per-WAN `gateways: { v4, v6 }` block in `state.json` reflecting the discovered next-hops.
@@ -21,6 +22,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ### Added
 
+- `wanwatch.types.fwmark` and `wanwatch.types.routingTableId` (both `lib.types.ints.between 1000 32767`) — exposed under `lib/types/primitives.nix`. Planned to migrate into `nix-libnet` in a follow-up release.
 - `daemon/internal/rtnl.RouteSubscriber` — emits per-`(iface, family)` default-route add/del events from the main RIB, filtered to WAN interfaces.
 - `daemon/cmd/wanwatchd.gatewayCache` — mirrors the kernel's view; drives non-PtP route writes and re-applies on route flap.
 - VM scenarios added since 0.1.0: `tests/vm/cold-start.nix`, `tests/vm/failover-probe-loss.nix` (v4 netem-driven), `tests/vm/failover-probe-loss-v6.nix` (v6 netem-driven; closes the v6 probe + threshold + hysteresis gap that the carrier-driven `failover-v6.nix` left unexercised), `tests/vm/gateway-discovery.nix`.

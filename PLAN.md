@@ -60,8 +60,9 @@ wanwatch owns the per-group routing table that mark dispatches into.
 - Carrier / operstate integration via rtnetlink — drop a WAN
   immediately on kernel-reported carrier loss; don't wait for the
   next probe cycle.
-- Per-group fwmark + routing-table-id allocation, deterministic from
-  the group's name.
+- Per-group fwmark + routing-table-id, user-declared and validated
+  via `wanwatch.types.{fwmark,routingTableId}` (range `1000..32767`,
+  duplicate detection at module-eval time). No auto-allocation.
 - Atomic state publication at `/run/wanwatch/state.json`.
 - Hook script directory (`/etc/wanwatch/hooks/{up,down,switch}.d/`)
   invoked on decision events with env vars.
@@ -132,11 +133,11 @@ This table lives in `docs/glossary.md` and is referenced from
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  modules/wanwatch.nix                                              │
-│    - validates via lib/types                                       │
-│    - calls lib/marks.allocate, lib/tables.allocate                 │
+│    - validates via lib/types (incl. fwmark, routingTableId)        │
+│    - asserts no duplicate marks/tables across groups               │
 │    - renders lib/config.toJSON → /etc/wanwatch/config.json         │
 │    - emits systemd unit: ExecStart = wanwatchd --config=…          │
-│    - exposes services.wanwatch.marks, .tables for downstream       │
+│    - exposes services.wanwatch.marks, .tables (user-input echo)    │
 └─────────────────────────────┬────────────────────────────────────┘
                               │ /etc/wanwatch/config.json
                               ▼
@@ -162,13 +163,14 @@ This table lives in `docs/glossary.md` and is referenced from
 ### Layer responsibilities
 
 - **`lib/`** — validation, builders, predicates, and
-  serialization for `wan`, `probe`, `group`, `member`. Allocators for
-  fwmarks and routing-table ids. Pure selection function (used both
-  by daemon tests and by module-level assertions). Takes
-  `{ lib, libnet }` at import time; `nixpkgs.lib` is a standard
-  dependency, used freely throughout (`lib.nameValuePair`,
-  `lib.partition`, `lib.types.*`, …). NixOS option types are
-  always available at `wanwatch.types`.
+  serialization for `wan`, `probe`, `group`, `member`. Typed
+  primitives (`wanwatch.types.{fwmark,routingTableId}`) for those
+  two integer kinds. Pure selection function (used both by daemon
+  tests and by module-level assertions). Takes `{ lib, libnet }`
+  at import time; `nixpkgs.lib` is a standard dependency, used
+  freely throughout (`lib.nameValuePair`, `lib.partition`,
+  `lib.types.*`, …). NixOS option types are always available at
+  `wanwatch.types`.
 - **`modules/`** — thin NixOS layer. `wanwatch.nix` is the main
   entrypoint (declares options, renders config, emits systemd unit,
   creates state dir + hooks dir). `telegraf.nix` is an opt-in
@@ -225,9 +227,7 @@ that resolve to the operational modules.
 | `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `toJSONValue`, `families` accessor; `pointToPoint` toggles scope-link vs gateway-discovery apply path |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
 | `lib/internal/selector.nix` *(Pass 4)* | pure `compute` + closed-set strategy registry (v1: `primary-backup`) |
-| `lib/internal/marks.nix` *(Pass 3)* | `allocate : groupNames → { <group> = <mark>; … }` deterministic |
-| `lib/internal/tables.nix` *(Pass 3)* | `allocate : groupNames → { <group> = <tableId>; … }` deterministic |
-| `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string` |
+| `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string`; `resolveAllocations` (duplicate-mark/table assertions) |
 | `lib/types/default.nix` | aggregates per-type option-type files via `lib.mergeAttrsList` |
 | `lib/types/primitives.nix` | shared option-type primitives (Pass 5) |
 | `lib/types/probe.nix` | probe-related NixOS option types (Pass 5) |
@@ -302,34 +302,32 @@ services.wanwatch = {
       { wan = "backup";  weight =  50; priority = 2; }
     ];
     strategy = "primary-backup";
-    # table and mark are auto-allocated by lib/{tables,marks}.allocate
-    # unless overridden explicitly:
-    # table = 100; mark = 100;
+    mark     = 1000;   # required — wanwatch.types.fwmark (1000..32767)
+    table    = 1000;   # required — wanwatch.types.routingTableId (1000..32767)
   };
 };
 ```
 
 ### 5.3 Public outputs for downstream consumers
 
-The module assigns and exposes deterministic allocations so firewall
-rules in nftzones (or hand-written nftables) can reference them
-without magic numbers:
+The module re-exposes each group's user-declared fwmark and
+routing-table id as read-only attribute outputs so firewall rules
+in nftzones (or hand-written nftables) can reference them by name
+rather than re-typing the integer literal in two places:
 
 ```nix
-# Read-only outputs assigned by the module.
-# Allocator output values shown below are illustrative — actual ints
-# come from hash + linear-probe over the configured group-name set
-# (see Open Question 2).
-services.wanwatch.marks  = { home-uplink = 0x1A3F; guest-uplink = 0x4C82; … };
-services.wanwatch.tables = { home-uplink = 6719;   guest-uplink = 19586;  … };
+# Read-only outputs — pure echoes of services.wanwatch.groups.<g>.{mark,table}.
+services.wanwatch.marks  = { home-uplink = 1000; guest-uplink = 1001; … };
+services.wanwatch.tables = { home-uplink = 1000; guest-uplink = 1001; … };
 services.wanwatch.groups = { … };   # echo of evaluated groups
 services.wanwatch.wans   = { … };   # echo of evaluated wans
 ```
 
-Consumers should always reference these by name
+Consumers should reference these by name
 (`config.services.wanwatch.marks.<group>`), never by hardcoded
-literal — the allocator output depends on the full group-name set
-and may change if groups are added or removed.
+literal — keeps the single source of truth in the group's own
+declaration, so renaming a group doesn't require chasing the int
+through every downstream module.
 
 ### 5.4 Family derivation from probe targets
 
@@ -456,11 +454,14 @@ convention. **No nftzones changes are required for wanwatch v1.**
 
 ### 6.1 The contract
 
-1. wanwatch assigns a fwmark (int) and routing-table id (int) per
-   group, deterministically from the group name. Both are exposed as
-   `services.wanwatch.marks.<group>` and `.tables.<group>`. The
-   table id is shared across families — v4 uses `table <table>` in
-   the v4 RIB, v6 uses the same `table <table>` in the v6 RIB.
+1. The user declares a fwmark (int) and routing-table id (int) per
+   group; the lib validates them via `wanwatch.types.{fwmark,
+   routingTableId}` and the module asserts no duplicates across
+   groups. Both are re-exposed read-only as
+   `services.wanwatch.marks.<group>` and `.tables.<group>` so
+   downstream consumers can reference them by name. The table id
+   is shared across families — v4 uses `table <table>` in the v4
+   RIB, v6 uses the same `table <table>` in the v6 RIB.
 2. wanwatch's daemon creates `ip rule add fwmark <mark> table <table>`
    AND `ip -6 rule add fwmark <mark> table <table>` at startup
    (idempotent — checks before adding) per group, per family.
@@ -495,8 +496,9 @@ networking.nftzones.tables.fw = {
 };
 ```
 
-No magic numbers: mark `100` (or whatever the allocator assigned) is
-referenced by name everywhere.
+No magic numbers in the downstream module: the integer is named
+once (in `services.wanwatch.groups.<name>.mark`) and referenced by
+attribute path everywhere else.
 
 ### 6.3 Integration tests (VM tier)
 
@@ -1111,16 +1113,16 @@ the relevant Pass starts; resolution moves to the relevant doc.
    discipline from day 1 (write a `docs/specs/state-evolution.md`)
    or defer? Recommendation: defer until v0.2 — note in changelog.
 
-2. **fwmark / table allocation collisions**. The deterministic
-   allocator hashes group names to mark/table ints. Range proposed:
-   marks `0x64`–`0x7FFF` (avoiding `0x100` boundaries that some
-   tools special-case), tables `100`–`32766` (avoiding `main=254`,
-   `local=255`, `default=253`, `unspec=0`). Collisions on hash —
-   how do we resolve? Recommendation: linear probe within the
-   range; document determinism contract as "function of group-name
-   set, not function of any single group's name". Test:
-   adding/removing a group changes only the affected entry plus any
-   probe-displaced ones, and the displacement is deterministic.
+2. **fwmark / table allocation collisions**. *Resolved (post-v0.1):*
+   the auto-allocator was removed in favour of user-declared marks
+   and tables. Both fields are required on `groups.<name>`, typed
+   as `wanwatch.types.fwmark` / `routingTableId` (range
+   `1000..32767`, kernel-reserved values `{253, 254, 255}` naturally
+   excluded), and the module asserts no duplicates across groups
+   at eval time. The set-determinism gotcha that motivated the
+   original auto-allocator (renaming a group could shift other
+   marks) is eliminated because the integer is fixed by user
+   declaration, not derived from the group-name set.
 
 3. **IPv6 family-health policy default**. With dual-stack WANs and a
    single v6 target outage, the user wants to know whether the WAN is
