@@ -32,20 +32,31 @@ type MemberHealth struct {
 ```go
 type Selection struct {
     Group  string
-    Active *string  // nil = no member healthy
+    Active Active
 }
+
+// Comparable (Go `==` works between Actives), removing the
+// `*string` nil-check + deref pattern at every consumer.
+type Active struct {
+    Wan string
+    Has bool
+}
+
+// NoActive is the zero-value Active; exported for readability at
+// call sites that want to name the "no member healthy" case.
+var NoActive = Active{}
 ```
 
-When `Active` is `nil`, the daemon writes no default route into the group's table. The fwmark policy rule stays in place — userspace traffic gets marked but has no next hop until a member recovers.
+When `Active.Has` is false (`Active == NoActive`), the daemon writes no default route into the group's table. The fwmark policy rule stays in place — userspace traffic gets marked but has no next hop until a member recovers.
 
 ## Strategy: `primary-backup`
 
 ```
 healthy = members where MemberHealth.Healthy
 if healthy is empty:
-    return Selection{Active: nil}
+    return Selection{Active: NoActive}
 sort healthy by (priority asc, wan asc)
-return Selection{Active: healthy[0].Wan}
+return Selection{Active: Active{Wan: healthy[0].Member.Wan, Has: true}}
 ```
 
 Lowest `priority` wins. Ties broken by lexicographic WAN name — guarantees determinism even when two healthy members share the same priority. `weight` is ignored entirely.
@@ -56,7 +67,7 @@ Lowest `priority` wins. Ties broken by lexicographic WAN name — guarantees det
 |---|---|
 | `[primary=1 ✓, backup=2 ✓]` | `primary` |
 | `[primary=1 ✗, backup=2 ✓]` | `backup` |
-| `[primary=1 ✗, backup=2 ✗]` | `null` |
+| `[primary=1 ✗, backup=2 ✗]` | `NoActive` |
 | `[a=1 ✓, b=1 ✓, c=1 ✓]` | `a` (tie, lex name) |
 | `[primary=2 ✗, backup=2 ✓, fallback=3 ✓]` | `backup` (lower priority among healthy) |
 
