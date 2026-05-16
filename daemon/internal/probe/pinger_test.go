@@ -430,3 +430,81 @@ func TestCycleSkipsReadOnCancelledContext(t *testing.T) {
 		t.Errorf("queued reply was consumed (%d left, want 1) — read window not skipped", len(conn.replies))
 	}
 }
+
+// TestCycleIgnoresUnknownSequence: a reply that matches our ident
+// but carries a seq we never sent (a stale reply from a previous
+// cycle, or a duplicate the kernel re-delivered) must be consumed
+// from the conn and dropped — not credited to a random inflight
+// entry. Pins the `if !known { continue }` branch in cycle().
+func TestCycleIgnoresUnknownSequence(t *testing.T) {
+	t.Parallel()
+	p := newPinger([]string{"1.1.1.1"})
+	addrs, _ := p.resolveTargets()
+	windows := map[string]*WindowStats{"1.1.1.1": mustNewWindow(t, p.WindowSize)}
+	// cycle issues seq=0 for our one target. Queue a reply carrying
+	// the right ident but a different seq — matches "stale reply"
+	// from a previous cycle of the same socket.
+	stale := echoReplyFor(p.Family, p.Ident, 99)
+	conn := &fakeConn{replies: [][]byte{stale}}
+
+	buf := make([]byte, 1500)
+	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
+
+	if windows["1.1.1.1"].LossRatio() != 1.0 {
+		t.Errorf("loss = %v, want 1.0 (no matching-seq reply ⇒ inflight lost)", windows["1.1.1.1"].LossRatio())
+	}
+	if len(conn.replies) != 0 {
+		t.Errorf("stale reply still queued (%d left); the unknown-seq path didn't consume it", len(conn.replies))
+	}
+}
+
+// TestResolveTargetsRejectsV4UnderV6: the symmetric case of
+// TestResolveTargetsRejectsFamilyMismatch — a v4 literal placed
+// under FamilyV6 must trip the validator. The two error branches
+// in resolveTargets are independent code paths; the v4-under-v6
+// branch was previously uncovered.
+func TestResolveTargetsRejectsV4UnderV6(t *testing.T) {
+	t.Parallel()
+	p := newPinger([]string{"1.1.1.1"}) // v4 ip
+	p.Family = FamilyV6                 // ... under v6 → mismatch
+	_, err := p.resolveTargets()
+	if err == nil {
+		t.Fatal("resolveTargets(v4 under v6) = nil, want family-mismatch error")
+	}
+	if !strings.Contains(err.Error(), "is v4 but family=v6") {
+		t.Errorf("err = %q, want it to name the mismatch direction", err.Error())
+	}
+}
+
+// TestDialICMPViaReturnsConnWhenBindSucceeds: the happy-path
+// return — listen yields a *net.IPConn, bind reports success,
+// dialICMPVia returns the conn unchanged. Covers the
+// `return ipConn, nil` line that the existing skip-on-no-CAP_NET_RAW
+// test never reaches.
+//
+// Listen returns a typed-nil *net.IPConn so the type-assert
+// succeeds without needing to actually open a raw socket; bind is
+// stubbed to return nil so neither path touches the nil conn's
+// methods.
+func TestDialICMPViaReturnsConnWhenBindSucceeds(t *testing.T) {
+	t.Parallel()
+	var typedNil *net.IPConn
+	listen := func(string, string) (net.PacketConn, error) {
+		return typedNil, nil
+	}
+	var bindCalled bool
+	bind := func(*net.IPConn, string) error {
+		bindCalled = true
+		return nil
+	}
+	got, err := dialICMPVia(FamilyV4, "eth0", listen, bind)
+	if err != nil {
+		t.Fatalf("dialICMPVia(bind-ok) = %v, want nil err", err)
+	}
+	if !bindCalled {
+		t.Error("bind was not invoked on the listen-success path")
+	}
+	if pc, ok := got.(*net.IPConn); !ok || pc != typedNil {
+		t.Errorf("returned conn = %v (%T), want the listen-provided *net.IPConn", got, got)
+	}
+}

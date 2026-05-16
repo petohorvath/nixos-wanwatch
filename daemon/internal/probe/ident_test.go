@@ -64,9 +64,15 @@ func TestAllocateIdentsRejectsDuplicates(t *testing.T) {
 
 func TestAllocateIdentsHandlesHashCollision(t *testing.T) {
 	t.Parallel()
-	// Build enough keys that two of them collide on the SHA-256
-	// initial slot — linear probe must hand them distinct idents.
-	keys := make([]IdentKey, 256)
+	// Build enough keys that the SHA-256 initial slot must collide
+	// somewhere — linear probe needs to hand the colliders distinct
+	// idents. 2048 keys in a 16-bit space puts the no-collision
+	// probability at ~e^-32 (≈1.3e-14), so the "if taken { continue }"
+	// branch is exercised on every run. The previous 256-key count
+	// only triggered a collision ~30% of the time — the test asserted
+	// the *output* property (no duplicates) but didn't always reach
+	// the probe-displacement code path.
+	keys := make([]IdentKey, 2048)
 	for i := range keys {
 		keys[i] = IdentKey{Wan: fmt.Sprintf("wan-%d", i), Family: FamilyV4}
 	}
@@ -80,6 +86,19 @@ func TestAllocateIdentsHandlesHashCollision(t *testing.T) {
 			t.Errorf("collision survived linear probe: ident %d", v)
 		}
 		seen[v] = struct{}{}
+	}
+	// Belt-and-braces: at least one key must have ended up at an
+	// ident different from its initialIdent (i.e. probe-displaced),
+	// confirming the test actually reached the displacement branch
+	// rather than getting lucky on a hash run.
+	displaced := 0
+	for k, v := range got {
+		if v != initialIdent(k) {
+			displaced++
+		}
+	}
+	if displaced == 0 {
+		t.Errorf("no displaced idents in %d-key allocation — probe branch unreachable", len(keys))
 	}
 }
 
