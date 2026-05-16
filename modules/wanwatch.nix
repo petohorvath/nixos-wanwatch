@@ -37,7 +37,9 @@
 let
   cfg = config.services.wanwatch;
 
-  defaultPackage = pkgs.callPackage ../pkgs/wanwatchd.nix { };
+  defaultPackage = pkgs.callPackage ../pkgs/wanwatchd.nix {
+    inherit (wanwatch) version;
+  };
 
   # The option types accept already-validated user inputs; round-trip
   # through `wanwatch.<type>.make` to get the tagged value form that

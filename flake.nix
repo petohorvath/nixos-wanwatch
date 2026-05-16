@@ -252,7 +252,13 @@
       packages = forAllSystems (
         pkgs:
         nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux rec {
-          wanwatchd = pkgs.callPackage ./pkgs/wanwatchd.nix { };
+          # Thread the lib's version through so wanwatchd's
+          # ldflags-injected `main.version` (and meta.version)
+          # come from one source — lib/default.nix — rather than
+          # a duplicate default in wanwatchd.nix.
+          wanwatchd = pkgs.callPackage ./pkgs/wanwatchd.nix {
+            inherit (self.lib) version;
+          };
           default = wanwatchd;
         }
       );

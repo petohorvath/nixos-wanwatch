@@ -9,7 +9,11 @@
   from wanwatch.
 
   Version + commit are link-injected so `wanwatch_build_info` matches
-  the package store path. Callers override via:
+  the package store path. The flake threads `version` from
+  `lib/default.nix` (the single source of truth) via callPackage;
+  `commit` is fed from CI. The default below is a fallback for
+  stand-alone callPackage use — keep it in sync with `lib/default.nix`
+  on tag bumps.
 
     pkgs.callPackage ./wanwatchd.nix {
       version = "0.1.0";
