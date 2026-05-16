@@ -184,6 +184,33 @@ would let the test helpers (`mkUpdate`, `mkSub`) keep clean names
 without the `Route` prefix the route-side tests currently carry
 to dodge collision. `daemon/internal/rtnl/route_test.go`.
 
+### Audit VM tests for tight timing windows
+
+`tests/vm/nftzones-integration.nix` lost a race on the unstable
+channel when an extended sibling scenario added enough parallel
+CPU pressure to delay the daemon's carrier → Decision → route-
+write pipeline past the test's implicit 1.5s grace window. The
+test was asserting on `ip -4 route show table <T>` directly after
+`ip link set wan0 up` — fix was a `wait_until_succeeds` poll on
+the route landing.
+
+Same race shape likely exists elsewhere. The signature is "after
+a state change the test induces (carrier flip, hook drop, netem
+add/remove), assert on something the daemon *eventually* mutates,
+without a `wait_until_succeeds` or `wait_for_active`-style poll
+in between." A bug-for-bug walk through `tests/vm/*.nix` looking
+for that pattern would convert latent flakes into either fast-
+failing tests or correctly-synchronised ones. Candidate audit
+targets: any assertion on `ip route show`, `ip rule show`,
+`nft list ruleset`, `stat /run/wanwatch/...`, or scrape metrics
+that follows a state-changing `succeed(...)` without an
+explicit wait.
+
+Signature in CI logs: `FIB table does not exist` (route check
+that raced an empty table), or a metric value off by one
+(scrape that raced an Inc call), or an empty file (stat that
+raced a write).
+
 ---
 
 ## considered — not currently planned
