@@ -14,13 +14,19 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 - **Metric renames**: `wanwatch_probe_rtt_milliseconds` → `wanwatch_probe_rtt_seconds`, `wanwatch_probe_jitter_milliseconds` → `wanwatch_probe_jitter_seconds`. Prometheus convention is base units.
 - `selector.Apply` (Go) renamed to `selector.Select` — `Apply` is reserved by the glossary for kernel-state mutation in `internal/apply`.
 - `Gateway` is now a glossary term (was an unnamed runtime concept). Daemon-internal struct field abbreviations `GwV4Old` / `GwV4New` / `GwV6Old` / `GwV6New` on `state.HookContext` spelled out as `GatewayV4Old` / `GatewayV4New` / `GatewayV6Old` / `GatewayV6New` to match the env-var names they populate.
+- **state.json is now republished on every observable state transition** (per-family Health flip, carrier/operstate change, Gateway cache mutation on a watched interface, route convergence) rather than only on Decisions. Consumers polling for a coherent runtime view stop seeing stale snapshots between Decisions.
+- **Hysteresis now seeds from the first *full* probe Window** rather than from every Sample. A Lost first Sample no longer seeds the state unhealthy — eliminates the cold-start down→up flap PLAN §8 warned against, and a healthy WAN no longer fires a spurious Decision pair as probes converge.
+- **state.json's `updatedAt` and the hook env var `WANWATCH_TS` now share one timestamp per Decision.** `state.Writer.Write` preserves a non-zero caller `UpdatedAt`; `daemon.commitDecision` captures `time.Now().UTC()` once and threads it into both writes. Consumers correlating the two surfaces see identical values instead of millisecond-drift twins.
+- `wanwatch_group_decisions_total` and `wanwatch_apply_op_errors_total` help text + `docs/metrics.md` shrunk to the label values the daemon actually emits in v1. `reason ∈ {health, carrier}` (was claiming `startup`/`manual`); `op ∈ {conntrack_flush, ifindex_lookup, rule_install}` (was claiming `state_write`/`hook` too). Reserved values are now documented as reserved.
 
 ### Added
 
 - `daemon/internal/rtnl.RouteSubscriber` — emits per-`(iface, family)` default-route add/del events from the main RIB, filtered to WAN interfaces.
-- `daemon/cmd/wanwatchd.GatewayCache` — mirrors the kernel's view; drives non-PtP route writes and re-applies on route flap.
-- VM scenario `tests/vm/gateway-discovery.nix` — end-to-end coverage of the discovery loop.
+- `daemon/cmd/wanwatchd.gatewayCache` — mirrors the kernel's view; drives non-PtP route writes and re-applies on route flap.
+- VM scenarios added since 0.1.0: `tests/vm/cold-start.nix`, `tests/vm/failover-probe-loss.nix` (v4 netem-driven), `tests/vm/failover-probe-loss-v6.nix` (v6 netem-driven; closes the v6 probe + threshold + hysteresis gap that the carrier-driven `failover-v6.nix` left unexercised), `tests/vm/gateway-discovery.nix`.
+- `tests/integration/` split into `scenarios/` + `rejections/` per PLAN §9.3, with two rejection cases (`probe-no-targets`, `probe-family-mismatch`) proving the lib validators stay wired into the live module-eval path.
 - `daemon/cmd/wanwatchd/daemon_test.go` — first unit coverage for the daemon's pipeline (`writeStateSnapshot`, `handleProbeResult`, `handleRouteEvent`). Lived as `state.go` before with no test file.
+- `wanwatch_apply_op_errors_total{op="rule_install"}` is now incremented on bootstrap `EnsureRule` failure (was: silent from the metric's perspective).
 
 ### Internal
 
@@ -29,6 +35,8 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 - `selector.Selection.Active` is now a comparable `Active{Wan string, Has bool}` struct (was `*string`). Removes the `equalStringPtr` / `strPtr` helpers and the loop-local pointer trick in `primaryBackup`.
 - `context.Context` propagated through `apply.WriteDefault` / `EnsureRule` / `FlushBySource` and the daemon's `bootstrap` / `handle*Event` / `recomputeGroup` / `applyRoutes` chain.
 - `state.Writer` now serializes `Write` calls with a `sync.Mutex` (was "serialize at the caller" documentation).
+- `state.Writer.Write` preserves a non-zero caller-supplied `UpdatedAt` (was: always overwritten with `time.Now().UTC()`).
+- `daemon/cmd/wanwatchd.gatewayCache` and its `set` / `clear` / `get` / `string` methods are unexported — `package main` has no external consumers, so the capitalized names were promising a public surface that didn't exist.
 - `probe.NewWindow` returns an error instead of panicking; `selector.NewHysteresisState(up, down)` takes thresholds at construction rather than per-call.
 - `cmd/wanwatchd` file shuffle: the file holding the `daemon` struct is now `daemon.go` (was `state.go`), the subscriber wiring is `subscribers.go` (was `daemon.go`), free helpers extracted to `helpers.go`.
 - `docs/glossary.md` row for `Health` now matches the v1 boolean shape; the four-state spec (`up`/`down`/`degraded`/`unknown`) deferred to v2 — see `TODO.md`.
@@ -64,7 +72,7 @@ Initial public release. Feature-complete per [`PLAN.md`](./PLAN.md) v1 scope.
 - Selector with `primary-backup` strategy + two-stage hysteresis (band-pass thresholds + consecutive-cycle filter).
 - Netlink apply: `RouteReplace` (idempotent default route), `RuleAdd` (idempotent fwmark rule, EEXIST-swallowed), `ConntrackDeleteFilter` (best-effort source-IP flush).
 - Atomic `state.json` writer + run-parts hook dispatcher with 5 s per-hook timeout and the `WANWATCH_*` env-var contract.
-- Prometheus registry over a 0660 Unix socket; 18 metrics per PLAN §7.2.
+- Prometheus registry over a 0660 Unix socket; 16 metrics per PLAN §7.2 (catalog drops `wanwatch_probe_samples_total` and `wanwatch_apply_op_duration_seconds` — see `TODO.md` for the re-add work).
 
 **Tests**
 
