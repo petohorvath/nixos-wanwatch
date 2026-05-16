@@ -11,6 +11,7 @@ Status legend:
 - **v2** — design changes large enough to warrant a major bump.
 - **infra** — CI / tooling debt; non-functional.
 - **cleanup** — internal refactor; no user-visible effect.
+- **considered** — evaluated and not currently planned; revisit only if conditions change.
 
 ---
 
@@ -165,3 +166,45 @@ The two subscriber types share zero symbols. Splitting the package
 would let the test helpers (`mkUpdate`, `mkSub`) keep clean names
 without the `Route` prefix the route-side tests currently carry
 to dodge collision. `daemon/internal/rtnl/route_test.go`.
+
+---
+
+## considered — not currently planned
+
+### Unprivileged-ICMP path
+
+PLAN §8 originally promised `SOCK_DGRAM+IPPROTO_ICMP` as the
+preferred probe socket, with `CAP_NET_RAW` dropped at runtime —
+the daemon (`daemon/internal/probe/pinger.go:209`) ships
+raw-socket only.
+
+**What it would change.** Two Linux paths exist for sending ICMP
+echo from userspace:
+
+- `SOCK_RAW + IPPROTO_ICMP` — current. App sees every ICMP packet
+  the kernel receives, builds the full ICMP message itself,
+  requires `CAP_NET_RAW`.
+- `SOCK_DGRAM + IPPROTO_ICMP` — alternative. Kernel demuxes echo
+  replies by identifier, no capability required as long as the
+  process's GID is covered by `net.ipv4.ping_group_range`. Linux
+  3.0+ for v4, 3.11+ for v6.
+
+**Why probably not.** The security delta is bounded:
+
+- `CAP_NET_ADMIN` is required either way — route mutation in
+  `apply.WriteDefault`, rule install in `apply.EnsureRule`,
+  conntrack flush in `apply.FlushBySource`. The daemon stays
+  privileged regardless.
+- `SO_BINDTODEVICE` (used per WAN to pin each probe's egress)
+  required `CAP_NET_RAW` itself pre-Linux 5.7; the 5.7 relaxation
+  has conditions that may or may not cover the daemon's usage.
+- Real cost: a `dialUnprivileged` codepath with raw-socket
+  fallback, module-side
+  `boot.kernel.sysctl."net.ipv4.ping_group_range"`, and runtime
+  `prctl(PR_CAPBSET_DROP, CAP_NET_RAW)` to shed the cap.
+
+**Revisit conditions.** Worth implementing if all three hold:
+(a) the daemon is deployed somewhere a compromised-with-
+`CAP_NET_RAW` process is a named threat, (b) all target kernels
+ship ≥ 5.7, (c) `SO_BINDTODEVICE` is confirmed working without
+the cap in the daemon's specific bind pattern.

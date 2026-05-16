@@ -750,10 +750,16 @@ The module's systemd unit declares:
 - `Restart = on-failure`, `RestartSec = 5s`,
   `WatchdogSec = 30s` (paired with `sd_notify` keepalive at half-interval).
 
-Unprivileged-ICMP path (kernel `net.ipv4.ping_group_range` covers
-the `wanwatch` group): if available, `SOCK_DGRAM+IPPROTO_ICMP` is
-preferred and `CAP_NET_RAW` is dropped at runtime. Falls back to
-raw socket otherwise.
+ICMP probes ship on `SOCK_RAW` via
+`golang.org/x/net/icmp.ListenPacket` — `CAP_NET_RAW` is the gate.
+An unprivileged variant (`SOCK_DGRAM+IPPROTO_ICMP` keyed off
+`net.ipv4.ping_group_range`, with `CAP_NET_RAW` dropped after
+socket setup) was originally promised here, but the marginal
+security gain — `CAP_NET_ADMIN` is still required for route, rule,
+and conntrack mutation, and `SO_BINDTODEVICE` carries its own
+kernel-version-dependent capability requirements — leaves it as a
+maybe-never. Tracked under `TODO.md` "considered — not currently
+planned" with revisit conditions.
 
 ---
 
