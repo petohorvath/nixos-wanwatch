@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestWriteCreatesFile(t *testing.T) {
@@ -84,6 +85,34 @@ func TestWriteSetsSchemaAndUpdatedAt(t *testing.T) {
 	}
 	if out.UpdatedAt.IsZero() {
 		t.Errorf("UpdatedAt is zero — Write must stamp it")
+	}
+}
+
+// TestWritePreservesCallerUpdatedAt pins the synchronization
+// contract used by the daemon's commitDecision: a non-zero
+// UpdatedAt supplied by the caller must survive Write so the
+// hook env-var WANWATCH_TS and state.json's `updatedAt` can be
+// stamped with the same wall-clock moment.
+func TestWritePreservesCallerUpdatedAt(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "state.json")
+	w := Writer{Path: path}
+
+	want := time.Date(2026, 5, 16, 12, 0, 0, 123456789, time.UTC)
+	if err := w.Write(State{UpdatedAt: want}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var out State
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !out.UpdatedAt.Equal(want) {
+		t.Errorf("UpdatedAt = %v, want %v (caller stamp must survive)", out.UpdatedAt, want)
 	}
 }
 

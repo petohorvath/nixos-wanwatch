@@ -97,12 +97,16 @@ type Writer struct {
 // On any error after the tmpfile is created, the tmpfile is
 // removed (best-effort) so we don't litter the state directory.
 //
-// `UpdatedAt` is overwritten with `time.Now().UTC()` at write
-// time — caller-provided values are ignored.
+// `UpdatedAt` is filled with `time.Now().UTC()` at write time when
+// the caller passes the zero value; otherwise the caller's timestamp
+// is preserved (so a Decision can stamp state.json and the hook env
+// vars with the same wall-clock moment).
 func (w *Writer) Write(s State) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	s.UpdatedAt = time.Now().UTC()
+	if s.UpdatedAt.IsZero() {
+		s.UpdatedAt = time.Now().UTC()
+	}
 	s.Schema = SchemaVersion
 
 	data, err := json.MarshalIndent(s, "", "  ")

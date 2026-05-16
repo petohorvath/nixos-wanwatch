@@ -206,7 +206,7 @@ func (d *daemon) bootstrap(ctx context.Context) error {
 	// wanwatch_state_publications_total, integration checks) see
 	// the daemon's view from the very first scrape — even before
 	// any probe sample lands. PLAN §8 cold-start.
-	d.writeStateSnapshot()
+	d.writeStateSnapshot(time.Time{})
 	return nil
 }
 
@@ -286,7 +286,7 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	// at all, leaving wans[<name>].families[<f>].healthy stale
 	// relative to the live Prometheus view. PLAN §5.5: state.json
 	// mirrors per-family Health, not just Decisions.
-	d.writeStateSnapshot()
+	d.writeStateSnapshot(time.Time{})
 }
 
 // handleLinkEvent updates per-WAN carrier/operstate. Carrier-down
@@ -321,7 +321,7 @@ func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 		// state.json — leaving the wans[<name>].carrier/operstate
 		// fields drifted from reality.
 		if prevCarrier != ws.carrier || prevOperstate != ws.operstate {
-			d.writeStateSnapshot()
+			d.writeStateSnapshot(time.Time{})
 		}
 		return
 	}
@@ -392,14 +392,17 @@ func (d *daemon) commitDecision(ctx context.Context, g *groupState) {
 	g.active = next
 	g.applyPending = false
 	g.pendingActive = selector.Active{}
+	now := time.Now().UTC()
 	if next.Has {
-		now := time.Now().UTC()
 		g.activeSince = &now
 	}
 	d.updateGroupActiveGauge(g)
 	d.flushSwitchedConntrack(ctx, g, old, next)
-	d.writeStateSnapshot()
-	d.runHooks(ctx, g, old, next)
+	// One timestamp for both writes so consumers correlating
+	// state.json's `updatedAt` against the hook's WANWATCH_TS see
+	// identical values rather than millisecond-drift twins.
+	d.writeStateSnapshot(now)
+	d.runHooks(ctx, g, old, next, now)
 }
 
 // flushSwitchedConntrack clears the conntrack entries pinned to the
@@ -598,16 +601,22 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	// already-active WAN, a gateway disappearing on the standby)
 	// wouldn't otherwise update state.json, leaving the
 	// wans[<name>].gateways[v4|v6] fields stale.
-	d.writeStateSnapshot()
+	d.writeStateSnapshot(time.Time{})
 }
 
 // writeStateSnapshot serializes the runtime state into the form
 // state.Writer expects, then writes atomically. Increments
 // `state_publications_total` on success.
-func (d *daemon) writeStateSnapshot() {
+//
+// `now` controls state.json's `updatedAt`: the zero value defers
+// to state.Writer (which falls back to `time.Now().UTC()` at write
+// time), while a non-zero value pins the stamp so it can match a
+// concurrent hook invocation (commitDecision).
+func (d *daemon) writeStateSnapshot(now time.Time) {
 	snap := state.State{
-		Wans:   make(map[string]state.Wan, len(d.wans)),
-		Groups: make(map[string]state.Group, len(d.groups)),
+		UpdatedAt: now,
+		Wans:      make(map[string]state.Wan, len(d.wans)),
+		Groups:    make(map[string]state.Group, len(d.groups)),
 	}
 	for _, ws := range d.wans {
 		fams := make(map[string]state.FamilyHealth, len(ws.families))
@@ -657,7 +666,10 @@ func (d *daemon) writeStateSnapshot() {
 // hook directory. The hooks run under `parent` — the daemon
 // context — so a shutdown signal cancels any in-flight hook rather
 // than blocking the daemon behind it.
-func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selector.Active) {
+//
+// `now` populates HookContext.Timestamp (WANWATCH_TS); pass the
+// zero value to let state.buildEnv fill it with time.Now().UTC().
+func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selector.Active, now time.Time) {
 	event := hookEventFor(old, next)
 	if event == "" {
 		return
@@ -683,6 +695,7 @@ func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selec
 		Families:     probedFamiliesFor(d.wans, next),
 		Table:        g.cfg.Table,
 		Mark:         g.cfg.Mark,
+		Timestamp:    now,
 	}
 	results := d.hookR.Run(parent, hookCtx)
 	for _, r := range results {
