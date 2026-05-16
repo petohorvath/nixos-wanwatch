@@ -90,7 +90,7 @@ func TestEventLoopRoutesRouteEventToDaemon(t *testing.T) {
 	cancel()
 	<-done
 
-	gw, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4)
+	gw, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4)
 	if !ok {
 		t.Fatal("eth0/v4 gateway not in cache after RouteEvent")
 	}

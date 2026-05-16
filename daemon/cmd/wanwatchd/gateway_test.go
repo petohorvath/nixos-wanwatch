@@ -10,8 +10,8 @@ import (
 
 func TestGatewayCacheGetEmpty(t *testing.T) {
 	t.Parallel()
-	c := NewGatewayCache()
-	gw, ok := c.Get("eth0", rtnl.RouteFamilyV4)
+	c := newGatewayCache()
+	gw, ok := c.get("eth0", rtnl.RouteFamilyV4)
 	if ok {
 		t.Errorf("Get on empty cache: ok=%v gw=%v, want ok=false", ok, gw)
 	}
@@ -19,11 +19,11 @@ func TestGatewayCacheGetEmpty(t *testing.T) {
 
 func TestGatewayCacheSetGet(t *testing.T) {
 	t.Parallel()
-	c := NewGatewayCache()
+	c := newGatewayCache()
 	want := net.ParseIP("192.0.2.1")
-	c.Set("eth0", rtnl.RouteFamilyV4, want)
+	c.set("eth0", rtnl.RouteFamilyV4, want)
 
-	got, ok := c.Get("eth0", rtnl.RouteFamilyV4)
+	got, ok := c.get("eth0", rtnl.RouteFamilyV4)
 	if !ok {
 		t.Fatal("Get after Set: ok=false")
 	}
@@ -36,10 +36,10 @@ func TestGatewayCacheSetRecordsScopeLink(t *testing.T) {
 	t.Parallel()
 	// Scope-link routes carry a nil gateway — the cache must
 	// distinguish "no entry" from "entry with nil gw".
-	c := NewGatewayCache()
-	c.Set("wg0", rtnl.RouteFamilyV4, nil)
+	c := newGatewayCache()
+	c.set("wg0", rtnl.RouteFamilyV4, nil)
 
-	gw, ok := c.Get("wg0", rtnl.RouteFamilyV4)
+	gw, ok := c.get("wg0", rtnl.RouteFamilyV4)
 	if !ok {
 		t.Fatal("Get on scope-link entry: ok=false; want true with nil gw")
 	}
@@ -50,12 +50,12 @@ func TestGatewayCacheSetRecordsScopeLink(t *testing.T) {
 
 func TestGatewayCacheKeysByFamily(t *testing.T) {
 	t.Parallel()
-	c := NewGatewayCache()
-	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	c.Set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
+	c := newGatewayCache()
+	c.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	c.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
 
-	v4, _ := c.Get("eth0", rtnl.RouteFamilyV4)
-	v6, _ := c.Get("eth0", rtnl.RouteFamilyV6)
+	v4, _ := c.get("eth0", rtnl.RouteFamilyV4)
+	v6, _ := c.get("eth0", rtnl.RouteFamilyV6)
 	if v4.String() != "192.0.2.1" {
 		t.Errorf("eth0/v4 = %v, want 192.0.2.1", v4)
 	}
@@ -66,28 +66,28 @@ func TestGatewayCacheKeysByFamily(t *testing.T) {
 
 func TestGatewayCacheClear(t *testing.T) {
 	t.Parallel()
-	c := NewGatewayCache()
-	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	c.Clear("eth0", rtnl.RouteFamilyV4)
+	c := newGatewayCache()
+	c.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	c.clear("eth0", rtnl.RouteFamilyV4)
 
-	if _, ok := c.Get("eth0", rtnl.RouteFamilyV4); ok {
+	if _, ok := c.get("eth0", rtnl.RouteFamilyV4); ok {
 		t.Error("entry still present after Clear")
 	}
 }
 
 func TestGatewayCacheStringFormats(t *testing.T) {
 	t.Parallel()
-	c := NewGatewayCache()
-	c.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	c.Set("wg0", rtnl.RouteFamilyV4, nil) // scope-link
+	c := newGatewayCache()
+	c.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	c.set("wg0", rtnl.RouteFamilyV4, nil) // scope-link
 
-	if got := c.String("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
+	if got := c.string("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
 		t.Errorf("String(eth0/v4) = %q, want 192.0.2.1", got)
 	}
-	if got := c.String("wg0", rtnl.RouteFamilyV4); got != "" {
+	if got := c.string("wg0", rtnl.RouteFamilyV4); got != "" {
 		t.Errorf("String(wg0/v4 scope-link) = %q, want empty", got)
 	}
-	if got := c.String("missing", rtnl.RouteFamilyV4); got != "" {
+	if got := c.string("missing", rtnl.RouteFamilyV4); got != "" {
 		t.Errorf("String(missing) = %q, want empty", got)
 	}
 }
@@ -120,7 +120,7 @@ func TestHandleRouteEventUpdatesCacheOnAdd(t *testing.T) {
 		Gateway: gw,
 	})
 
-	got, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4)
+	got, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4)
 	if !ok {
 		t.Fatal("cache not populated")
 	}
@@ -132,7 +132,7 @@ func TestHandleRouteEventUpdatesCacheOnAdd(t *testing.T) {
 func TestHandleRouteEventClearsCacheOnDel(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
-	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 
 	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:     rtnl.RouteEventDel,
@@ -140,7 +140,7 @@ func TestHandleRouteEventClearsCacheOnDel(t *testing.T) {
 		Family: rtnl.RouteFamilyV4,
 	})
 
-	if _, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4); ok {
+	if _, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4); ok {
 		t.Error("cache entry survived RouteEventDel")
 	}
 }
@@ -159,7 +159,7 @@ func TestHandleRouteEventIgnoresUnrelatedInterface(t *testing.T) {
 		Family:  rtnl.RouteFamilyV4,
 		Gateway: net.ParseIP("127.0.0.1"),
 	})
-	if _, ok := d.gateways.Get("lo", rtnl.RouteFamilyV4); !ok {
+	if _, ok := d.gateways.get("lo", rtnl.RouteFamilyV4); !ok {
 		t.Error("lo gateway not recorded")
 	}
 }

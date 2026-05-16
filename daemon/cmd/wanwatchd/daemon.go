@@ -118,7 +118,7 @@ type daemon struct {
 	logger   *slog.Logger
 	wans     map[string]*wanState
 	groups   map[string]*groupState
-	gateways *GatewayCache
+	gateways *gatewayCache
 
 	// The syscall-touching seams of the apply path — newDaemon wires
 	// each to its production function; tests substitute fakes (the
@@ -147,7 +147,7 @@ func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) 
 		logger:         logger,
 		wans:           make(map[string]*wanState, len(cfg.Wans)),
 		groups:         make(map[string]*groupState, len(cfg.Groups)),
-		gateways:       NewGatewayCache(),
+		gateways:       newGatewayCache(),
 		ifindexOf:      interfaceIndex,
 		writeRoute:     apply.WriteDefault,
 		interfaceAddrs: interfaceAddrs,
@@ -465,7 +465,7 @@ func (d *daemon) retryPendingApply(ctx context.Context, wan string) {
 // probe are skipped either way.
 //
 // PointToPoint WANs get scope-link routes (no gateway needed);
-// non-PtP WANs use the gateway the GatewayCache learned from the
+// non-PtP WANs use the gateway the gatewayCache learned from the
 // kernel's main routing table.
 //
 // It returns an error if any family *hard*-fails — the ifindex
@@ -502,7 +502,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 		case ws.cfg.PointToPoint:
 			route.PointToPoint = true
 		default:
-			gw, ok := d.gateways.Get(ws.cfg.Interface, rtnl.RouteFamily(fam))
+			gw, ok := d.gateways.get(ws.cfg.Interface, rtnl.RouteFamily(fam))
 			if !ok || gw == nil {
 				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
 					"group", g.cfg.Name, "wan", activeWan, "family", famLabel,
@@ -558,12 +558,12 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 // RouteReplace is idempotent so a full rewrite would be harmless,
 // but per-family halves the netlink syscall count under flap.
 func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
-	prev, hadPrev := d.gateways.Get(e.Iface, e.Family)
+	prev, hadPrev := d.gateways.get(e.Iface, e.Family)
 	switch e.Op {
 	case rtnl.RouteEventAdd:
-		d.gateways.Set(e.Iface, e.Family, e.Gateway)
+		d.gateways.set(e.Iface, e.Family, e.Gateway)
 	case rtnl.RouteEventDel:
-		d.gateways.Clear(e.Iface, e.Family)
+		d.gateways.clear(e.Iface, e.Family)
 	}
 
 	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !prev.Equal(e.Gateway)
@@ -626,8 +626,8 @@ func (d *daemon) writeStateSnapshot() {
 			Operstate: ws.operstate.String(),
 			Healthy:   ws.healthy(),
 			Gateways: state.Gateways{
-				V4: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV4),
-				V6: d.gateways.String(ws.cfg.Interface, rtnl.RouteFamilyV6),
+				V4: d.gateways.string(ws.cfg.Interface, rtnl.RouteFamilyV4),
+				V6: d.gateways.string(ws.cfg.Interface, rtnl.RouteFamilyV6),
 			},
 			Families: fams,
 		}
@@ -676,10 +676,10 @@ func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selec
 		// blank when (a) the iface has no cached default route yet,
 		// or (b) the route is scope-link (point-to-point) so there
 		// is no gateway to surface.
-		GatewayV4Old: d.gateways.String(oldIface, rtnl.RouteFamilyV4),
-		GatewayV4New: d.gateways.String(nextIface, rtnl.RouteFamilyV4),
-		GatewayV6Old: d.gateways.String(oldIface, rtnl.RouteFamilyV6),
-		GatewayV6New: d.gateways.String(nextIface, rtnl.RouteFamilyV6),
+		GatewayV4Old: d.gateways.string(oldIface, rtnl.RouteFamilyV4),
+		GatewayV4New: d.gateways.string(nextIface, rtnl.RouteFamilyV4),
+		GatewayV6Old: d.gateways.string(oldIface, rtnl.RouteFamilyV6),
+		GatewayV6New: d.gateways.string(nextIface, rtnl.RouteFamilyV6),
 		Families:     probedFamiliesFor(d.wans, next),
 		Table:        g.cfg.Table,
 		Mark:         g.cfg.Mark,

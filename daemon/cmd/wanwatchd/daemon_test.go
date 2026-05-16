@@ -43,7 +43,7 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 		JitterMicros: 800,
 		LossRatio:    0.05,
 	}
-	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 
 	d.writeStateSnapshot()
 
@@ -394,7 +394,7 @@ func TestHandleRouteEventPopulatesGatewayCache(t *testing.T) {
 		Family:  rtnl.RouteFamilyV4,
 		Gateway: net.ParseIP("198.51.100.1"),
 	})
-	gw, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4)
+	gw, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4)
 	if !ok || gw.String() != "198.51.100.1" {
 		t.Errorf("eth0/v4 = (%v, %v), want (198.51.100.1, true)", gw, ok)
 	}
@@ -404,13 +404,13 @@ func TestHandleRouteEventPopulatesGatewayCache(t *testing.T) {
 func TestHandleRouteEventDelClearsCache(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
-	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
 	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:     rtnl.RouteEventDel,
 		Iface:  "eth0",
 		Family: rtnl.RouteFamilyV4,
 	})
-	if _, ok := d.gateways.Get("eth0", rtnl.RouteFamilyV4); ok {
+	if _, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4); ok {
 		t.Error("cache still has eth0/v4 after Del event")
 	}
 }
@@ -1286,7 +1286,7 @@ func TestApplyRoutesErrorContract(t *testing.T) {
 	// A netlink write error is a hard failure, and bumps the
 	// per-(group,family) error counter so the failure is observable.
 	d.ifindexOf = func(string) (int, error) { return 1, nil }
-	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 	d.writeRoute = func(context.Context, apply.DefaultRoute) error {
 		return errors.New("netlink: operation not permitted")
 	}
@@ -1304,8 +1304,8 @@ func TestApplyRoutesExplicitFamilyWritesOnlyThat(t *testing.T) {
 	// Seed both families' gateways so the filtered call has something
 	// to write — otherwise both families would soft-skip and the
 	// assertion below couldn't distinguish "filtered" from "skipped".
-	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	d.gateways.Set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
 	var fams []probe.Family
 	d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
 		fams = append(fams, r.Family)
@@ -1346,8 +1346,8 @@ func TestHandleRouteEventRewritesOnlyEventFamily(t *testing.T) {
 
 	// Both families have a cached gateway up front so the cold-start
 	// commit's per-family writes can all land.
-	d.gateways.Set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	d.gateways.Set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
+	d.gateways.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
 
 	var written []probe.Family
 	d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
