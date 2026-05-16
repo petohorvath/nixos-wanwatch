@@ -120,4 +120,97 @@ in
     expr = evalTypeFails types.pctInt 50.5;
     expected = true;
   };
+
+  # ===== fwmark =====
+
+  testFwmarkAcceptsLowerBound = {
+    expr = evalType types.fwmark 1000;
+    expected = 1000;
+  };
+
+  testFwmarkAcceptsUpperBound = {
+    expr = evalType types.fwmark 32767;
+    expected = 32767;
+  };
+
+  testFwmarkAcceptsMid = {
+    expr = evalType types.fwmark 16000;
+    expected = 16000;
+  };
+
+  testFwmarkRejectsZero = {
+    # `meta mark set 0` clears the mark — using it as a routing key
+    # matches every unmarked packet, never a useful policy choice.
+    expr = evalTypeFails types.fwmark 0;
+    expected = true;
+  };
+
+  testFwmarkRejectsBelowLowerBound = {
+    # The 1000 floor buries the small-integer space ad-hoc scripts
+    # commonly grab (mark 1, mark 10, …).
+    expr = evalTypeFails types.fwmark 999;
+    expected = true;
+  };
+
+  testFwmarkRejectsAboveUpperBound = {
+    expr = evalTypeFails types.fwmark 32768;
+    expected = true;
+  };
+
+  testFwmarkRejectsNegative = {
+    expr = evalTypeFails types.fwmark (-1);
+    expected = true;
+  };
+
+  testFwmarkRejectsString = {
+    expr = evalTypeFails types.fwmark "1000";
+    expected = true;
+  };
+
+  testFwmarkRejectsFloat = {
+    expr = evalTypeFails types.fwmark 1000.5;
+    expected = true;
+  };
+
+  # ===== routingTableId =====
+  #
+  # Shares its range with `fwmark` by construction — the basics
+  # below cover that the type is wired and rejects the same edge
+  # cases. The lower bound of 1000 already buries the kernel-reserved
+  # ids {253, 254, 255}, so no `addCheck` is needed for those.
+
+  testRoutingTableIdAcceptsLowerBound = {
+    expr = evalType types.routingTableId 1000;
+    expected = 1000;
+  };
+
+  testRoutingTableIdAcceptsUpperBound = {
+    expr = evalType types.routingTableId 32767;
+    expected = 32767;
+  };
+
+  testRoutingTableIdRejectsKernelReservedMain = {
+    # `main` (254) is the kernel's normal table — writing into it
+    # would fight every other route-installer. Out of range here
+    # by virtue of the 1000 floor.
+    expr = evalTypeFails types.routingTableId 254;
+    expected = true;
+  };
+
+  testRoutingTableIdRejectsKernelReservedLocal = {
+    # `local` (255) is auto-populated with this-host addresses;
+    # writing into it breaks "is this packet for me" lookups.
+    expr = evalTypeFails types.routingTableId 255;
+    expected = true;
+  };
+
+  testRoutingTableIdRejectsAboveUpperBound = {
+    expr = evalTypeFails types.routingTableId 32768;
+    expected = true;
+  };
+
+  testRoutingTableIdRejectsZero = {
+    expr = evalTypeFails types.routingTableId 0;
+    expected = true;
+  };
 }
