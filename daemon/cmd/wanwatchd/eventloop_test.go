@@ -10,6 +10,34 @@ import (
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
 )
 
+// waitConsumed polls a buffered channel until its length drops to
+// zero, signalling that the eventLoop's select picked the event up.
+// Bounded so a stuck event loop fails the test loudly instead of
+// hanging until the suite's outer timeout.
+//
+// Direct polling of the daemon's mutated state (e.g. `d.wans[...]`)
+// from the test goroutine while the eventLoop concurrently writes
+// it is a Go-memory-model data race that fails under `go test
+// -race`. Polling channel length instead is safe (the runtime
+// reads atomically) and tight: typically a single 1ms tick.
+func waitConsumed[T any](t *testing.T, ch <-chan T) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(ch) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("event loop never consumed the queued event (channel still has %d items)", len(ch))
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+	// The channel receive happens-before the handler's mutation,
+	// but len()==0 fires the instant the receive completes — before
+	// the handler may have finished its write. Give it a small
+	// window so the cancel+done synchronization below sees a
+	// completed mutation. 20ms is generous on any sane runner and
+	// covers a hot-stop+restart on a loaded CI.
+	time.Sleep(20 * time.Millisecond)
+}
+
 func TestEventLoopRoutesProbeResultToDaemon(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfg())
@@ -29,7 +57,7 @@ func TestEventLoopRoutesProbeResultToDaemon(t *testing.T) {
 		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 		close(done)
 	}()
-	time.Sleep(50 * time.Millisecond)
+	waitConsumed(t, probeResults)
 	cancel()
 	<-done
 
@@ -57,7 +85,7 @@ func TestEventLoopRoutesLinkEventToDaemon(t *testing.T) {
 		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 		close(done)
 	}()
-	time.Sleep(50 * time.Millisecond)
+	waitConsumed(t, linkEvents)
 	cancel()
 	<-done
 
@@ -86,7 +114,7 @@ func TestEventLoopRoutesRouteEventToDaemon(t *testing.T) {
 		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
 		close(done)
 	}()
-	time.Sleep(50 * time.Millisecond)
+	waitConsumed(t, routeEvents)
 	cancel()
 	<-done
 
