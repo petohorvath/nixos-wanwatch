@@ -121,16 +121,29 @@ pkgs.testers.runNixOSTest {
         f"group.active should be null when wan unhealthy: {state['groups']['home']}"
     )
 
-    # The per-family Prometheus gauges should agree.
-    body = router.succeed(
-        "${pkgs.curl}/bin/curl -s --unix-socket /run/wanwatch/metrics.sock "
-        "http://wanwatch/metrics"
-    )
-    assert (
-        'wanwatch_wan_family_healthy{family="v4",wan="uplink"} 1' in body
-    ), f"v4 gauge != 1; scrape:\n{body}"
-    assert (
-        'wanwatch_wan_family_healthy{family="v6",wan="uplink"} 0' in body
-    ), f"v6 gauge != 0; scrape:\n{body}"
+    # The per-family Prometheus gauges should agree. Poll: the
+    # state.json convergence loop above only gates on the state
+    # writer; the per-family gauges are updated on a separate path
+    # within the same Decision commit but without a formal ordering
+    # guarantee, so a snapshot scrape can race the gauge write on a
+    # loaded runner.
+    def scrape_body():
+        return router.succeed(
+            "${pkgs.curl}/bin/curl -s --unix-socket "
+            "/run/wanwatch/metrics.sock http://wanwatch/metrics"
+        )
+
+
+    want_v4 = 'wanwatch_wan_family_healthy{family="v4",wan="uplink"} 1'
+    want_v6 = 'wanwatch_wan_family_healthy{family="v6",wan="uplink"} 0'
+
+    body = ""
+    for _ in range(40):
+        body = scrape_body()
+        if want_v4 in body and want_v6 in body:
+            break
+        router.execute("sleep 0.25")
+    assert want_v4 in body, f"v4 gauge != 1; scrape:\n{body}"
+    assert want_v6 in body, f"v6 gauge != 0; scrape:\n{body}"
   '';
 }

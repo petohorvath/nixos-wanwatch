@@ -215,11 +215,6 @@ pkgs.testers.runNixOSTest {
         return metric(scrape(router), series)
 
 
-    def loss_ratio(router, wan, family="v6"):
-        state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-        return state["wans"][wan]["families"][family]["lossRatio"]
-
-
     def assert_unchanged_for(router, group, seconds, what):
         """Sample the health_decisions counter at start + after
         `seconds`; raise if it advanced. Used to pin "no Decision
@@ -278,8 +273,13 @@ pkgs.testers.runNixOSTest {
     assert after_a > before_a, (
         f"phase A: health-decisions did not advance: {before_a} → {after_a}"
     )
-    assert loss_ratio(router, "primary") >= 0.5, (
-        f"phase A: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≥ 0.5"
+    # Poll: `wait_for_active` proves the flip; the lossRatio in the
+    # same snapshot is from the most recent aggregate refresh, which
+    # may still reflect mid-failover numbers. Bound on the threshold.
+    router.wait_until_succeeds(
+        "jq -e '.wans.primary.families.v6.lossRatio >= 0.5' "
+        "< /run/wanwatch/state.json > /dev/null",
+        timeout=10,
     )
 
     # ==== Phase B — clear netem ⇒ recovery ====
@@ -338,9 +338,12 @@ pkgs.testers.runNixOSTest {
     wait_for_active(router, "backup", timeout=15)
     # Soft window: 50% configured loss can give anywhere from 30%
     # to 70% over a 10-sample window — assert "above the 25%
-    # threshold," not an exact value.
-    assert loss_ratio(router, "primary") >= 0.25, (
-        f"phase D1: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≥ 0.25"
+    # threshold," not an exact value. Poll so the snapshot taken
+    # at the flip moment doesn't race the aggregate refresh.
+    router.wait_until_succeeds(
+        "jq -e '.wans.primary.families.v6.lossRatio >= 0.25' "
+        "< /run/wanwatch/state.json > /dev/null",
+        timeout=10,
     )
 
     # D2 — stays unhealthy in the band-pass region
@@ -376,10 +379,14 @@ pkgs.testers.runNixOSTest {
     wait_for_active(router, "backup", timeout=15)
     # Aggregate should be in [0.3, 0.7] (one target ~0%, one ~100%
     # averaged). Loose so window noise doesn't flake the assertion.
-    lr_e = loss_ratio(router, "primary")
-    assert 0.3 <= lr_e <= 0.7, (
-        f"phase E: primary v6 lossRatio = {lr_e}, want in [0.3, 0.7] "
-        f"(one of two targets unreachable)"
+    # Poll so the snapshot doesn't race the aggregate refresh — the
+    # active flip may land before the per-target average has folded
+    # in the unreachable target's losses.
+    router.wait_until_succeeds(
+        "jq -e '.wans.primary.families.v6.lossRatio "
+        "| (. >= 0.3 and . <= 0.7)' "
+        "< /run/wanwatch/state.json > /dev/null",
+        timeout=10,
     )
 
     isp1.succeed("ip -6 addr add fd00:1::2/64 dev eth1")

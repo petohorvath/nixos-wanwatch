@@ -107,10 +107,11 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip link set eth1 up")
 
     # 1. The kernel really did install the default route the
-    #    daemon needs to discover.
-    main_route = router.succeed("ip -4 route show default")
-    assert "192.168.1.1" in main_route, (
-        f"kernel main-RIB default not installed:\n{main_route}"
+    #    daemon needs to discover. Poll: systemd-networkd may
+    #    still be applying the Gateway= directive when
+    #    wait_for_unit returns. Mirrors gateway-discovery-v6.nix.
+    router.wait_until_succeeds(
+        "ip -4 route show default | grep -q 'via 192.168.1.1'", timeout=15
     )
 
     # 2. The daemon publishes state.json with schema=1 + the

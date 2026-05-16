@@ -158,22 +158,22 @@ pkgs.testers.runNixOSTest {
     # filtering proved brittle across iproute2 versions (newer
     # releases want `fwmark X/MASK`); list the full set and grep
     # the printed mark instead.
-    def has_fwmark_rule(family_flag, mark):
-        rules = router.succeed(f"ip {family_flag} rule show").splitlines()
-        return any(
-            f"fwmark 0x{mark:x}" in line or f"fwmark 0x{mark:08x}" in line
-            for line in rules
+    #
+    # Poll defensively: bootstrap → EnsureRule → first state.json
+    # publish → sd_notify READY, so `wait_for_unit` SHOULD gate
+    # these — but a future bootstrap-order regression would silently
+    # re-introduce a race. Cheap on the happy path. Matches
+    # smoke.nix.
+    def wait_for_fwmark_rule(family_flag, mark, timeout=10):
+        pattern = f"fwmark 0x{mark:x}|fwmark 0x{mark:08x}"
+        router.wait_until_succeeds(
+            f"ip {family_flag} rule show | grep -Eq '{pattern}'",
+            timeout=timeout,
         )
 
 
-    assert has_fwmark_rule("-4", mark), (
-        f"v4 ip rule for fwmark {mark} ({hex(mark)}) missing:\n"
-        + router.succeed("ip -4 rule show")
-    )
-    assert has_fwmark_rule("-6", mark), (
-        f"v6 ip rule for fwmark {mark} ({hex(mark)}) missing:\n"
-        + router.succeed("ip -6 rule show")
-    )
+    wait_for_fwmark_rule("-4", mark)
+    wait_for_fwmark_rule("-6", mark)
 
     # 3. The daemon wrote the default route into the group's table
     # — a scope-link route out of wan0 (point-to-point, no gateway).
