@@ -228,7 +228,6 @@ that resolve to the operational modules.
 | `lib/internal/marks.nix` *(Pass 3)* | `allocate : groupNames → { <group> = <mark>; … }` deterministic |
 | `lib/internal/tables.nix` *(Pass 3)* | `allocate : groupNames → { <group> = <tableId>; … }` deterministic |
 | `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string` |
-| `lib/internal/snippets.nix` *(Pass 5)* | nftzones-integration helpers |
 | `lib/types/default.nix` | aggregates per-type option-type files via `lib.mergeAttrsList` |
 | `lib/types/primitives.nix` | shared option-type primitives (Pass 5) |
 | `lib/types/probe.nix` | probe-related NixOS option types (Pass 5) |
@@ -936,7 +935,6 @@ correctly. End-to-end on a single host without the Nix module.
 
 ### Pass 5 — surfaces
 
-- `lib/snippets.nix` — nftzones integration helpers
 - `lib/types/*.nix` — flattened option types (per-concept files)
 - `modules/wanwatch.nix` — the NixOS module (creates user/group,
   systemd unit with capabilities per §8, state dir, hooks dir)
