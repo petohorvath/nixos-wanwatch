@@ -543,7 +543,8 @@ wanwatch_group_decisions_total{group,reason}           counter
 wanwatch_apply_route_duration_seconds{group,family}    histogram (per-family RTM_NEWROUTE)
 wanwatch_apply_route_errors_total{group,family}        counter
 wanwatch_apply_op_errors_total{group,op}               counter
-                                                       op ∈ {conntrack_flush,ifindex_lookup}
+                                                       op ∈ {conntrack_flush,ifindex_lookup,
+                                                             rule_install}
 
 # Daemon
 wanwatch_state_publications_total                      counter

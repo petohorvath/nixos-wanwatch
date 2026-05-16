@@ -195,6 +195,7 @@ func (d *daemon) bootstrap(ctx context.Context) error {
 				Mark:   g.Mark,
 				Table:  g.Table,
 			}); err != nil {
+				d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "rule_install").Inc()
 				return err
 			}
 		}

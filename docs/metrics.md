@@ -37,7 +37,7 @@ Split into per-family and family-agnostic so labels never collapse to empty.
 |---|---|---|---|
 | `wanwatch_apply_route_duration_seconds` | histogram | `group`, `family` | Wall time of `RouteReplace`. |
 | `wanwatch_apply_route_errors_total` | counter | `group`, `family` | Route writes that returned a netlink error. |
-| `wanwatch_apply_op_errors_total` | counter | `group`, `op` | Errors per family-agnostic op. `op ∈ {conntrack_flush, ifindex_lookup}` in v1 — `state_write`, `hook`, and `rule_install` are reserved but not yet emitted. |
+| `wanwatch_apply_op_errors_total` | counter | `group`, `op` | Errors per family-agnostic op. `op ∈ {conntrack_flush, ifindex_lookup, rule_install}` in v1 — `state_write` and `hook` are reserved but not yet emitted. |
 
 ## Daemon-wide
 
