@@ -578,4 +578,21 @@ in
     expr = probe.defaults.intervalMs;
     expected = 500;
   };
+
+  # ===== Round-trip =====
+
+  testRoundTrip = {
+    # PLAN §9.1 (5): re-emitting the JSON shape after a second
+    # `make` must be byte-identical to the first. Pins the
+    # contract that `toJSONValue`'s output is itself a valid
+    # `make` input — consumers re-loading the rendered config
+    # don't need bespoke massaging to drive it back through the lib.
+    expr =
+      let
+        js1 = probe.toJSONValue (probe.make fullInput);
+        js2 = probe.toJSONValue (probe.make js1);
+      in
+      js1 == js2;
+    expected = true;
+  };
 }

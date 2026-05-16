@@ -193,4 +193,18 @@ in
       priority = 1;
     };
   };
+
+  # ===== Round-trip =====
+
+  testRoundTrip = {
+    # PLAN §9.1 (5): re-emitting the JSON shape after a second
+    # `make` must be byte-identical to the first.
+    expr =
+      let
+        js1 = member.toJSONValue (member.make minimalInput);
+        js2 = member.toJSONValue (member.make js1);
+      in
+      js1 == js2;
+    expected = true;
+  };
 }

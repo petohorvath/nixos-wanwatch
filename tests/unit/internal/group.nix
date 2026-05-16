@@ -362,4 +362,20 @@ in
       mark = null;
     };
   };
+
+  # ===== Round-trip =====
+
+  testRoundTrip = {
+    # PLAN §9.1 (5): re-emitting the JSON shape after a second
+    # `make` must be byte-identical to the first. Nested members
+    # round-trip via member.toJSONValue / member.make, so this
+    # covers the group ∘ member composition.
+    expr =
+      let
+        js1 = group.toJSONValue (group.make minimalInput);
+        js2 = group.toJSONValue (group.make js1);
+      in
+      js1 == js2;
+    expected = true;
+  };
 }

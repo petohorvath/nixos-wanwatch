@@ -292,4 +292,20 @@ in
     expr = evalThrows (wan.make { name = "bad"; });
     expected = true;
   };
+
+  # ===== Round-trip =====
+
+  testRoundTrip = {
+    # PLAN §9.1 (5): re-emitting the JSON shape after a second
+    # `make` must be byte-identical to the first. The nested
+    # probe must round-trip too — this covers the wan ∘ probe
+    # composition in one shot.
+    expr =
+      let
+        js1 = wan.toJSONValue (wan.make dualStackInput);
+        js2 = wan.toJSONValue (wan.make js1);
+      in
+      js1 == js2;
+    expected = true;
+  };
 }
