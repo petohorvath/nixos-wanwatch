@@ -42,7 +42,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.WanHealthy.WithLabelValues("primary").Set(1)
 	r.WanCarrierChanges.WithLabelValues("primary").Inc()
 	r.GroupActive.WithLabelValues("home", "primary").Set(1)
-	r.GroupDecisions.WithLabelValues("home", "startup").Inc()
+	r.GroupDecisions.WithLabelValues("home", "carrier").Inc()
 	r.ApplyRouteDuration.WithLabelValues("home", "v4").Observe(0.001)
 	r.ApplyRouteErrors.WithLabelValues("home", "v4").Inc()
 	r.ApplyOpErrors.WithLabelValues("home", "ifindex_lookup").Inc()

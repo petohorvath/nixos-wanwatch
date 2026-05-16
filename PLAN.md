@@ -537,14 +537,13 @@ wanwatch_wan_carrier_changes_total{wan}                counter
 # Group layer
 wanwatch_group_active{group,wan}                       gauge (1 for active, 0 others)
 wanwatch_group_decisions_total{group,reason}           counter
-                                                       reason ∈ {health,carrier,startup,manual}
+                                                       reason ∈ {health,carrier}
 
 # Apply layer — split per-family vs family-agnostic ops to avoid empty labels
 wanwatch_apply_route_duration_seconds{group,family}    histogram (per-family RTM_NEWROUTE)
 wanwatch_apply_route_errors_total{group,family}        counter
 wanwatch_apply_op_errors_total{group,op}               counter
-                                                       op ∈ {conntrack_flush,state_write,hook,
-                                                             rule_install,ifindex_lookup}
+                                                       op ∈ {conntrack_flush,ifindex_lookup}
 
 # Daemon
 wanwatch_state_publications_total                      counter

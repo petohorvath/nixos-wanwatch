@@ -132,7 +132,7 @@ func New() *Registry {
 			Namespace: Namespace,
 			Subsystem: "group",
 			Name:      "decisions_total",
-			Help:      "Decisions emitted per group, partitioned by reason ∈ {health,carrier,startup,manual}.",
+			Help:      "Decisions emitted per group, partitioned by reason ∈ {health,carrier}.",
 		}, []string{"group", "reason"}),
 
 		ApplyRouteDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
