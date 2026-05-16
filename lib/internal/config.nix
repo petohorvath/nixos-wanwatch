@@ -11,14 +11,15 @@
       "schema": 1,
       "global": { statePath, hooksDir, metricsSocket, logLevel, hookTimeoutMs },
       "wans":   { "<name>": <wan.toJSONValue>, ... },
-      "groups": { "<name>": <group.toJSONValue with mark/table
-                             resolved>, ... }
+      "groups": { "<name>": <group.toJSONValue>, ... }
     }
 
-  Auto-allocation: any group with `mark = null` or `table = null`
-  has those fields filled in by `internal.marks.allocate` /
-  `internal.tables.allocate` over the subset of groups whose
-  field is null. Groups with explicit user-set values keep them.
+  Marks + tables: each group's `mark` and `table` are user-required
+  integers (validated by `internal.group.tryMake` and
+  `wanwatch.types.{fwmark,routingTableId}`). This module's job is
+  the cross-group duplicate check — two groups can't share a mark
+  or a table, otherwise their traffic would mis-route. The check
+  fires at module-eval time.
 
   ===== render =====
 
@@ -49,16 +50,11 @@
   ===== resolveAllocations =====
 
   Internal helper, exposed so unit tests can exercise it without
-  reaching for the full `render`. Allocates marks + tables across
-  the auto-allocation subset and returns groups with the resolved
-  values substituted in.
-
-  Collision detection: explicit `mark` / `table` values
-  participate in the same id space as the auto-allocated ones.
-  Two groups can't share a mark or a table — whether both are
-  explicit, both auto, or one of each. Throws on collision so the
-  drift surfaces at module-eval time, not as a silent routing bug
-  in production.
+  reaching for the full `render`. After the auto-allocator removal
+  this is a pure validator — it returns the input groups unchanged
+  when the mark + table sets contain no duplicates, and throws
+  otherwise. The name is kept for backwards compatibility with the
+  module's call site.
 
   ===== schemaVersion =====
 
@@ -71,12 +67,7 @@
   internal,
 }:
 let
-  inherit (internal)
-    wan
-    group
-    marks
-    tables
-    ;
+  inherit (internal) wan group;
 
   schemaVersion = 1;
 
@@ -88,61 +79,49 @@ let
     hookTimeoutMs = 5000;
   };
 
+  # findDuplicates : { <group-name> = <int>; } → [ { value, names } ]
+  # Returns one entry per duplicated integer with the group names
+  # that share it. Empty list when the mapping is collision-free.
+  findDuplicates =
+    groupValues:
+    let
+      names = builtins.attrNames groupValues;
+      byValue = lib.foldl' (
+        acc: n:
+        let
+          v = toString groupValues.${n};
+        in
+        acc
+        // {
+          ${v} = (acc.${v} or [ ]) ++ [ n ];
+        }
+      ) { } names;
+      dups = lib.filterAttrs (_: ns: builtins.length ns > 1) byValue;
+    in
+    lib.mapAttrsToList (value: ns: {
+      inherit value;
+      names = ns;
+    }) dups;
+
+  formatDup =
+    field: dup:
+    "${field} ${dup.value} is shared by groups [${
+      lib.concatMapStringsSep ", " (n: "'${n}'") dup.names
+    }]";
+
   resolveAllocations =
     groups:
     let
-      names = builtins.attrNames groups;
-      explicit =
-        field:
-        lib.foldl' (
-          acc: n:
-          let
-            v = groups.${n}.${field};
-          in
-          if v == null then acc else acc // { ${toString v} = n; }
-        ) { } names;
-
-      explicitMarks = explicit "mark";
-      explicitTables = explicit "table";
-
-      autoMarkNames = builtins.filter (n: groups.${n}.mark == null) names;
-      autoTableNames = builtins.filter (n: groups.${n}.table == null) names;
-
-      autoMarks = marks.allocate autoMarkNames;
-      autoTables = tables.allocate autoTableNames;
-
-      # Surface collisions between auto-allocated values and the
-      # explicit set. Two groups sharing a mark or a table would
-      # quietly mis-route in production — fail fast at eval time.
-      checkCollision =
-        field: assigned: explicitMap:
-        lib.foldl' (
-          _: n:
-          let
-            v = assigned.${n};
-            owner = explicitMap.${toString v} or null;
-          in
-          if owner == null then
-            null
-          else
-            builtins.throw "wanwatch: config.resolveAllocations: auto-allocated ${field} ${toString v} for group '${n}' collides with explicit value on group '${owner}'"
-        ) null (builtins.attrNames assigned);
-
-      _markCollision = checkCollision "mark" autoMarks explicitMarks;
-      _tableCollision = checkCollision "table" autoTables explicitTables;
+      markValues = builtins.mapAttrs (_: g: g.mark) groups;
+      tableValues = builtins.mapAttrs (_: g: g.table) groups;
+      markDups = findDuplicates markValues;
+      tableDups = findDuplicates tableValues;
+      messages = builtins.map (formatDup "mark") markDups ++ builtins.map (formatDup "table") tableDups;
     in
-    builtins.seq _markCollision (
-      builtins.seq _tableCollision (
-        builtins.mapAttrs (
-          name: g:
-          g
-          // {
-            mark = if g.mark == null then autoMarks.${name} else g.mark;
-            table = if g.table == null then autoTables.${name} else g.table;
-          }
-        ) groups
-      )
-    );
+    if messages == [ ] then
+      groups
+    else
+      builtins.throw "wanwatch: duplicate mark or table across groups: ${lib.concatStringsSep "; " messages}";
 
   render =
     {
@@ -151,13 +130,13 @@ let
       groups ? { },
     }:
     let
-      resolvedGroups = resolveAllocations groups;
+      validatedGroups = resolveAllocations groups;
     in
     {
       schema = schemaVersion;
       global = defaultGlobal // global;
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
-      groups = builtins.mapAttrs (_: group.toJSONValue) resolvedGroups;
+      groups = builtins.mapAttrs (_: group.toJSONValue) validatedGroups;
     };
 
   toJSONValue = render;

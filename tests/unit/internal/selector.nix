@@ -28,6 +28,11 @@ let
         }
         // m
       ) memberSpecs;
+      # mark/table are required since the auto-allocator was
+      # removed; selector tests don't care about the specific
+      # values, just pick something in range.
+      mark = 1000;
+      table = 1000;
     };
 in
 {
@@ -119,6 +124,8 @@ in
               priority = 3;
             }
           ];
+          mark = 1000;
+          table = 1000;
         };
       in
       (selector.compute g {
@@ -150,6 +157,8 @@ in
               priority = 1;
             }
           ];
+          mark = 1000;
+          table = 1000;
         };
       in
       (selector.compute g {
@@ -198,6 +207,8 @@ in
               weight = 1000;
             }
           ];
+          mark = 1000;
+          table = 1000;
         };
       in
       (selector.compute g {
@@ -220,6 +231,8 @@ in
               priority = 1;
             }
           ];
+          mark = 1000;
+          table = 1000;
         };
       in
       (selector.compute g { primary = true; }).group;

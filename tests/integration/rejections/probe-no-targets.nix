@@ -23,12 +23,16 @@ let
           v6 = [ ];
         };
       };
-      groups.x.members = [
-        {
-          wan = "broken";
-          priority = 1;
-        }
-      ];
+      groups.x = {
+        members = [
+          {
+            wan = "broken";
+            priority = 1;
+          }
+        ];
+        mark = 1000;
+        table = 1000;
+      };
     };
 
     boot.isContainer = true;

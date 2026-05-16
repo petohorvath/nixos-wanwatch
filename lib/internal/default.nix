@@ -20,8 +20,9 @@
                       type — composes Members under a Strategy.
     6. `selector`   — depends on member. Pure decision logic; mirror
                       of `daemon/internal/selector`.
-    7. `allocator`  — leaf. Hash+probe int allocator.
-    8. `marks` / `tables` — depend on allocator. Thin wrappers.
+    7. `config`     — depends on wan + group. Daemon-config JSON
+                      renderer with cross-group duplicate-mark/
+                      table assertions.
 */
 { lib, libnet }:
 let
@@ -52,31 +53,8 @@ let
 
   config = import ./config.nix {
     inherit lib;
-    internal = {
-      inherit
-        wan
-        group
-        marks
-        tables
-        ;
-    };
+    internal = { inherit wan group; };
   };
-
-  allocator = import ./allocator.nix {
-    inherit lib;
-  };
-
-  marks = import ./marks.nix {
-    internal = { inherit allocator; };
-  };
-
-  tables = import ./tables.nix {
-    internal = { inherit allocator; };
-  };
-
-  # Late binding: `config` needs `marks` + `tables` (built above).
-  # `let` keeps the dependency order safe — `config` sees a fully
-  # built `internal` view via the recursive let.
 in
 {
   inherit
@@ -86,9 +64,6 @@ in
     wan
     group
     selector
-    allocator
-    marks
-    tables
     config
     ;
 }

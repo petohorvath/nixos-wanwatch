@@ -5,8 +5,8 @@
   Exercises:
     - defaultGlobal exposed values
     - global merging (defaults + user overrides)
-    - resolveAllocations: auto-fills null mark/table; preserves
-      user-set values
+    - resolveAllocations: returns input groups unchanged on success;
+      throws on duplicate mark or table across groups
     - render shape: schema, global, wans, groups
     - toJSON returns a string with the expected structure
 */
@@ -25,9 +25,9 @@ let
   helpers = import ../helpers.nix { inherit pkgs; };
   inherit (helpers) evalThrows;
 
-  # Build a group with optional mark/table overrides. Single
-  # auto-allocated member so callers can focus on the field under
-  # test.
+  # Build a group with the given name + explicit mark/table. The
+  # auto-allocator was removed in this release — every group must
+  # declare both, validated against [1000, 32767] upstream.
   mkGroup =
     name: extras:
     group.make (
@@ -39,6 +39,8 @@ let
             priority = 1;
           }
         ];
+        mark = 1000;
+        table = 1000;
       }
       // extras
     );
@@ -64,6 +66,8 @@ let
         priority = 1;
       }
     ];
+    mark = 1000;
+    table = 1000;
   };
 
   workGroup = group.make {
@@ -74,19 +78,8 @@ let
         priority = 1;
       }
     ];
-  };
-
-  # Explicit user-set mark/table for testing override preservation.
-  pinnedGroup = group.make {
-    name = "pinned";
-    members = [
-      {
-        wan = "primary";
-        priority = 1;
-      }
-    ];
-    mark = 999;
-    table = 1234;
+    mark = 1001;
+    table = 1001;
   };
 in
 {
@@ -115,10 +108,30 @@ in
     expected = 1;
   };
 
-  # ===== resolveAllocations — auto-fill =====
+  # ===== resolveAllocations — pass-through =====
 
-  testResolveAllocatesAllNullMembers = {
-    # Both groups have null mark + null table; both should be filled.
+  testResolveAllocationsEmptyInput = {
+    # No groups → nothing to validate → trivial pass.
+    expr = config.resolveAllocations { };
+    expected = { };
+  };
+
+  testResolveAllocationsReturnsGroupsUnchanged = {
+    # Distinct marks and tables → no duplicates → input echoed back
+    # untouched. Confirms the post-allocator-removal behaviour:
+    # resolveAllocations is now a validator, not a transformer.
+    expr =
+      let
+        input = {
+          home = homeGroup;
+          work = workGroup;
+        };
+      in
+      config.resolveAllocations input == input;
+    expected = true;
+  };
+
+  testResolveAllocationsPreservesExplicitValues = {
     expr =
       let
         resolved = config.resolveAllocations {
@@ -127,128 +140,87 @@ in
         };
       in
       {
-        homeMarkIsInt = builtins.isInt resolved.home.mark;
-        workMarkIsInt = builtins.isInt resolved.work.mark;
-        homeTableIsInt = builtins.isInt resolved.home.table;
-        workTableIsInt = builtins.isInt resolved.work.table;
+        homeMark = resolved.home.mark;
+        homeTable = resolved.home.table;
+        workMark = resolved.work.mark;
+        workTable = resolved.work.table;
       };
     expected = {
-      homeMarkIsInt = true;
-      workMarkIsInt = true;
-      homeTableIsInt = true;
-      workTableIsInt = true;
+      homeMark = 1000;
+      homeTable = 1000;
+      workMark = 1001;
+      workTable = 1001;
     };
   };
 
-  testResolveMarksDistinctForDifferentNames = {
+  testResolveAllocationsAllowsMarkEqualToTable = {
+    # mark and table are independent integer spaces — a group with
+    # `mark = 1000; table = 1000;` is fine. The duplicate check is
+    # within-field, not across-field.
     expr =
       let
-        resolved = config.resolveAllocations {
-          home = homeGroup;
-          work = workGroup;
+        g = mkGroup "g" {
+          mark = 1500;
+          table = 1500;
         };
       in
-      resolved.home.mark != resolved.work.mark;
+      (config.resolveAllocations { inherit g; }).g.mark == 1500;
     expected = true;
   };
 
-  testResolveTablesDistinctForDifferentNames = {
+  # ===== resolveAllocations — duplicate detection =====
+
+  testResolveAllocationsThrowsOnDuplicateMark = {
     expr =
-      let
-        resolved = config.resolveAllocations {
-          home = homeGroup;
-          work = workGroup;
-        };
-      in
-      resolved.home.table != resolved.work.table;
-    expected = true;
-  };
-
-  # ===== resolveAllocations — preserve explicit values =====
-
-  testResolvePreservesExplicitMark = {
-    expr = (config.resolveAllocations { pinned = pinnedGroup; }).pinned.mark;
-    expected = 999;
-  };
-
-  testResolvePreservesExplicitTable = {
-    expr = (config.resolveAllocations { pinned = pinnedGroup; }).pinned.table;
-    expected = 1234;
-  };
-
-  # ===== resolveAllocations — collision detection =====
-
-  testResolveThrowsOnMarkCollision = {
-    # Compute the auto-allocation for a single-group set, then pin
-    # that same mark on a second group — auto for the first must
-    # collide with explicit on the second.
-    expr =
-      let
-        autoOnly = config.resolveAllocations { home = mkGroup "home" { }; };
-        pinnedMark = autoOnly.home.mark;
-        result = config.resolveAllocations {
-          home = mkGroup "home" { };
-          collides = mkGroup "collides" { mark = pinnedMark; };
-        };
-      in
-      evalThrows result.home.mark;
-    expected = true;
-  };
-
-  testResolveThrowsOnTableCollision = {
-    expr =
-      let
-        autoOnly = config.resolveAllocations { home = mkGroup "home" { }; };
-        pinnedTable = autoOnly.home.table;
-        result = config.resolveAllocations {
-          home = mkGroup "home" { };
-          collides = mkGroup "collides" { table = pinnedTable; };
-        };
-      in
-      evalThrows result.home.table;
-    expected = true;
-  };
-
-  testResolveAcceptsNonCollidingExplicits = {
-    # Picking explicit values far outside the auto-allocator's
-    # typical hash range — vanishingly unlikely to collide.
-    expr =
-      let
-        resolved = config.resolveAllocations {
-          home = mkGroup "home" { };
-          pinned = mkGroup "pinned" {
-            mark = 65000;
-            table = 32000;
+      evalThrows
+        (config.resolveAllocations {
+          a = mkGroup "a" {
+            mark = 1500;
+            table = 1500;
           };
-        };
-      in
-      resolved.pinned.mark == 65000 && resolved.pinned.table == 32000;
+          b = mkGroup "b" {
+            mark = 1500; # collides with a
+            table = 1600;
+          };
+        }).a.mark;
     expected = true;
   };
 
-  testResolveMixedExplicitAndAuto = {
-    # `home` is auto; `pinned` is explicit. The auto allocation must
-    # not collide with the pinned value and must produce a different
-    # mark/table for home.
+  testResolveAllocationsThrowsOnDuplicateTable = {
     expr =
-      let
-        resolved = config.resolveAllocations {
-          home = homeGroup;
-          pinned = pinnedGroup;
-        };
-      in
-      {
-        pinnedMark = resolved.pinned.mark;
-        pinnedTable = resolved.pinned.table;
-        homeMarkIsAutoAllocated = builtins.isInt resolved.home.mark && resolved.home.mark != 999;
-        homeTableIsAutoAllocated = builtins.isInt resolved.home.table && resolved.home.table != 1234;
-      };
-    expected = {
-      pinnedMark = 999;
-      pinnedTable = 1234;
-      homeMarkIsAutoAllocated = true;
-      homeTableIsAutoAllocated = true;
-    };
+      evalThrows
+        (config.resolveAllocations {
+          a = mkGroup "a" {
+            mark = 1500;
+            table = 1500;
+          };
+          b = mkGroup "b" {
+            mark = 1600;
+            table = 1500; # collides with a
+          };
+        }).a.table;
+    expected = true;
+  };
+
+  testResolveAllocationsThreeWayDuplicateMark = {
+    # Three groups all sharing the same mark — still throws.
+    expr =
+      evalThrows
+        (config.resolveAllocations {
+          a = mkGroup "a" {
+            mark = 1500;
+            table = 1500;
+          };
+          b = mkGroup "b" {
+            mark = 1500;
+            table = 1600;
+          };
+          c = mkGroup "c" {
+            mark = 1500;
+            table = 1700;
+          };
+        }).a.mark;
+    expected = true;
   };
 
   # ===== render — shape =====
@@ -299,8 +271,6 @@ in
   };
 
   testRenderWansAreSerializedObjects = {
-    # Each rendered wan must surface as an attrset (toJSONValue form),
-    # not the raw tagged value.
     expr =
       let
         rendered = config.render {
@@ -313,7 +283,8 @@ in
     expected = "eth0";
   };
 
-  testRenderGroupsHaveResolvedMarkAndTable = {
+  testRenderGroupsCarryUserMarkAndTable = {
+    # Confirms the user's mark/table flow through render unchanged.
     expr =
       let
         rendered = config.render {
@@ -323,12 +294,11 @@ in
         };
       in
       {
-        markIsInt = builtins.isInt rendered.groups.home.mark;
-        tableIsInt = builtins.isInt rendered.groups.home.table;
+        inherit (rendered.groups.home) mark table;
       };
     expected = {
-      markIsInt = true;
-      tableIsInt = true;
+      mark = 1000;
+      table = 1000;
     };
   };
 
@@ -360,7 +330,6 @@ in
   };
 
   testToJSONRoundTrip = {
-    # The rendered string must parse back to the same shape.
     expr =
       let
         input = {

@@ -64,12 +64,16 @@ pkgs.testers.runNixOSTest {
             familyHealthPolicy = "all";
           };
         };
-        groups.home.members = [
-          {
-            wan = "uplink";
-            priority = 1;
-          }
-        ];
+        groups.home = {
+          members = [
+            {
+              wan = "uplink";
+              priority = 1;
+            }
+          ];
+          mark = 1000;
+          table = 1000;
+        };
       };
     };
 

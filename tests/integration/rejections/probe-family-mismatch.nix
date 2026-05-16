@@ -17,12 +17,16 @@ let
         interface = "eth0";
         probe.targets.v4 = [ "2606:4700:4700::1111" ];
       };
-      groups.x.members = [
-        {
-          wan = "broken";
-          priority = 1;
-        }
-      ];
+      groups.x = {
+        members = [
+          {
+            wan = "broken";
+            priority = 1;
+          }
+        ];
+        mark = 1000;
+        table = 1000;
+      };
     };
 
     boot.isContainer = true;

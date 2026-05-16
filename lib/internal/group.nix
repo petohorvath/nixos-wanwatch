@@ -6,7 +6,7 @@
   traffic. The Strategy decides which Member carries the group's
   traffic at any given moment.
 
-  Fields (required unless marked optional):
+  Fields (all required):
 
     name     — wanwatch identifier
     members  — non-empty list of Members. Each Member input is an
@@ -14,10 +14,10 @@
                owns the construction.
     strategy — enum, v1: "primary-backup" only. v2 will add
                "load-balance" once multi-active lands.
-    table    — optional int. Routing-table id. Null means
-               auto-allocated by `internal.tables.allocate`.
-    mark     — optional int. fwmark. Null means auto-allocated
-               by `internal.marks.allocate`.
+    table    — required integer in [1000, 32767]. Routing-table id
+               shared across v4 and v6 RIBs.
+    mark     — required integer in [1000, 32767]. fwmark used to
+               dispatch traffic to `table`.
 
   ===== make =====
 
@@ -39,8 +39,8 @@
     groupInvalidMember     — embedded member.make rejected (forwarded)
     groupDuplicateMember   — same WAN referenced by multiple members
     groupInvalidStrategy   — strategy ∉ {"primary-backup"}
-    groupInvalidTable      — table set but not a positive integer
-    groupInvalidMark       — mark set but not a positive integer
+    groupInvalidTable      — table missing or not an int in [1000, 32767]
+    groupInvalidMark       — mark missing or not an int in [1000, 32767]
 
   ===== Accessors =====
 
@@ -65,18 +65,34 @@ let
     check
     partitionTry
     isValidName
-    isPositiveInt
     ;
   formatErrors = internal.primitives.formatErrors "group.make";
   inherit (internal) member;
 
   # ===== Defaults =====
+  #
+  # `table` and `mark` have no defaults — both are required per
+  # group, validated against [1000, 32767] (matches the option
+  # types `wanwatch.types.{routingTableId,fwmark}`). The auto-
+  # allocator that filled them was removed; the integer is the
+  # user's choice now.
 
   defaults = {
     strategy = "primary-backup";
-    table = null;
-    mark = null;
   };
+
+  # ===== Range constants =====
+  #
+  # Kept in sync with `lib/types/primitives.nix` definitions for
+  # `fwmark` and `routingTableId`. A grep-tier coupling rather than
+  # a code-tier one because the types module exports option types,
+  # not raw bounds; pulling the bounds out of a type's functor is
+  # noisy in Nix.
+
+  markTableMin = 1000;
+  markTableMax = 32767;
+
+  isMarkTableInt = n: builtins.isInt n && n >= markTableMin && n <= markTableMax;
 
   validStrategies = [ "primary-backup" ];
 
@@ -113,19 +129,13 @@ let
 
   validateTable =
     table:
-    if table == null then
-      [ ]
-    else
-      check "groupInvalidTable" (isPositiveInt table)
-        "table must be a positive integer; got ${builtins.toJSON table}";
+    check "groupInvalidTable" (isMarkTableInt table)
+      "table is required and must be an integer in [${toString markTableMin}, ${toString markTableMax}]; got ${builtins.toJSON table}";
 
   validateMark =
     mark:
-    if mark == null then
-      [ ]
-    else
-      check "groupInvalidMark" (isPositiveInt mark)
-        "mark must be a positive integer; got ${builtins.toJSON mark}";
+    check "groupInvalidMark" (isMarkTableInt mark)
+      "mark is required and must be an integer in [${toString markTableMin}, ${toString markTableMax}]; got ${builtins.toJSON mark}";
 
   # Cross-check across already-parsed members. Run only when every
   # member parsed cleanly — otherwise the wan list contains nulls.
@@ -150,6 +160,10 @@ let
     table = user.table or null;
     mark = user.mark or null;
   };
+  # `table` / `mark` keep `or null` so missing-field cases produce
+  # a `groupInvalidTable` / `groupInvalidMark` error from the
+  # validators (null is rejected by isMarkTableInt) rather than
+  # an opaque "attribute not found" thrown deep in `buildValue`.
 
   collectErrors =
     cfg: membersResult:

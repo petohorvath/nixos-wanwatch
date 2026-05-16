@@ -36,8 +36,6 @@ in
     wan
     group
     selector
-    marks
-    tables
     config
     ;
   version = "0.1.0";

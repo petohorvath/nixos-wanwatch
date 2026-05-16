@@ -8,16 +8,20 @@
                      attrsets, derived read-only from the attribute
                      key.
     groupStrategy  — enum [ "primary-backup" ] (v1)
-    groupTable     — `nullOr primitives.positiveInt` (null =
-                     auto-allocated by `internal.tables.allocate`)
-    groupMark      — `nullOr primitives.positiveInt` (null =
-                     auto-allocated by `internal.marks.allocate`)
+    groupTable     — `primitives.routingTableId` (1000..32767),
+                     required per group.
+    groupMark      — `primitives.fwmark` (1000..32767), required
+                     per group.
     group          — top-level submodule (composes member)
 
   Cross-field invariants — non-empty members, no duplicate WAN
   references — live in `internal.group.tryMake`. The type system
   doesn't reach across fields, and forwarding the responsibility
   keeps the validators consolidated.
+
+  Duplicate-mark and duplicate-table detection across groups lives
+  in `internal.config.resolveAllocations`, not in this submodule
+  (the type system can't see across attrset siblings).
 
   Takes `memberTypes` so the group submodule can use
   `memberTypes.member` for the elements of its `members` list.
@@ -39,8 +43,8 @@ let
   # validator stay aligned.
   groupStrategy = types.enum internal.group.validStrategies;
 
-  groupTable = types.nullOr primitives.positiveInt;
-  groupMark = types.nullOr primitives.positiveInt;
+  groupTable = primitives.routingTableId;
+  groupMark = primitives.fwmark;
 
   group = types.submodule (
     { name, ... }:
@@ -80,25 +84,21 @@ let
         };
         table = mkOption {
           type = groupTable;
-          default = defaults.table;
-          example = 100;
+          example = 1000;
           description = ''
             Routing-table id for this group's policy-routed
-            traffic. Null = auto-allocated by
-            `internal.tables.allocate` (deterministic hash over
-            the group-name set, in range [100, 32766] minus
-            253/254/255).
+            traffic. Required integer in `[1000, 32767]`. Shared
+            across v4 and v6 RIBs (PLAN §6.1). The module asserts
+            no two groups share the same `table`.
           '';
         };
         mark = mkOption {
           type = groupMark;
-          default = defaults.mark;
-          example = 100;
+          example = 1000;
           description = ''
-            fwmark used to dispatch traffic to `table`. Null =
-            auto-allocated by `internal.marks.allocate`
-            (deterministic hash over the group-name set, in range
-            [100, 32767]).
+            fwmark used to dispatch traffic to `table`. Required
+            integer in `[1000, 32767]`. The module asserts no two
+            groups share the same `mark`.
           '';
         };
       };

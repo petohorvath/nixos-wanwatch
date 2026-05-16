@@ -19,9 +19,6 @@ runner.runTests (
   // import ./internal/group.nix args
   // import ./internal/selector.nix args
   // import ./internal/config.nix args
-  // import ./internal/allocator.nix args
-  // import ./internal/marks.nix args
-  // import ./internal/tables.nix args
   // import ./types/primitives.nix args
   // import ./types/probe.nix args
   // import ./types/member.nix args

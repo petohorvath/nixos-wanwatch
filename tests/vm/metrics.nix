@@ -65,12 +65,16 @@ pkgs.testers.runNixOSTest {
             };
           };
         };
-        groups.home-uplink.members = [
-          {
-            wan = "primary";
-            priority = 1;
-          }
-        ];
+        groups.home-uplink = {
+          members = [
+            {
+              wan = "primary";
+              priority = 1;
+            }
+          ];
+          mark = 1000;
+          table = 1000;
+        };
         telegraf = {
           enable = true;
           # Tight interval so the test doesn't have to wait

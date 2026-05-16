@@ -16,9 +16,11 @@ let
   helpers = import ../helpers.nix { inherit pkgs; };
   inherit (helpers) evalType evalTypeFails;
 
-  # Minimal valid group input. `name` is `readOnly` and defaults
-  # to the attribute key — `evalType` wraps under
-  # `options.value`, so the submodule sees `name = "value"`.
+  # Minimal well-formed group input. `mark` and `table` are required
+  # since the auto-allocator was removed; both typed as
+  # `wanwatch.types.{fwmark,routingTableId}` (range [1000, 32767]).
+  # `name` is `readOnly` and defaults to the attribute key — `evalType`
+  # wraps under `options.value`, so the submodule sees `name = "value"`.
   baseConfig = {
     members = [
       {
@@ -26,6 +28,8 @@ let
         priority = 1;
       }
     ];
+    mark = 1000;
+    table = 1000;
   };
 in
 {
@@ -51,14 +55,21 @@ in
     expected = true;
   };
 
-  testGroupTableAcceptsNull = {
-    expr = evalType types.groupTable null;
-    expected = null;
+  testGroupTableAcceptsLowerBound = {
+    expr = evalType types.groupTable 1000;
+    expected = 1000;
   };
 
-  testGroupTableAcceptsPositive = {
-    expr = evalType types.groupTable 100;
-    expected = 100;
+  testGroupTableAcceptsUpperBound = {
+    expr = evalType types.groupTable 32767;
+    expected = 32767;
+  };
+
+  testGroupTableRejectsNull = {
+    # null no longer valid — was the "auto-allocate" sentinel, now
+    # removed; every group must declare an integer.
+    expr = evalTypeFails types.groupTable null;
+    expected = true;
   };
 
   testGroupTableRejectsZero = {
@@ -66,14 +77,34 @@ in
     expected = true;
   };
 
-  testGroupMarkAcceptsNull = {
-    expr = evalType types.groupMark null;
-    expected = null;
+  testGroupTableRejectsBelowRange = {
+    expr = evalTypeFails types.groupTable 999;
+    expected = true;
   };
 
-  testGroupMarkAcceptsPositive = {
-    expr = evalType types.groupMark 100;
-    expected = 100;
+  testGroupTableRejectsAboveRange = {
+    expr = evalTypeFails types.groupTable 32768;
+    expected = true;
+  };
+
+  testGroupMarkAcceptsLowerBound = {
+    expr = evalType types.groupMark 1000;
+    expected = 1000;
+  };
+
+  testGroupMarkAcceptsUpperBound = {
+    expr = evalType types.groupMark 32767;
+    expected = 32767;
+  };
+
+  testGroupMarkRejectsNull = {
+    expr = evalTypeFails types.groupMark null;
+    expected = true;
+  };
+
+  testGroupMarkRejectsZero = {
+    expr = evalTypeFails types.groupMark 0;
+    expected = true;
   };
 
   # ===== top-level submodule — defaults =====
@@ -96,8 +127,8 @@ in
     expected = {
       name = "value"; # derived from `options.value` in `evalType`
       strategy = "primary-backup";
-      table = null;
-      mark = null;
+      table = 1000;
+      mark = 1000;
       memberCount = 1;
       firstMemberWan = "primary";
     };
@@ -122,8 +153,8 @@ in
   testGroupPreservesFullSpec = {
     expr = evalType types.group {
       strategy = "primary-backup";
-      table = 100;
-      mark = 100;
+      table = 1500;
+      mark = 1500;
       members = [
         {
           wan = "primary";
@@ -140,8 +171,8 @@ in
     expected = {
       name = "value";
       strategy = "primary-backup";
-      table = 100;
-      mark = 100;
+      table = 1500;
+      mark = 1500;
       members = [
         {
           wan = "primary";
@@ -160,6 +191,8 @@ in
   testGroupRejectsBadMember = {
     expr = evalTypeFails types.group {
       members = [ { wan = "1bad"; } ];
+      mark = 1000;
+      table = 1000;
     };
     expected = true;
   };
@@ -176,6 +209,18 @@ in
 
   testGroupRejectsZeroMark = {
     expr = evalTypeFails types.group (baseConfig // { mark = 0; });
+    expected = true;
+  };
+
+  testGroupRejectsMissingTable = {
+    # baseConfig minus `table` → the option becomes required-but-missing,
+    # which the submodule rejects at eval time.
+    expr = evalTypeFails types.group (builtins.removeAttrs baseConfig [ "table" ]);
+    expected = true;
+  };
+
+  testGroupRejectsMissingMark = {
+    expr = evalTypeFails types.group (builtins.removeAttrs baseConfig [ "mark" ]);
     expected = true;
   };
 }

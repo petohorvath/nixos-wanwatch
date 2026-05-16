@@ -4,8 +4,8 @@
   module against the full nixpkgs module corpus, and asserts:
 
     - the rendered daemon config carries the expected schema + shape
-    - mark / table allocators produced non-null ints
-    - `services.wanwatch.marks` / `.tables` echo the rendered values
+    - user-declared mark / table flow into the rendered config
+    - `services.wanwatch.marks` / `.tables` echo the user-supplied values
     - the systemd unit is wired with the required capabilities
 
   Module-eval only — no VM, no kernel. Catches option type / assertion
@@ -35,16 +35,20 @@ let
           probe.targets.v4 = [ "8.8.8.8" ];
         };
       };
-      groups.home-uplink.members = [
-        {
-          wan = "primary";
-          priority = 1;
-        }
-        {
-          wan = "backup";
-          priority = 2;
-        }
-      ];
+      groups.home-uplink = {
+        members = [
+          {
+            wan = "primary";
+            priority = 1;
+          }
+          {
+            wan = "backup";
+            priority = 2;
+          }
+        ];
+        mark = 1000;
+        table = 1000;
+      };
     };
 
     boot.isContainer = true;

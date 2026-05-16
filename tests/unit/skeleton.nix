@@ -13,9 +13,9 @@
   Adding a new value type to `lib/` means adding one entry to
   `valueTypes` below — that's the entire incremental cost.
 
-  Pure-function modules (selector, marks, tables, config,
-  snippets) intentionally use a *different* skeleton (compute /
-  allocate / render / …) and are not exercised here.
+  Pure-function modules (selector, config) intentionally use a
+  *different* skeleton (compute / render / …) and are not
+  exercised here.
 */
 { pkgs, libnet, ... }:
 let

@@ -173,12 +173,15 @@ in
       readOnly = true;
       default = lib.mapAttrs (_: g: g.mark) resolved;
       defaultText = lib.literalMD ''
-        Computed from `groups` via `wanwatch.config.resolveAllocations`.
+        Echo of each group's user-declared value, after
+        `wanwatch.config.resolveAllocations` asserts no duplicates
+        across groups.
       '';
       description = ''
-        Per-group fwmark, after auto-allocation + collision
-        resolution. Read-only output for cross-module reference
-        (e.g. nftzones).
+        Per-group fwmark — read-only echo of
+        `services.wanwatch.groups.<group>.mark`. Cross-module
+        consumers (e.g. nftzones) should reference this by name
+        rather than re-typing the integer.
       '';
     };
 
@@ -187,11 +190,14 @@ in
       readOnly = true;
       default = lib.mapAttrs (_: g: g.table) resolved;
       defaultText = lib.literalMD ''
-        Computed from `groups` via `wanwatch.config.resolveAllocations`.
+        Echo of each group's user-declared value, after
+        `wanwatch.config.resolveAllocations` asserts no duplicates
+        across groups.
       '';
       description = ''
-        Per-group routing-table id, after auto-allocation + collision
-        resolution. Shared across v4 and v6 RIBs per PLAN §6.
+        Per-group routing-table id — read-only echo of
+        `services.wanwatch.groups.<group>.table`. Shared across v4
+        and v6 RIBs per PLAN §6.1.
       '';
     };
   };

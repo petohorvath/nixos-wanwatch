@@ -19,12 +19,16 @@ let
         interface = "eth0";
         probe.targets.v4 = [ "1.1.1.1" ];
       };
-      groups.home-uplink.members = [
-        {
-          wan = "primary";
-          priority = 1;
-        }
-      ];
+      groups.home-uplink = {
+        members = [
+          {
+            wan = "primary";
+            priority = 1;
+          }
+        ];
+        mark = 1000;
+        table = 1000;
+      };
       telegraf.enable = true;
     };
     services.telegraf.enable = true;

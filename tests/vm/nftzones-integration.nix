@@ -103,12 +103,16 @@ pkgs.testers.runNixOSTest {
             };
           };
         };
-        groups.home-uplink.members = [
-          {
-            wan = "primary";
-            priority = 1;
-          }
-        ];
+        groups.home-uplink = {
+          members = [
+            {
+              wan = "primary";
+              priority = 1;
+            }
+          ];
+          mark = 1000;
+          table = 1000;
+        };
       };
     };
 
