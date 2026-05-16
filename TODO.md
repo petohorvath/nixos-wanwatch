@@ -21,12 +21,6 @@ Status legend:
 Small CLI for status queries: `wanwatchctl status`, `wanwatchctl group <name>`.
 Reads `state.json`; no privileged ops. PLAN §12 OQ #8.
 
-### Configurable hook timeout
-
-Currently hard-coded to 5 s in `state.DefaultHookTimeout`. Expose as
-`services.wanwatch.global.hookTimeout`. PLAN §12 OQ #5;
-`daemon/internal/state/hooks.go:61`.
-
 ### Pre-apply hooks
 
 Add a `<hooksDir>/pre-{up,down,switch}.d/*` tier that fires *before*
@@ -39,14 +33,6 @@ the apply would make hooks part of the apply transaction, which PLAN
 §5.5 explicitly rules out — promoting them would need a PLAN change
 first. `daemon/cmd/wanwatchd/daemon.go` (runHooks / commitDecision),
 PLAN §5.5 env-var contract.
-
-### Conntrack flush on Decision
-
-`apply.FlushBySource` is implemented + tested but not wired into the
-per-Decision path. Wire it: on switch, flush entries on the old
-active's interface so existing flows fail over instead of being
-black-holed by stateful NAT. `docs/wan-monitoring.md:121`,
-`daemon/internal/apply/conntrack.go`.
 
 ### Stale-route policy on family-set shrink
 
