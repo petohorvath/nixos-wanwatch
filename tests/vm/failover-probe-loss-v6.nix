@@ -167,7 +167,6 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import json
-    import time
 
 
     def wait_for_active(router, want, timeout=10):
