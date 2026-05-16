@@ -87,23 +87,33 @@ pkgs.testers.runNixOSTest {
 
     # Wait for both families to cook: v4 needs consecutiveUp=2
     # successful samples to flip to healthy (~2s); v6 cooks
-    # as unhealthy on its first Lost sample.
+    # as unhealthy on its first Lost sample. The convergence
+    # predicate also requires the aggregate wan.healthy + group.
+    # active to follow (per policy="all") — those mutations land
+    # in the same Decision commit as the family-level flip but
+    # snapshotting only the per-family fields could still observe
+    # an in-flight state on a slow runner. Gating on every assertion
+    # the post-loop checks keeps the snapshot self-consistent.
     converged = False
     for _ in range(40):
         state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-        fams = state["wans"]["uplink"]["families"]
+        wan = state["wans"]["uplink"]
+        fams = wan["families"]
+        group = state["groups"]["home"]
         if (
             fams.get("v4", {}).get("healthy") is True
             and fams.get("v6", {}).get("healthy") is False
+            and wan.get("healthy") is False
+            and group.get("active") is None
         ):
             converged = True
             break
         router.execute("sleep 0.5")
     assert converged, f"v4=healthy/v6=unhealthy never converged; last:\n{state}"
 
-    # With familyHealthPolicy="all", the WAN aggregate Healthy
-    # follows the unhealthy family down. The group then has no
-    # active member.
+    # The convergence predicate above already pinned these — kept
+    # as final-state assertions with explicit messages so a future
+    # change to the predicate doesn't silently drop the policy check.
     assert state["wans"]["uplink"]["healthy"] is False, (
         f"wan.healthy under policy=all should be false: {state['wans']['uplink']}"
     )

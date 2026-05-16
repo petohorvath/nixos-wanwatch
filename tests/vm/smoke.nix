@@ -127,10 +127,21 @@ pkgs.testers.runNixOSTest {
 
     # 5. The daemon's bootstrap step installed fwmark policy rules
     #    for the configured group, in BOTH families. PLAN §6.1.
+    #    bootstrap → EnsureRule (per (group, family)) → first state.json
+    #    publish → sd_notify READY. wait_for_unit gates on READY so
+    #    the rules SHOULD be there, but a future bootstrap refactor
+    #    that reorders the writes would silently re-introduce the
+    #    race — poll so the failure mode stays "fast-fail with a
+    #    useful timeout" rather than "single-shot probe at the wrong
+    #    moment". Cheap on the happy path (one tick).
     mark = router.succeed(
         "jq -r '.groups.\"home-uplink\".mark' /etc/wanwatch/config.json"
     ).strip()
-    router.succeed(f"ip rule show fwmark 0x{int(mark):x} | grep -q .")
-    router.succeed(f"ip -6 rule show fwmark 0x{int(mark):x} | grep -q .")
+    router.wait_until_succeeds(
+        f"ip rule show fwmark 0x{int(mark):x} | grep -q .", timeout=10
+    )
+    router.wait_until_succeeds(
+        f"ip -6 rule show fwmark 0x{int(mark):x} | grep -q .", timeout=10
+    )
   '';
 }

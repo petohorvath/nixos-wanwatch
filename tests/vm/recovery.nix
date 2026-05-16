@@ -143,19 +143,16 @@ pkgs.testers.runNixOSTest {
     wait_for_active(router, "primary")
 
     # Decisions counter should now show two carrier-driven changes
-    # (down→backup, up→primary).
-    body = router.succeed(
+    # (down→backup, up→primary). wait_for_active only proves the
+    # latest state.json was rewritten, not that the metric counter's
+    # second Inc has surfaced — poll the metric to its expected
+    # value rather than reading a single snapshot.
+    router.wait_until_succeeds(
         "${pkgs.curl}/bin/curl -s --unix-socket /run/wanwatch/metrics.sock "
-        "http://wanwatch/metrics"
+        "http://wanwatch/metrics | "
+        "awk '/^wanwatch_group_decisions_total\\{group=\"home-uplink\",reason=\"carrier\"\\}/ "
+        "{ if ($2+0 >= 2) exit 0 } END { exit 1 }'",
+        timeout=10,
     )
-    matches = [
-        line for line in body.splitlines()
-        if line.startswith(
-            'wanwatch_group_decisions_total{group="home-uplink",reason="carrier"}'
-        )
-    ]
-    assert matches, "no carrier-reason decisions counter in scrape"
-    count = float(matches[-1].rsplit(maxsplit=1)[-1])
-    assert count >= 2, f"expected ≥2 carrier decisions, got {count}"
   '';
 }

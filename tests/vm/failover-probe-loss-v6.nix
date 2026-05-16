@@ -287,8 +287,14 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("tc qdisc del dev eth1 root")
     wait_for_active(router, "primary")
-    assert loss_ratio(router, "primary") <= 0.10, (
-        f"phase B: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≤ 0.10"
+    # Poll: `wait_for_active` proves the flip; the lossRatio in the
+    # same snapshot is from the most recent aggregate refresh, which
+    # may still reflect mid-recovery numbers. Bound on the threshold
+    # directly.
+    router.wait_until_succeeds(
+        "jq -e '.wans.primary.families.v6.lossRatio <= 0.10' "
+        "< /run/wanwatch/state.json > /dev/null",
+        timeout=10,
     )
 
     # ==== Phase C — blip suppression ====
@@ -344,8 +350,10 @@ pkgs.testers.runNixOSTest {
     # D3 — clear ⇒ recovery
     router.succeed("tc qdisc del dev eth1 root")
     wait_for_active(router, "primary", timeout=15)
-    assert loss_ratio(router, "primary") <= 0.10, (
-        f"phase D3: primary v6 lossRatio = {loss_ratio(router, 'primary')}, want ≤ 0.10"
+    router.wait_until_succeeds(
+        "jq -e '.wans.primary.families.v6.lossRatio <= 0.10' "
+        "< /run/wanwatch/state.json > /dev/null",
+        timeout=10,
     )
 
     # ==== Phase E — per-target aggregation ====
@@ -383,17 +391,11 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("systemctl restart wanwatch.service")
     router.wait_for_unit("wanwatch.service")
-    router.wait_for_file("/run/wanwatch/state.json")
-    # state.json is republished on bootstrap; the file existing
-    # right after the unit reports active proves the writer ran.
-
-    # Active member survives the restart via the cold-start carrier
-    # path (no probe Window yet, but carrier=up keeps the high-
-    # priority member selected).
-    state_f = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-    assert state_f["groups"]["home-uplink"]["active"] == "primary", (
-        f"phase F: active = {state_f['groups']['home-uplink']['active']!r}, want 'primary' (cold-start carrier path)"
-    )
+    # wait_for_active polls state.json's `active` field — proves
+    # both freshness (was rewritten after the restart) and value.
+    # A bare wait_for_file would only prove existence and could
+    # match the pre-restart file before the new bootstrap commits.
+    wait_for_active(router, "primary", timeout=15)
 
     # Probes converge again — the WAN flips back to probe-healthy
     # within the window-cook time (~2s) + consecUp (600ms).

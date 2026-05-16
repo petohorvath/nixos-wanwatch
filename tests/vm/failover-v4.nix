@@ -187,12 +187,14 @@ pkgs.testers.runNixOSTest {
 
     # 6. wanwatch_group_decisions_total has incremented for the
     #    "carrier" reason — proves the metrics path also reacted.
-    body = router.succeed(
+    #    Poll the scrape: prometheus Vec series only materialize on
+    #    first .Inc() call, so under runner pressure the series can
+    #    appear shortly after the Decision lands.
+    router.wait_until_succeeds(
         "${pkgs.curl}/bin/curl -s --unix-socket /run/wanwatch/metrics.sock "
-        "http://wanwatch/metrics"
-    )
-    assert 'wanwatch_group_decisions_total{group="home-uplink",reason="carrier"}' in body, (
-        "decisions counter missing the 'carrier' reason; scrape:\n" + body
+        "http://wanwatch/metrics | "
+        "grep -q 'wanwatch_group_decisions_total{group=\"home-uplink\",reason=\"carrier\"}'",
+        timeout=10,
     )
   '';
 }

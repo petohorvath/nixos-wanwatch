@@ -283,13 +283,13 @@ pkgs.testers.runNixOSTest {
 
     # state.json should reflect the per-family observation: v4
     # lossRatio at or near 1.0, primary's family healthy=false.
-    state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-    v4 = state["wans"]["primary"]["families"]["v4"]
-    assert v4["healthy"] is False, (
-        f"primary v4 still healthy after 100% loss: {v4}"
-    )
-    assert v4["lossRatio"] >= 0.5, (
-        f"primary v4 lossRatio = {v4['lossRatio']}, want ≥ 0.5"
+    # Poll the snapshot — `wait_for_active` only proves the active
+    # flip landed, not that the next aggregate refresh has folded
+    # in the loss numbers we care about.
+    router.wait_until_succeeds(
+        "jq -e '.wans.primary.families.v4 | (.healthy == false and .lossRatio >= 0.5)' "
+        "< /run/wanwatch/state.json > /dev/null",
+        timeout=10,
     )
 
     # 5. Clear the netem rule; primary should recover after
@@ -299,13 +299,11 @@ pkgs.testers.runNixOSTest {
 
     # Final sanity: primary's family is healthy again and the
     # lossRatio has fallen to ≤ lossPctUp (5%) — i.e. ≤ 0.05.
-    state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-    v4 = state["wans"]["primary"]["families"]["v4"]
-    assert v4["healthy"] is True, (
-        f"primary v4 didn't recover after netem cleared: {v4}"
-    )
-    assert v4["lossRatio"] <= 0.10, (
-        f"primary v4 lossRatio = {v4['lossRatio']}, want ≤ 0.10 post-recovery"
+    # Same poll rationale as the unhealthy case above.
+    router.wait_until_succeeds(
+        "jq -e '.wans.primary.families.v4 | (.healthy == true and .lossRatio <= 0.10)' "
+        "< /run/wanwatch/state.json > /dev/null",
+        timeout=10,
     )
   '';
 }
