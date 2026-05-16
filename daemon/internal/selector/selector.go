@@ -11,9 +11,9 @@
 //     (hysteresis.go) that suppresses flapping by gating the
 //     externally-visible Healthy verdict.
 //
-// The PLAN's directory name is `internal/select/`; this package uses
-// `internal/selector/` because `select` is a Go control-flow keyword
-// and can't appear as a package identifier.
+// The package is `internal/selector/` rather than `internal/select/`
+// because `select` is a Go control-flow keyword and cannot appear as
+// a package identifier.
 package selector
 
 import (

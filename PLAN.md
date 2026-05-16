@@ -1,10 +1,12 @@
 # wanwatch — design plan (v1)
 
-Pre-implementation planning document. Working agreement on scope, public
-surface, internal layering, build sequence, and conventions. Updated as
-we learn; not a contract.
+Authoritative design intent. Records the working agreement on scope,
+public surface, internal layering, build sequence, and conventions.
+Updated when an intended change diverges from the document.
 
-**Status**: planning. No code yet.
+**Status**: v0.1.0 shipped (2026-05-12). All six passes complete.
+See `CHANGELOG.md` for post-release deltas and `TODO.md` for the
+deferred-work backlog.
 
 ---
 
@@ -43,12 +45,13 @@ wanwatch owns the per-group routing table that mark dispatches into.
 
 - Single-active failover per group — at any moment, one healthy
   member of each group carries that group's traffic.
-- **First-class IPv4 and IPv6.** A WAN may declare a v4 gateway, a
-  v6 gateway, or both. Each family is probed independently. On a
-  Decision the daemon rewrites the default route in the v4 routing
-  table and the v6 routing table independently, per-family. Per-WAN
-  Health aggregates per-family Health under a configurable policy
-  (`all` or `any` — default `all`).
+- **First-class IPv4 and IPv6.** A WAN serves one or both families
+  per its `probe.targets`; next-hops are discovered at runtime via
+  rtnetlink rather than declared statically. Each family is probed
+  independently. On a Decision the daemon rewrites the default route
+  in the v4 routing table and the v6 routing table independently,
+  per-family. Per-WAN Health aggregates per-family Health under a
+  configurable policy (`all` or `any` — default `all`).
 - ICMP and ICMPv6 probing per WAN with sliding-window RTT, jitter,
   and loss statistics (algorithm equivalent to `dpinger`'s sample
   window).
@@ -98,7 +101,7 @@ This table lives in `docs/glossary.md` and is referenced from
 
 | Term | Definition | Not to be confused with |
 |---|---|---|
-| **WAN** | An egress interface with optional gateway. The atomic monitored unit. | Group, Member |
+| **WAN** | An egress interface plus a Probe configuration. Serves one or two IP families depending on `probe.targets`; next-hops are discovered at runtime via netlink. The atomic monitored unit. | Group, Member |
 | **Probe** | Configuration of how to test a WAN — targets, method, interval, thresholds, hysteresis. | Sample |
 | **Target** | A single IP being probed. A Probe has one or more Targets. | Probe |
 | **Sample** | One probe attempt + result (RTT in microseconds, or `loss`). | Probe |
@@ -110,6 +113,7 @@ This table lives in `docs/glossary.md` and is referenced from
 | **Strategy** | Algorithm choosing active Member(s) from healthy ones. v1: `primary-backup`. | Selection |
 | **Selection** | Current chosen Member(s) per Group. Output of Strategy applied to Member Health. | Decision |
 | **Decision** | A Selection *change* event — old Selection → new Selection. Triggers Apply. | Selection |
+| **Gateway** | Daemon-mirrored default-route next-hop for a (WAN, family). Discovered via rtnetlink from the kernel's main routing table; empty when no default exists on the WAN's interface or when the WAN is `pointToPoint`. Consumed by Apply when writing per-Group default routes. | Apply |
 | **Apply** | The act of mutating kernel state (route, conntrack) to reflect a Decision. | Decision |
 | **State** | Externalized view: per-WAN Health, per-Group Selection. Atomic JSON file. | Selection (sub-component) |
 | **Hook** | User script invoked on Decision with structured env vars. | Apply |
@@ -660,10 +664,10 @@ both families per Decision.
 - `rule.go` — `RTM_NEWRULE` per family to install `fwmark <m> table
   <t>` at startup. Idempotent — checks existing rules before adding.
   Runs once per (group, family) on daemon start.
-- `conntrack.go` — `florianl/go-conntrack` to flush entries on the
-  old interface after a switch. Family-agnostic flush (both v4 and
-  v6 conntrack tables). Best-effort; failures logged but don't
-  block.
+- `conntrack.go` — `vishvananda/netlink`'s `ConntrackDeleteFilters`
+  to flush entries on the old interface after a switch. Per-family
+  flush (both v4 and v6 conntrack tables, iterated). Best-effort;
+  failures logged but don't block.
 
 ### `internal/state`
 
@@ -690,12 +694,18 @@ and the main event loop:
 ```go
 for {
     select {
-    case r := <-probeResults: handleProbeResult(r)
-    case e := <-linkEvents:   handleLinkEvent(e)
-    case <-ctx.Done():        shutdown()
+    case <-ctx.Done():        return
+    case r := <-probeResults: d.handleProbeResult(ctx, r)
+    case e := <-linkEvents:   d.handleLinkEvent(ctx, e)
+    case e := <-routeEvents:  d.handleRouteEvent(ctx, e)
     }
 }
 ```
+
+A third channel feeds `RouteEvent`s from the per-WAN
+`rtnl.RouteSubscriber`s — the daemon mirrors the kernel's main-table
+default routes into the per-WAN Gateway cache so Apply can write the
+per-Group table without re-reading the kernel on every Decision.
 
 ### Cold-start behavior
 
@@ -734,8 +744,10 @@ The module's systemd unit declares:
   `ProtectKernelModules = true`, `ProtectControlGroups = true`,
   `RestrictAddressFamilies = AF_UNIX AF_INET AF_INET6 AF_NETLINK`,
   `MemoryDenyWriteExecute = true`, `LockPersonality = true`.
-- `ReadWritePaths = /run/wanwatch /etc/wanwatch/hooks`
-  (state writer + hook directory read).
+- `RuntimeDirectory = wanwatch` covers `/run/wanwatch` (state file
+  + metrics socket); hook scripts under `/etc/wanwatch/hooks` are
+  read-only-readable under `ProtectSystem = strict` — the daemon
+  never writes there, so no `ReadWritePaths` line is required.
 - `Restart = on-failure`, `RestartSec = 5s`,
   `WatchdogSec = 30s` (paired with `sd_notify` keepalive at half-interval).
 
@@ -765,8 +777,9 @@ Per public function, required test coverage:
 3. Every predicate, both `true` and `false` outcomes.
 4. Every boundary (empty list, single item, max/min).
 5. Round-trip for serialization (`make → toJSON → fromJSON → eq`).
-6. Total-order properties for `compare` (reflexivity, antisymmetry,
-   transitivity).
+6. Total-order properties for `compare` when present (reflexivity,
+   antisymmetry, transitivity). No v1 value type defines `compare`;
+   this requirement activates with the first ordered value type.
 7. Determinism for allocators (same input → same output).
 
 A meta-test in `tests/unit/skeleton.nix` asserts that every value
@@ -802,7 +815,9 @@ coverage, excluding `_test.go` files and `cmd/`):
 - `daemon/` aggregate over `internal/...` — ≥85%
 
 CI fails if any individual gate regresses on a PR. `cmd/wanwatchd/`
-is exempt — it's wiring exercised by VM tests.
+has table-driven unit coverage (~75% on the daemon pipeline —
+decision commit, gateway cache, event loop, prober wiring) backed
+by end-to-end behavior in the VM tier; no explicit gate.
 
 ### 9.3 Integration (Nix)
 
