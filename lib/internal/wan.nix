@@ -79,7 +79,7 @@ let
     let
       r =
         if builtins.isString interface then
-          libnet.interface.tryParseName interface
+          libnet.interfaceName.tryParse interface
         else
           {
             success = false;
