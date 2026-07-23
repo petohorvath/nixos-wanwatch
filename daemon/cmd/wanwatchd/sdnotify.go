@@ -64,13 +64,22 @@ func watchdogInterval() time.Duration {
 	return time.Duration(usec) * time.Microsecond / 2
 }
 
-// runWatchdog pings the systemd watchdog every watchdogInterval()
-// until ctx is cancelled, and returns immediately when no watchdog
-// is configured. A failed ping is logged, not fatal: a daemon that
-// genuinely can't keep up is exactly what the watchdog exists to
-// catch, so missing the keepalive and letting systemd restart the
-// process is the intended outcome.
-func runWatchdog(ctx context.Context, logger *slog.Logger) {
+// watchdogChallenge asks eventLoop to prove it can still dispatch.
+// Closing ack is the response; a fresh channel per challenge makes
+// acknowledgments impossible to reuse across watchdog intervals.
+type watchdogChallenge struct {
+	ack chan struct{}
+}
+
+// runWatchdog challenges the event loop every watchdogInterval() and
+// sends WATCHDOG=1 only after that challenge is acknowledged. If the
+// event loop is wedged, this goroutine waits without sending another
+// keepalive, allowing systemd to restart the process. Cancellation
+// unblocks both sides of the handshake during orderly shutdown.
+//
+// A failed ping is logged, not fatal: missing the keepalive and
+// letting systemd restart the daemon is the intended failure mode.
+func runWatchdog(ctx context.Context, logger *slog.Logger, challenges chan<- watchdogChallenge) {
 	interval := watchdogInterval()
 	if interval <= 0 {
 		return
@@ -83,6 +92,17 @@ func runWatchdog(ctx context.Context, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			challenge := watchdogChallenge{ack: make(chan struct{})}
+			select {
+			case <-ctx.Done():
+				return
+			case challenges <- challenge:
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-challenge.ack:
+			}
 			if err := sdNotify("WATCHDOG=1"); err != nil {
 				logger.Warn("sd_notify watchdog ping failed", "err", err)
 			}

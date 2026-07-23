@@ -57,6 +57,7 @@ func testDaemon(t *testing.T, cfg *config.Config) *daemon {
 	d.writeRoute = func(context.Context, apply.DefaultRoute) error { return nil }
 	d.interfaceAddrs = func(string) ([]net.IP, error) { return nil, nil }
 	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) { return 0, nil }
+	t.Cleanup(d.stopHooks)
 	return d
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -110,7 +111,7 @@ func TestRunWatchdogDisabledReturns(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	done := make(chan struct{})
 	go func() {
-		runWatchdog(context.Background(), logger)
+		runWatchdog(context.Background(), logger, nil)
 		close(done)
 	}()
 	select {
@@ -129,9 +130,20 @@ func TestRunWatchdogPingsUntilCancelled(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithCancel(context.Background())
+	challenges := make(chan watchdogChallenge)
 	done := make(chan struct{})
 	go func() {
-		runWatchdog(ctx, logger)
+		for {
+			select {
+			case challenge := <-challenges:
+				close(challenge.ack)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		runWatchdog(ctx, logger, challenges)
 		close(done)
 	}()
 
@@ -144,5 +156,56 @@ func TestRunWatchdogPingsUntilCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("runWatchdog did not return after ctx cancel")
+	}
+}
+
+func TestRunWatchdogNoAckNoPing(t *testing.T) {
+	conn := listenNotify(t)
+	t.Setenv("WATCHDOG_USEC", "20000")
+	t.Setenv("WATCHDOG_PID", strconv.Itoa(os.Getpid()))
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	challenges := make(chan watchdogChallenge)
+	challengeReceived := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-challenges:
+			// Deliberately withhold ack: successful delivery alone must
+			// never permit a WATCHDOG datagram.
+			close(challengeReceived)
+		}
+	}()
+	go func() {
+		runWatchdog(ctx, logger, challenges)
+		close(done)
+	}()
+	select {
+	case <-challengeReceived:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("runWatchdog did not deliver a watchdog challenge")
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	buf := make([]byte, 256)
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("received WATCHDOG=1 without an event-loop acknowledgment")
+	} else {
+		var netErr net.Error
+		if !errors.As(err, &netErr) || !netErr.Timeout() {
+			t.Fatalf("Read = %v, want timeout", err)
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWatchdog did not return while waiting for event-loop acknowledgment")
 	}
 }

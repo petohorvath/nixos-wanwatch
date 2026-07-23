@@ -171,9 +171,11 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 	if err := sdNotify("READY=1"); err != nil {
 		logger.Warn("sd_notify READY failed", "err", err)
 	}
-	go runWatchdog(ctx, logger)
+	watchdogChallenges := make(chan watchdogChallenge)
+	go runWatchdog(ctx, logger, watchdogChallenges)
 
-	eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
+	eventLoop(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
+	d.stopHooks()
 	return exitError(ctx, metricsDone, logger)
 }
 
