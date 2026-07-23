@@ -36,9 +36,12 @@
 
     probeNoTargets               — both `targets.v4` and
                                    `targets.v6` empty
-    probeInvalidTarget           — target string not a valid IP
+    probeInvalidTarget           — malformed targets container/bucket,
+                                   or target string not a valid IP
     probeTargetFamilyMismatch    — v4 literal in `targets.v6`, or
                                    v6 literal in `targets.v4`
+    probeInvalidThresholds       — `thresholds` is not an attrset
+    probeInvalidHysteresis       — `hysteresis` is not an attrset
     probeInvalidMethod           — method ∉ {"icmp"}
     probeNonPositiveInterval     — intervalMs ≤ 0
     probeNonPositiveTimeout      — timeoutMs ≤ 0
@@ -134,20 +137,23 @@ let
   # lives in validateTargets.
   validateTargetBucket =
     fam: familyPredicate: xs:
-    let
-      parsed = parseTargets xs;
-      parseErrors = builtins.map (lib.nameValuePair "probeInvalidTarget") parsed.errors;
-      mismatches = builtins.concatMap (
-        ip:
-        if familyPredicate ip then
-          [ ]
-        else
-          [
-            (lib.nameValuePair "probeTargetFamilyMismatch" "${libnet.ip.toString ip} in targets.${fam} is not a ${fam} address")
-          ]
-      ) parsed.parsed;
-    in
-    parseErrors ++ mismatches;
+    if !(builtins.isList xs) then
+      check "probeInvalidTarget" false "targets.${fam} must be a list"
+    else
+      let
+        parsed = parseTargets xs;
+        parseErrors = builtins.map (lib.nameValuePair "probeInvalidTarget") parsed.errors;
+        mismatches = builtins.concatMap (
+          ip:
+          if familyPredicate ip then
+            [ ]
+          else
+            [
+              (lib.nameValuePair "probeTargetFamilyMismatch" "${libnet.ip.toString ip} in targets.${fam} is not a ${fam} address")
+            ]
+        ) parsed.parsed;
+      in
+      parseErrors ++ mismatches;
 
   validateTargets =
     targets:
@@ -158,7 +164,7 @@ let
         v4 = targets.v4 or [ ];
         v6 = targets.v6 or [ ];
         nonEmpty =
-          if v4 == [ ] && v6 == [ ] then
+          if builtins.isList v4 && builtins.isList v6 && v4 == [ ] && v6 == [ ] then
             check "probeNoTargets" false "at least one of targets.v4 or targets.v6 must be non-empty"
           else
             [ ];
@@ -216,17 +222,27 @@ let
       check "probeRTTThresholdsInverted" (!(downValid && upValid && up >= down))
         "thresholds.rttMsUp (${builtins.toJSON up}) must be strictly less than thresholds.rttMsDown (${builtins.toJSON down}); recovery threshold must sit below failure threshold to avoid flapping";
 
+  validateThresholds =
+    thresholds:
+    if !(builtins.isAttrs thresholds) then
+      check "probeInvalidThresholds" false "thresholds must be an attrset"
+    else
+      validateLossThresholds thresholds ++ validateRttThresholds thresholds;
+
   validateHysteresis =
     h:
-    check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveDown or null))
-      "hysteresis.consecutiveDown must be a positive integer; got ${
-        builtins.toJSON (h.consecutiveDown or null)
-      }"
-    ++
-      check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveUp or null))
-        "hysteresis.consecutiveUp must be a positive integer; got ${
-          builtins.toJSON (h.consecutiveUp or null)
-        }";
+    if !(builtins.isAttrs h) then
+      check "probeInvalidHysteresis" false "hysteresis must be an attrset"
+    else
+      check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveDown or null))
+        "hysteresis.consecutiveDown must be a positive integer; got ${
+          builtins.toJSON (h.consecutiveDown or null)
+        }"
+      ++
+        check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveUp or null))
+          "hysteresis.consecutiveUp must be a positive integer; got ${
+            builtins.toJSON (h.consecutiveUp or null)
+          }";
 
   validateFamilyHealthPolicy =
     policy:
@@ -238,19 +254,25 @@ let
   mergeWithDefaults =
     user:
     let
-      t = user.targets or { };
+      targets = user.targets or { };
+      thresholds = user.thresholds or { };
+      hysteresis = user.hysteresis or { };
     in
     {
       method = user.method or defaults.method;
-      targets = {
-        v4 = t.v4 or [ ];
-        v6 = t.v6 or [ ];
-      };
+      targets =
+        if builtins.isAttrs targets then
+          {
+            v4 = targets.v4 or [ ];
+            v6 = targets.v6 or [ ];
+          }
+        else
+          targets;
       intervalMs = user.intervalMs or defaults.intervalMs;
       timeoutMs = user.timeoutMs or defaults.timeoutMs;
       windowSize = user.windowSize or defaults.windowSize;
-      thresholds = defaults.thresholds // (user.thresholds or { });
-      hysteresis = defaults.hysteresis // (user.hysteresis or { });
+      thresholds = if builtins.isAttrs thresholds then defaults.thresholds // thresholds else thresholds;
+      hysteresis = if builtins.isAttrs hysteresis then defaults.hysteresis // hysteresis else hysteresis;
       familyHealthPolicy = user.familyHealthPolicy or defaults.familyHealthPolicy;
     };
 
@@ -261,8 +283,7 @@ let
     ++ validateInterval cfg.intervalMs
     ++ validateTimeout cfg.timeoutMs
     ++ validateWindowSize cfg.windowSize
-    ++ validateLossThresholds cfg.thresholds
-    ++ validateRttThresholds cfg.thresholds
+    ++ validateThresholds cfg.thresholds
     ++ validateHysteresis cfg.hysteresis
     ++ validateFamilyHealthPolicy cfg.familyHealthPolicy;
 

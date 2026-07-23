@@ -19,6 +19,14 @@ let
   inherit (helpers) evalThrows errorMatches;
   tryError = helpers.tryError probe;
 
+  tryMakeRejectsWithoutThrowing =
+    kind: input:
+    let
+      result = probe.tryMake input;
+      evaluated = builtins.tryEval (builtins.deepSeq result result);
+    in
+    evaluated.success && !evaluated.value.success && errorMatches kind evaluated.value.error;
+
   minimalInput = {
     targets.v4 = [ "1.1.1.1" ];
   };
@@ -281,6 +289,38 @@ in
         "not-an-ip"
       ];
     });
+    expected = true;
+  };
+
+  # ===== Error: malformed nested field shapes =====
+
+  testTryMakeRejectsNonAttrTargetsWithoutThrowing = {
+    expr = tryMakeRejectsWithoutThrowing "probeInvalidTarget" {
+      targets = "1.1.1.1";
+    };
+    expected = true;
+  };
+
+  testTryMakeRejectsNonListTargetBucketWithoutThrowing = {
+    expr = tryMakeRejectsWithoutThrowing "probeInvalidTarget" {
+      targets.v4 = "1.1.1.1";
+    };
+    expected = true;
+  };
+
+  testTryMakeRejectsNonAttrThresholdsWithoutThrowing = {
+    expr = tryMakeRejectsWithoutThrowing "probeInvalidThresholds" {
+      targets.v4 = [ "1.1.1.1" ];
+      thresholds = 5;
+    };
+    expected = true;
+  };
+
+  testTryMakeRejectsNonAttrHysteresisWithoutThrowing = {
+    expr = tryMakeRejectsWithoutThrowing "probeInvalidHysteresis" {
+      targets.v4 = [ "1.1.1.1" ];
+      hysteresis = [ 1 ];
+    };
     expected = true;
   };
 
