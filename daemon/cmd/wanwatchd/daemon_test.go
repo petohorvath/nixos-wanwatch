@@ -485,6 +485,82 @@ func TestUpdateGroupActiveGaugeAbsentClearsAll(t *testing.T) {
 	}
 }
 
+// TestHandleLinkEventUpdatesEveryWANOnSharedInterface guards the
+// supported shape where multiple WANs monitor one interface. The
+// subscriber emits one LinkEvent per interface, so the handler must
+// fan that event out to every matching WAN rather than whichever map
+// entry happens to be visited first.
+func TestHandleLinkEventUpdatesEveryWANOnSharedInterface(t *testing.T) {
+	t.Parallel()
+	cfg := testCfg()
+	cfg.Wans["backup"] = config.Wan{
+		Name:      "backup",
+		Interface: "eth0",
+		Probe:     cfg.Wans["backup"].Probe,
+	}
+	d := testDaemon(t, cfg)
+
+	d.handleLinkEvent(t.Context(), rtnl.LinkEvent{
+		Name:      "eth0",
+		Carrier:   rtnl.CarrierUp,
+		Operstate: rtnl.OperstateUp,
+	})
+
+	for _, name := range []string{"primary", "backup"} {
+		ws := d.wans[name]
+		if ws.carrier != rtnl.CarrierUp || ws.operstate != rtnl.OperstateUp {
+			t.Errorf("WAN %q link state = carrier %v, operstate %v; want up, up",
+				name, ws.carrier, ws.operstate)
+		}
+	}
+}
+
+// TestHandleLinkEventSharedInterfaceAvoidsIntermediateDecisions proves
+// that a single physical link transition is folded into every matching
+// WAN before any Group is recomputed. Recomputing inside the WAN map
+// iteration can otherwise publish a transient Selection through the
+// not-yet-updated peer; repeated up/down cycles exercise both possible
+// Go map iteration orders.
+func TestHandleLinkEventSharedInterfaceAvoidsIntermediateDecisions(t *testing.T) {
+	t.Parallel()
+	cfg := testCfgWithGroup()
+	cfg.Wans["backup"] = config.Wan{
+		Name:      "backup",
+		Interface: "eth0",
+		Probe:     cfg.Wans["backup"].Probe,
+	}
+	d := testDaemon(t, cfg)
+	g := d.groups["home"]
+
+	for cycle := range 32 {
+		before := g.decisionsTotal
+		d.handleLinkEvent(t.Context(), rtnl.LinkEvent{
+			Name:      "eth0",
+			Carrier:   rtnl.CarrierUp,
+			Operstate: rtnl.OperstateUp,
+		})
+		if delta := g.decisionsTotal - before; delta != 1 {
+			t.Fatalf("cycle %d carrier-up produced %d Decisions, want 1", cycle, delta)
+		}
+		if !g.active.Has || g.active.Wan != "primary" {
+			t.Fatalf("cycle %d carrier-up active = %+v, want primary", cycle, g.active)
+		}
+
+		before = g.decisionsTotal
+		d.handleLinkEvent(t.Context(), rtnl.LinkEvent{
+			Name:      "eth0",
+			Carrier:   rtnl.CarrierDown,
+			Operstate: rtnl.OperstateDown,
+		})
+		if delta := g.decisionsTotal - before; delta != 1 {
+			t.Fatalf("cycle %d carrier-down produced %d Decisions, want 1", cycle, delta)
+		}
+		if g.active.Has {
+			t.Fatalf("cycle %d carrier-down active = %+v, want none", cycle, g.active)
+		}
+	}
+}
+
 // testCfgWithGroup builds the same two-WAN cfg as testCfg() and
 // attaches a single primary-backup group containing both members.
 // Hand-rolled here rather than mutating testCfg() so the existing
