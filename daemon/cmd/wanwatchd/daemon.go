@@ -294,6 +294,8 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 // — the selector sees the carrier change immediately, without
 // waiting for the probe to time out.
 func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
+	var healthChangedWANs []string
+	stateChanged := false
 	for _, ws := range d.wans {
 		if ws.cfg.Interface != e.Name {
 			continue
@@ -311,19 +313,27 @@ func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 		d.metrics.WanOperstate.WithLabelValues(ws.name).Set(float64(int(e.Operstate)))
 
 		if ws.healthy() != prevHealthy {
-			d.recomputeAffectedGroups(ctx, ws.name, reasonCarrier)
+			healthChangedWANs = append(healthChangedWANs, ws.name)
 		}
-		// Republish state.json on any carrier/operstate transition.
-		// LinkSubscriber dedupes upstream so a fresh event always
-		// represents a real change, but a change that doesn't move
-		// ws.healthy() (e.g. operstate down → dormant) wouldn't fire
-		// recomputeAffectedGroups and so wouldn't otherwise update
-		// state.json — leaving the wans[<name>].carrier/operstate
-		// fields drifted from reality.
 		if prevCarrier != ws.carrier || prevOperstate != ws.operstate {
-			d.writeStateSnapshot(time.Time{})
+			stateChanged = true
 		}
-		return
+	}
+
+	// Fold the event into every WAN sharing the interface before
+	// recomputing any Group. Otherwise map iteration can expose a
+	// transient Selection through a matching WAN whose link state has
+	// not yet been updated.
+	for _, wan := range healthChangedWANs {
+		d.recomputeAffectedGroups(ctx, wan, reasonCarrier)
+	}
+	// Republish state.json on any carrier/operstate transition.
+	// LinkSubscriber dedupes upstream so a fresh event always
+	// represents a real change, but a change that doesn't move Health
+	// (e.g. operstate down → dormant) would not otherwise update
+	// state.json.
+	if stateChanged {
+		d.writeStateSnapshot(time.Time{})
 	}
 }
 
