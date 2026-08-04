@@ -102,7 +102,8 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		return fmt.Errorf("log-level: %w", err)
 	}
 	logger := slog.New(slog.NewTextHandler(logSink, &slog.HandlerOptions{Level: level}))
-	logger.Info("wanwatchd starting",
+	logger.Info(
+		"wanwatchd starting",
 		"config", f.configPath,
 		"wans", len(cfg.Wans),
 		"groups", len(cfg.Groups),

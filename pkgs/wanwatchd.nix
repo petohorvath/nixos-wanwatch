@@ -8,24 +8,26 @@
   because the only cgo-using transitive dep (netns) is unreachable
   from wanwatch.
 
-  Version + commit are link-injected so `wanwatch_build_info` matches
-  the package store path. The flake threads `version` from
+  Version + revision are link-injected so `wanwatch_build_info`
+  identifies the package. The flake threads `version` from
   `lib/default.nix` (the single source of truth) via callPackage;
-  `commit` is fed from CI. The default below is a fallback for
-  stand-alone callPackage use — keep it in sync with `lib/default.nix`
-  on tag bumps.
+  release builds may override `revision`. The version default below
+  is a fallback for stand-alone callPackage use — keep it in sync
+  with `lib/default.nix` on tag bumps.
 
     pkgs.callPackage ./wanwatchd.nix {
       version = "0.1.0";
-      commit  = "abcdef0";
+      revision = "abcdef0";
     }
 */
 {
   lib,
   buildGoModule,
   version ? "0.1.0",
-  commit ? "unknown",
+  revision ? "unknown",
 }:
+
+assert builtins.isString revision;
 
 buildGoModule {
   pname = "wanwatchd";
@@ -52,7 +54,7 @@ buildGoModule {
     "-s"
     "-w"
     "-X main.version=${version}"
-    "-X main.commit=${commit}"
+    "-X main.commit=${revision}"
   ];
 
   # Daemon talks to the kernel via netlink — no useful test surface

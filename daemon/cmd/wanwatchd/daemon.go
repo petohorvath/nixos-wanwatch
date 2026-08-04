@@ -371,7 +371,8 @@ func (d *daemon) recomputeGroup(ctx context.Context, g *groupState, reason decis
 		return
 	}
 
-	d.logger.Info("decision",
+	d.logger.Info(
+		"decision",
 		"group", g.cfg.Name,
 		"reason", reason,
 		"old", g.active.Wan,

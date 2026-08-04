@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # GitHub-native Nix support updates each flake input independently and
+  # opens ordinary Dependabot PRs, so the repository's normal pull_request
+  # CI runs without a PAT, App key, or write-capable Actions workflow.
+  - package-ecosystem: "nix"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "monthly"
+
+    # Keep the automated scope narrow: all non-primary inputs remain part
+    # of the deliberate manual dependency review in PLAN §11.10.
+    allow:
+      - dependency-name: "nixpkgs"
+
+    # Dependabot recognizes versioned Nix branches and can otherwise move
+    # from nixos-26.05 to a future stable branch. Permit commit refreshes on
+    # 26.05 while requiring channel upgrades to remain explicit changes.
+    ignore:
+      - dependency-name: "nixpkgs"
+        versions:
+          - "> 26.05"
+
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: "flake"
