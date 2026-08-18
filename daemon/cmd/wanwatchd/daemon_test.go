@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -903,6 +904,7 @@ func TestRunHooksUpEvent(t *testing.T) {
 
 	g := d.groups["home"]
 	d.runHooks(t.Context(), g, selector.NoActive, selector.Active{Wan: "primary", Has: true}, time.Time{})
+	d.waitHooks()
 
 	data, err := os.ReadFile(outFile)
 	if err != nil {
@@ -928,6 +930,7 @@ func TestRunHooksNoEventOnIdentical(t *testing.T) {
 
 	active := selector.Active{Wan: "primary", Has: true}
 	d.runHooks(t.Context(), d.groups["home"], active, active, time.Time{})
+	d.waitHooks()
 
 	if _, err := os.Stat(sentinel); err == nil {
 		t.Error("hook fired on identical-active transition; want no event")
@@ -944,9 +947,118 @@ func TestRunHooksMissingDirIsNotError(t *testing.T) {
 	// No writeHook → HooksDir/up.d/ doesn't exist.
 	d.runHooks(t.Context(), d.groups["home"], selector.NoActive,
 		selector.Active{Wan: "primary", Has: true}, time.Time{})
+	d.waitHooks()
 	// No assertion needed — the test fails by panicking if runHooks
 	// gets the error contract wrong. Reaching here is the success
 	// condition.
+}
+
+// TestRunHooksIgnoresCancelledContext pins the shutdown boundary: once the
+// daemon context is cancelled, a final event-loop iteration must not start a
+// worker or accept another best-effort hook job.
+func TestRunHooksIgnoresCancelledContext(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d.runHooks(ctx, d.groups["home"], selector.NoActive,
+		selector.Active{Wan: "primary", Has: true}, time.Time{})
+
+	if d.hookDone != nil {
+		t.Fatal("cancelled hook dispatch started a worker")
+	}
+	d.waitHooks()
+}
+
+// TestRunHooksRunsAcceptedEventsInDecisionOrder holds the first hook at a
+// filesystem gate, then queues a switch. The switch must not run ahead of
+// the first event: hook side effects preserve Decision order even though the
+// event loop itself never waits for them.
+func TestRunHooksRunsAcceptedEventsInDecisionOrder(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var order []state.Event
+	d.hookRun = func(_ context.Context, hookCtx state.HookContext) []state.HookResult {
+		if hookCtx.Event == state.EventUp {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		order = append(order, hookCtx.Event)
+		return nil
+	}
+
+	d.runHooks(t.Context(), d.groups["home"], selector.NoActive,
+		selector.Active{Wan: "primary", Has: true}, time.Time{})
+	<-firstStarted
+	d.runHooks(t.Context(), d.groups["home"], selector.Active{Wan: "primary", Has: true},
+		selector.Active{Wan: "backup", Has: true}, time.Time{})
+
+	if got := len(d.hookJobs); got != 1 {
+		t.Fatalf("queued hook jobs = %d, want 1 while first hook is blocked", got)
+	}
+	close(releaseFirst)
+	d.waitHooks()
+
+	if len(order) != 2 || order[0] != state.EventUp || order[1] != state.EventSwitch {
+		t.Errorf("hook execution order = %v, want [up switch]", order)
+	}
+}
+
+// TestRunHooksDropsNewEventWhenQueueIsFull pins the best-effort queue
+// contract: with the worker held on one event, exactly hookQueueCapacity
+// later Decisions are accepted, the next one is dropped, and enqueue still
+// returns without waiting for the blocked hook.
+func TestRunHooksDropsNewEventWhenQueueIsFull(t *testing.T) {
+	t.Parallel()
+	d := testDaemon(t, testCfgWithGroup())
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var mu sync.Mutex
+	calls := 0
+	d.hookRun = func(_ context.Context, _ state.HookContext) []state.HookResult {
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		if first {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return nil
+	}
+
+	d.runHooks(t.Context(), d.groups["home"], selector.NoActive,
+		selector.Active{Wan: "primary", Has: true}, time.Time{})
+	<-firstStarted
+
+	enqueued := make(chan struct{})
+	go func() {
+		for range hookQueueCapacity + 1 {
+			d.runHooks(t.Context(), d.groups["home"], selector.NoActive,
+				selector.Active{Wan: "primary", Has: true}, time.Time{})
+		}
+		close(enqueued)
+	}()
+	select {
+	case <-enqueued:
+	case <-time.After(time.Second):
+		close(releaseFirst)
+		t.Fatal("hook enqueue blocked behind a full queue")
+	}
+
+	close(releaseFirst)
+	d.waitHooks()
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+	if want := 1 + hookQueueCapacity; got != want {
+		t.Errorf("hook runs = %d, want %d (one full-queue event dropped)", got, want)
+	}
 }
 
 // TestHandleRouteEventReappliesOnActiveIface: a RouteEvent for the
@@ -1144,7 +1256,7 @@ func TestEventLoopEndToEndFiresUpHook(t *testing.T) {
 	defer cancel()
 	loopDone := make(chan struct{})
 	go func() {
-		eventLoop(ctx, d, probeResults, linkEvents, routeEvents)
+		eventLoop(ctx, d, probeResults, linkEvents, routeEvents, nil)
 		close(loopDone)
 	}()
 
@@ -1180,6 +1292,73 @@ func TestEventLoopEndToEndFiresUpHook(t *testing.T) {
 
 	cancel()
 	<-loopDone
+}
+
+func TestSlowHookDoesNotBlockWatchdogAck(t *testing.T) {
+	t.Parallel()
+	cfg := testCfgWithGroup()
+	cfg.Global.HookTimeoutMs = 3000
+	d := testDaemon(t, cfg)
+
+	started := filepath.Join(d.cfg.Global.HooksDir, "started")
+	finished := filepath.Join(d.cfg.Global.HooksDir, "finished")
+	release := filepath.Join(d.cfg.Global.HooksDir, "release")
+	writeHook(t, filepath.Join(d.cfg.Global.HooksDir, "up.d"), "slow.sh",
+		`touch `+started+`; while [ ! -e `+release+` ]; do sleep 0.01; done; touch `+finished)
+
+	probeResults := make(chan probe.ProbeResult, 1)
+	linkEvents := make(chan rtnl.LinkEvent, 1)
+	routeEvents := make(chan rtnl.RouteEvent, 1)
+	challenges := make(chan watchdogChallenge)
+	ctx, cancel := context.WithCancel(context.Background())
+	loopDone := make(chan struct{})
+	go func() {
+		eventLoop(ctx, d, probeResults, linkEvents, routeEvents, challenges)
+		close(loopDone)
+	}()
+	defer func() {
+		_ = os.WriteFile(release, nil, 0o600)
+		cancel()
+		select {
+		case <-loopDone:
+		case <-time.After(2 * time.Second):
+			t.Error("eventLoop did not stop after cancellation")
+		}
+	}()
+
+	linkEvents <- rtnl.LinkEvent{Name: "eth0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp}
+	waitForPath := func(path string, deadline time.Duration) {
+		t.Helper()
+		until := time.Now().Add(deadline)
+		for {
+			if _, err := os.Stat(path); err == nil {
+				return
+			}
+			if time.Now().After(until) {
+				t.Fatalf("path %s was not created within %s", path, deadline)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	waitForPath(started, 2*time.Second)
+
+	ack := make(chan struct{})
+	select {
+	case challenges <- watchdogChallenge{ack: ack}:
+	case <-time.After(time.Second):
+		t.Fatal("eventLoop did not accept watchdog challenge while hook was running")
+	}
+	select {
+	case <-ack:
+	case <-time.After(time.Second):
+		t.Fatal("eventLoop did not acknowledge watchdog challenge while hook was running")
+	}
+
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatalf("release hook: %v", err)
+	}
+	waitForPath(finished, 2*time.Second)
+	d.waitHooks()
 }
 
 // TestRecordProbeMetricsEmptyPerTarget: cold start emits a
@@ -1284,6 +1463,7 @@ func TestRetryPendingApplyConverges(t *testing.T) {
 		Family: probe.FamilyV4,
 		Stats:  probe.FamilyStats{LossRatio: 0, RTTMicros: 10_000},
 	})
+	d.waitHooks()
 
 	if g.applyPending {
 		t.Error("still applyPending after a successful retry")
