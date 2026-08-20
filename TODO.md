@@ -151,27 +151,6 @@ implementation is mechanical.
 
 ---
 
-## tracking — waiting on upstream
-
-### Bump nixpkgs once Go stdlib `net` fix lands
-
-`.github/workflows/audit.yml`'s `govulncheck` job stays red on
-GO-2026-4971 — a Windows-only panic in `net.Dial` and
-`net.LookupPort` when handling NUL bytes. govulncheck reports
-`Found in: net@go1.25.9`, `Fixed in: net@go1.25.10` against our
-nixos-25.11 pin (stable's current Go is 1.25.9); the `nixos-unstable`
-channel ships Go 1.26.2 which is also flagged (fixed somewhere on the
-1.26.x branch). The daemon is Linux-only so the call paths are
-unreachable in practice, but govulncheck flags any reachable import
-of the affected functions regardless of build target.
-
-Resolution is a `nix flake update nixpkgs` once the channel we pin
-ships the fixed point release (1.25.10+ on stable, or 1.26.3+ on
-unstable). No code change on our side; verify by re-dispatching
-the audit workflow and watching the govulncheck job go green.
-
----
-
 ## cleanup — internal refactors
 
 Captured during reviews; deemed not worth blocking the original

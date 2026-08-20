@@ -10,7 +10,7 @@
     # Sibling-flake inputs (libnet, nftzones, nftypes, treefmt-nix,
     # git-hooks) follow this via `inputs.nixpkgs.follows = "nixpkgs"`
     # so their lib outputs pin against stable too.
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
     # A second nixpkgs pinned to nixos-unstable. Consulted only by
     # the `vm-unstable-*` flake checks (via `unstablePkgsFor`),
@@ -241,6 +241,7 @@
           # a duplicate default in wanwatchd.nix.
           wanwatchd = pkgs.callPackage ./pkgs/wanwatchd.nix {
             inherit (self.lib) version;
+            revision = "unknown";
           };
           default = wanwatchd;
         }
@@ -462,6 +463,7 @@
             pkgs.deadnix
           ];
           preCommit = preCommitCheckFor pkgs;
+          auditPkgs = unstablePkgsFor pkgs.stdenv.hostPlatform.system;
         in
         {
           # The pre-commit shellHook installs .git/hooks/{pre-commit,
@@ -471,6 +473,16 @@
           default = pkgs.mkShell {
             packages = base;
             inherit (preCommit) shellHook;
+          };
+
+          # Pinned tools used by the weekly/release vulnerability
+          # workflow. Keeping them in a separate shell avoids adding
+          # scanner dependencies to normal development environments.
+          audit = pkgs.mkShellNoCC {
+            packages = [
+              auditPkgs.govulncheck
+              auditPkgs.vulnix
+            ];
           };
         }
       );
