@@ -91,7 +91,6 @@ pkgs.testers.runNixOSTest {
         networking.firewall.enable = lib.mkForce false;
 
         environment.systemPackages = [
-          pkgs.jq
           pkgs.iproute2
         ];
 
@@ -205,6 +204,29 @@ pkgs.testers.runNixOSTest {
         return 0.0
 
 
+    def wait_for_probe_loss(router, wan, family, low, high=1.0, timeout=10):
+        """Poll the live Prometheus gauge until it enters [low, high]."""
+        series = (
+            'wanwatch_probe_loss_ratio{family="'
+            + family
+            + '",wan="'
+            + wan
+            + '"}'
+        )
+        prefix = series + " "
+        last = None
+        for _ in range(timeout * 10):
+            body = scrape(router)
+            if any(line.startswith(prefix) for line in body.splitlines()):
+                last = metric(body, series)
+                if low <= last <= high:
+                    return last
+            router.execute("sleep 0.1")
+        raise AssertionError(
+            f"{series} never entered [{low}, {high}]; last value = {last}"
+        )
+
+
     def health_decisions(router, group):
         series = (
             'wanwatch_group_decisions_total{group="'
@@ -257,28 +279,25 @@ pkgs.testers.runNixOSTest {
     assert after_a > before_a, (
         f"phase A: health-decisions did not advance: {before_a} → {after_a}"
     )
-    # Poll: `wait_for_active` proves the flip; the lossRatio in the
-    # same snapshot is from the most recent aggregate refresh, which
-    # may still reflect mid-failover numbers. Bound on the threshold.
-    router.wait_until_succeeds(
-        "jq -e '.wans.primary.families.v6.lossRatio >= 0.5' "
-        "< /run/wanwatch/state.json > /dev/null",
-        timeout=10,
+    # state.json is transition-driven, not a live probe-stat stream.
+    # The Decision snapshot must show the unhealthy verdict and the
+    # configured 25% down threshold, but it can freeze below 50% when
+    # hysteresis flips before the 100%-loss window fully converges.
+    state_a = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+    family_a = state_a["wans"]["primary"]["families"]["v6"]
+    assert family_a["healthy"] is False, f"phase A family state = {family_a}"
+    assert family_a["lossRatio"] >= 0.25, (
+        f"phase A transition lossRatio = {family_a['lossRatio']}, want ≥ 0.25"
     )
+    # Per-sample stats continue updating only on the Prometheus surface.
+    wait_for_probe_loss(router, "primary", "v6", 0.5)
 
     # ==== Phase B — clear netem ⇒ recovery ====
 
     router.succeed("tc qdisc del dev eth1 root")
     wait_for_active(router, "primary")
-    # Poll: `wait_for_active` proves the flip; the lossRatio in the
-    # same snapshot is from the most recent aggregate refresh, which
-    # may still reflect mid-recovery numbers. Bound on the threshold
-    # directly.
-    router.wait_until_succeeds(
-        "jq -e '.wans.primary.families.v6.lossRatio <= 0.10' "
-        "< /run/wanwatch/state.json > /dev/null",
-        timeout=10,
-    )
+    # Poll live probe stats; state.json changes only on transitions.
+    wait_for_probe_loss(router, "primary", "v6", 0.0, 0.10)
 
     # ==== Phase C — blip suppression (REMOVED) ====
     #
@@ -320,13 +339,9 @@ pkgs.testers.runNixOSTest {
     wait_for_active(router, "backup", timeout=15)
     # Soft window: 50% configured loss can give anywhere from 30%
     # to 70% over a 10-sample window — assert "above the 25%
-    # threshold," not an exact value. Poll so the snapshot taken
-    # at the flip moment doesn't race the aggregate refresh.
-    router.wait_until_succeeds(
-        "jq -e '.wans.primary.families.v6.lossRatio >= 0.25' "
-        "< /run/wanwatch/state.json > /dev/null",
-        timeout=10,
-    )
+    # threshold," not an exact value. Read the live metric because
+    # state.json intentionally freezes probe stats between transitions.
+    wait_for_probe_loss(router, "primary", "v6", 0.25)
 
     # ==== Phase D2 — band-pass hold (REMOVED) ====
     #
@@ -360,11 +375,7 @@ pkgs.testers.runNixOSTest {
     # D3 — clear ⇒ recovery
     router.succeed("tc qdisc del dev eth1 root")
     wait_for_active(router, "primary", timeout=15)
-    router.wait_until_succeeds(
-        "jq -e '.wans.primary.families.v6.lossRatio <= 0.10' "
-        "< /run/wanwatch/state.json > /dev/null",
-        timeout=10,
-    )
+    wait_for_probe_loss(router, "primary", "v6", 0.0, 0.10)
 
     # ==== Phase E — per-target aggregation ====
     #
@@ -378,16 +389,9 @@ pkgs.testers.runNixOSTest {
     isp1.succeed("ip -6 addr del fd00:1::2/64 dev eth1")
     wait_for_active(router, "backup", timeout=15)
     # Aggregate should be in [0.3, 0.7] (one target ~0%, one ~100%
-    # averaged). Loose so window noise doesn't flake the assertion.
-    # Poll so the snapshot doesn't race the aggregate refresh — the
-    # active flip may land before the per-target average has folded
-    # in the unreachable target's losses.
-    router.wait_until_succeeds(
-        "jq -e '.wans.primary.families.v6.lossRatio "
-        "| (. >= 0.3 and . <= 0.7)' "
-        "< /run/wanwatch/state.json > /dev/null",
-        timeout=10,
-    )
+    # averaged). Poll the live metric so window convergence after the
+    # Decision remains observable without forcing state.json writes.
+    wait_for_probe_loss(router, "primary", "v6", 0.3, 0.7)
 
     isp1.succeed("ip -6 addr add fd00:1::2/64 dev eth1")
     router.wait_until_succeeds("ping -6 -c 1 -W 1 fd00:1::2", timeout=10)

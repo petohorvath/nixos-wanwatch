@@ -71,7 +71,6 @@ pkgs.testers.runNixOSTest {
         networking.firewall.enable = lib.mkForce false;
 
         environment.systemPackages = [
-          pkgs.jq
           pkgs.iproute2
         ];
 
@@ -173,6 +172,29 @@ pkgs.testers.runNixOSTest {
             if line.startswith(prefix):
                 return float(line[len(prefix):])
         return 0.0
+
+
+    def wait_for_probe_loss(router, wan, family, low, high=1.0, timeout=10):
+        """Poll the live Prometheus gauge until it enters [low, high]."""
+        series = (
+            'wanwatch_probe_loss_ratio{family="'
+            + family
+            + '",wan="'
+            + wan
+            + '"}'
+        )
+        prefix = series + " "
+        last = None
+        for _ in range(timeout * 10):
+            body = scrape(router)
+            if any(line.startswith(prefix) for line in body.splitlines()):
+                last = metric(body, series)
+                if low <= last <= high:
+                    return last
+            router.execute("sleep 0.1")
+        raise AssertionError(
+            f"{series} never entered [{low}, {high}]; last value = {last}"
+        )
 
 
     def wait_for_wan_healthy(router, wan, timeout=15):
@@ -281,29 +303,22 @@ pkgs.testers.runNixOSTest {
         f"indicate a regression in the probe path)"
     )
 
-    # state.json should reflect the per-family observation: v4
-    # lossRatio at or near 1.0, primary's family healthy=false.
-    # Poll the snapshot — `wait_for_active` only proves the active
-    # flip landed, not that the next aggregate refresh has folded
-    # in the loss numbers we care about.
-    router.wait_until_succeeds(
-        "jq -e '.wans.primary.families.v4 | (.healthy == false and .lossRatio >= 0.5)' "
-        "< /run/wanwatch/state.json > /dev/null",
-        timeout=10,
+    # state.json is transition-driven: assert the Decision snapshot's
+    # verdict and down threshold, then use Prometheus for later samples.
+    failed_state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+    failed_v4 = failed_state["wans"]["primary"]["families"]["v4"]
+    assert failed_v4["healthy"] is False, f"failed family state = {failed_v4}"
+    assert failed_v4["lossRatio"] >= 0.25, (
+        f"transition lossRatio = {failed_v4['lossRatio']}, want ≥ 0.25"
     )
+    wait_for_probe_loss(router, "primary", "v4", 0.5)
 
     # 5. Clear the netem rule; primary should recover after
     #    `consecutiveUp` good samples (2 × 200ms ≈ 400ms).
     router.succeed("tc qdisc del dev eth1 root")
     wait_for_active(router, "primary")
 
-    # Final sanity: primary's family is healthy again and the
-    # lossRatio has fallen to ≤ lossPctUp (5%) — i.e. ≤ 0.05.
-    # Same poll rationale as the unhealthy case above.
-    router.wait_until_succeeds(
-        "jq -e '.wans.primary.families.v4 | (.healthy == true and .lossRatio <= 0.10)' "
-        "< /run/wanwatch/state.json > /dev/null",
-        timeout=10,
-    )
+    # Final sanity: primary's live loss has fallen to the recovery band.
+    wait_for_probe_loss(router, "primary", "v4", 0.0, 0.10)
   '';
 }
