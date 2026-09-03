@@ -1,6 +1,6 @@
-# golangci-lint v2 config. Curated check set pinned by CLAUDE.md's
-# §Lint section — adding or removing a linter here is a deliberate
-# decision: update CLAUDE.md in the same commit so the doc and the
+# golangci-lint v2 config. Curated check set documented by AGENTS.md's
+# §Formatting and linting section — adding or removing a linter here is a
+# deliberate decision: update AGENTS.md in the same commit so the doc and the
 # config don't drift.
 #
 # Formatting (gofumpt + goimports) is enforced by treefmt-nix, not

@@ -1,7 +1,7 @@
 name: audit
 
-# Weekly vulnerability scan promised by PLAN §11.10 and CLAUDE.md
-# §Audits. Two independent jobs:
+# Weekly vulnerability scan promised by PLAN §11.10 and AGENTS.md
+# §Tests and checks. Two independent jobs:
 #
 #   - govulncheck — scans the built daemon for vulnerable Go symbols
 #     and embedded standard-library/module versions (golang.org/x/vuln).

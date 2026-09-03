@@ -98,7 +98,7 @@ wanwatch owns the per-group routing table that mark dispatches into.
 
 Terms have non-overlapping meanings. Reusing them loosely is a defect.
 This table lives in `docs/glossary.md` and is referenced from
-`CLAUDE.md`.
+`AGENTS.md`.
 
 | Term | Definition | Not to be confused with |
 |---|---|---|
@@ -882,7 +882,7 @@ at HEAD.
 - `tests/unit/runner.nix` — `lib.runTests` derivation wrapper
 - `daemon/go.mod` skeleton + `daemon/internal/probe/stats.go`
   (pure sliding-window math) + tests
-- `CLAUDE.md` — conventions documented
+- `AGENTS.md` — conventions documented
 - `docs/glossary.md` — initial term set
 
 **Exit criteria**: `nix flake check` runs and passes (with zero
@@ -1100,7 +1100,7 @@ a specific commit and explained in the body.
 | Dependency-update review | monthly | manual: review `go.mod` and all non-primary-nixpkgs `flake.lock` deltas |
 | Public-API surface review | each minor version | manual: read `lib/default.nix` + daemon exports |
 | Glossary drift | each minor version | grep usage vs `docs/glossary.md` |
-| Convention drift | each minor version | re-read `CLAUDE.md` against code |
+| Convention drift | each minor version | re-read `AGENTS.md` against code |
 
 ---
 
