@@ -121,7 +121,7 @@ Current CI runs:
 - unit, daemon/package/coverage/race, and integration jobs on x86_64 and aarch64 Linux;
 - every VM scenario on x86_64 Linux against both stable and unstable nixpkgs.
 
-The pre-push hook runs golangci-lint; on Linux it also runs unit, integration, race, and coverage checks. It does not run the VM matrix. The separate audit workflow runs `govulncheck` and `vulnix` weekly and for release tags.
+The pre-push hook runs golangci-lint only when changed paths match `^daemon/.*\.go$`; on Linux it also runs unit, integration, race, and coverage checks. It does not run the VM matrix. The separate audit workflow runs `govulncheck` and `vulnix` weekly and for release tags.
 
 ## Architecture and change boundaries
 
