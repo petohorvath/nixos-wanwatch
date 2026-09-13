@@ -40,25 +40,22 @@ func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cf
 // The daemon uses these events to learn the current default-route
 // gateway on each WAN's interface from the kernel's main RIB.
 //
-// Prime runs synchronously before the subscriber goroutine spawns so
-// that any default routes already present in the kernel (the common
-// case — systemd-networkd has typically finished by the time
-// wanwatchd starts) are visible to the event loop on its very first
-// iteration. Without this, a link-event arriving before the
-// subscriber dumps would drive an applyRoutes call that finds an
-// empty cache and skips the route write.
+// Start establishes the live subscription before queuing the initial
+// route snapshot synchronously. Defaults arriving during the snapshot
+// are buffered and delivered after it, so gateway discovery has no
+// gap between its initial dump and live updates.
 func startRouteSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.RouteEvent, error) {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.RouteSubscriber{Interfaces: watched}
 	events := make(chan rtnl.RouteEvent, 64)
-	if err := s.Prime(ctx, events); err != nil {
-		return nil, fmt.Errorf("rtnl route subscriber prime: %w", err)
+	exited, err := s.Start(ctx, events)
+	if err != nil {
+		return nil, fmt.Errorf("rtnl route subscriber start: %w", err)
 	}
 	go func() {
-		err := s.Run(ctx, events)
-		onSubsystemExit(cancel, logger, "route subscriber", err)
+		onSubsystemExit(cancel, logger, "route subscriber", <-exited)
 	}()
-	logger.Info("rtnl route subscriber started", "interfaces", len(watched), "primed", len(events))
+	logger.Info("rtnl route subscriber started", "interfaces", len(watched), "queued", len(events))
 	return events, nil
 }
 

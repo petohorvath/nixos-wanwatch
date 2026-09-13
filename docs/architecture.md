@@ -87,7 +87,7 @@ daemon/
   cmd/wanwatchd/        — process lifecycle, event loop
   internal/config/      — config.json parser + structural validator
   internal/probe/       — Pinger goroutine, ICMP wire format, WindowStats
-  internal/rtnl/        — RTNLGRP_LINK subscriber, LinkEvent dedup
+  internal/rtnl/        — link + route subscriptions, Gateway discovery, LinkEvent dedup
   internal/selector/    — strategies + per-WAN hysteresis state
   internal/decision/    — per-Group Selection, Apply retries and commits
   internal/apply/       — route / rule / conntrack via vishvananda/netlink
@@ -142,6 +142,12 @@ families for that target. A newer Selection supersedes it. Missing
 Gateways remain soft skips: a commit can leave a family's existing route
 untouched. Gateway changes on a committed Selection refresh only the
 changed family and produce no new Decision or Hook.
+
+Gateway discovery opens its live route subscription before listing the
+kernel's existing IPv4 and IPv6 routes. It queues snapshot events before
+the event loop starts, then forwards buffered live additions and deletions
+in receive order. The route subscriber owns both phases so a route installed
+during startup cannot fall between the snapshot and subscription.
 
 ## Data flow on a switch
 
