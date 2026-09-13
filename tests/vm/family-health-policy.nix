@@ -77,73 +77,24 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     start_all()
     isp.wait_for_unit("multi-user.target")
     router.wait_for_unit("wanwatch.service")
 
-    # Wait for both families to cook: v4 needs consecutiveUp=2
-    # successful samples to flip to healthy (~2s); v6 cooks
-    # as unhealthy on its first Lost sample. The convergence
-    # predicate also requires the aggregate wan.healthy + group.
-    # active to follow (per policy="all") — those mutations land
-    # in the same Decision commit as the family-level flip but
-    # snapshotting only the per-family fields could still observe
-    # an in-flight state on a slow runner. Gating on every assertion
-    # the post-loop checks keeps the snapshot self-consistent.
-    converged = False
-    for _ in range(40):
-        state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-        wan = state["wans"]["uplink"]
-        fams = wan["families"]
-        group = state["groups"]["home"]
-        if (
-            fams.get("v4", {}).get("healthy") is True
-            and fams.get("v6", {}).get("healthy") is False
-            and wan.get("healthy") is False
-            and group.get("active") is None
-        ):
-            converged = True
-            break
-        router.execute("sleep 0.5")
-    assert converged, f"v4=healthy/v6=unhealthy never converged; last:\n{state}"
+    # All verdicts and the Selection must agree in one State snapshot.
+    # A per-family flip alone does not prove the aggregate policy was applied.
+    observe.state({
+        "wans": {"uplink": {
+            "healthy": False,
+            "families": {"v4": {"healthy": True}, "v6": {"healthy": False}},
+        }},
+        "groups": {"home": {"active": None}},
+    }, timeout=20)
 
-    # The convergence predicate above already pinned these — kept
-    # as final-state assertions with explicit messages so a future
-    # change to the predicate doesn't silently drop the policy check.
-    assert state["wans"]["uplink"]["healthy"] is False, (
-        f"wan.healthy under policy=all should be false: {state['wans']['uplink']}"
-    )
-    assert state["groups"]["home"]["active"] is None, (
-        f"group.active should be null when wan unhealthy: {state['groups']['home']}"
-    )
-
-    # The per-family Prometheus gauges should agree. Poll: the
-    # state.json convergence loop above only gates on the state
-    # writer; the per-family gauges are updated on a separate path
-    # within the same Decision commit but without a formal ordering
-    # guarantee, so a snapshot scrape can race the gauge write on a
-    # loaded runner.
-    def scrape_body():
-        return router.succeed(
-            "${pkgs.curl}/bin/curl -s --unix-socket "
-            "/run/wanwatch/metrics.sock http://wanwatch/metrics"
-        )
-
-
-    want_v4 = 'wanwatch_wan_family_healthy{family="v4",wan="uplink"} 1'
-    want_v6 = 'wanwatch_wan_family_healthy{family="v6",wan="uplink"} 0'
-
-    body = ""
-    for _ in range(40):
-        body = scrape_body()
-        if want_v4 in body and want_v6 in body:
-            break
-        router.execute("sleep 0.25")
-    assert want_v4 in body, f"v4 gauge != 1; scrape:\n{body}"
-    assert want_v6 in body, f"v6 gauge != 0; scrape:\n{body}"
+    # Independently wait for both live gauges; absence must not count as false.
+    observe.wait_family_metrics("uplink", {"v4": True, "v6": False})
   '';
 }

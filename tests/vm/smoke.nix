@@ -97,7 +97,9 @@ pkgs.testers.runNixOSTest {
 
     };
 
-  testScript = ''
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
+
     router.wait_for_unit("wanwatch.service")
 
     # 1. Daemon is alive and the unit reached active.
@@ -105,9 +107,7 @@ pkgs.testers.runNixOSTest {
 
     # 2. Initial state.json is published from bootstrap — exists
     #    even before any probe sample.
-    router.wait_for_file("/run/wanwatch/state.json")
-    schema = router.succeed("jq -r .schema /run/wanwatch/state.json").strip()
-    assert schema == "1", f"state.json schema = {schema!r}, want '1'"
+    observe.state()
 
     # 3. Metrics socket present and group-readable.
     router.wait_for_file("/run/wanwatch/metrics.sock")
@@ -117,10 +117,7 @@ pkgs.testers.runNixOSTest {
     # 4. Scrape /metrics over the unix socket and assert
     #    wanwatch_build_info is present (set during bootstrap with
     #    a constant value of 1).
-    body = router.succeed(
-        "${pkgs.curl}/bin/curl -s --unix-socket /run/wanwatch/metrics.sock "
-        "http://wanwatch/metrics"
-    )
+    body = observe.scrape()
     assert "wanwatch_build_info" in body, (
         f"scrape body missing wanwatch_build_info:\n{body}"
     )

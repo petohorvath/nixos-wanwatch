@@ -255,6 +255,12 @@
             inherit pkgs;
             libnet = libnet.lib.withLib pkgs.lib;
           };
+          # Observation rules are testable without booting the VM scenarios.
+          observation = pkgs.runCommand "wanwatch-observation-tests" { } ''
+            ${pkgs.python3}/bin/python3 -B -m unittest discover \
+              -s ${./tests/vm} -p test_observation.py -v
+            touch $out
+          '';
           pre-commit = preCommitCheckFor pkgs;
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

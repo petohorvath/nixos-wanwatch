@@ -116,22 +116,8 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
-
-    def wait_for_active(router, want, timeout=15):
-        """Poll state.json until groups.home-uplink.active == want."""
-        for _ in range(timeout * 4):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            active = json.loads(out)["groups"]["home-uplink"]["active"]
-            if active == want:
-                return
-            router.execute("sleep 0.25")
-        raise AssertionError(
-            f"active never reached {want!r}; last state =\n{out}"
-        )
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     router.wait_for_unit("wanwatch.service")
     router.wait_for_unit("systemd-networkd.service")
@@ -143,27 +129,11 @@ pkgs.testers.runNixOSTest {
 
     # 1. Initial Selection: primary (lowest priority among
     #    carrier-up members). Cold-start health is carrier-only.
-    wait_for_active(router, "primary")
+    observe.wait_active("home-uplink", "primary")
 
-    # 2. Default route in the group's table is a scope-link route
-    #    out of wan0 (point-to-point: no gateway, no `via`).
-    #
-    #    wait_for_active fires the moment state.json shows
-    #    active=primary, but `ip link set wan0 up` also kicks
-    #    systemd-networkd into reconfiguring wan0; the kernel-side
-    #    route can briefly disappear and re-appear around that
-    #    reconfigure. Poll for the route to be in place rather
-    #    than racing networkd.
-    table = router.succeed(
-        "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
-    ).strip()
-    router.wait_until_succeeds(
-        f"ip -4 route show table {table} | grep -q ' dev wan0'", timeout=10
-    )
-    route = router.succeed(f"ip -4 route show table {table}")
-    assert "wan0" in route and "via" not in route, (
-        f"initial table {table} route mismatch (want scope-link via wan0):\n{route}"
-    )
+    # 2. Verify the direct default route in the kernel, allowing networkd
+    # reconfiguration to settle after the link comes up.
+    observe.wait_default_route("v4", "wan0", group="home-uplink")
 
     # 3. Induce carrier-down on the primary. ip link set <if>
     #    carrier off is supported on dummy in modern kernels;
@@ -174,27 +144,12 @@ pkgs.testers.runNixOSTest {
     # 4. Daemon switches to backup. Decision is rtnl-driven so
     #    the switch should happen within rtnl propagation +
     #    apply latency — single-digit seconds.
-    wait_for_active(router, "backup")
+    observe.wait_active("home-uplink", "backup")
 
-    # 5. New default route is a scope-link route out of wan1.
-    router.wait_until_succeeds(
-        f"ip -4 route show table {table} | grep -q ' dev wan1'", timeout=10
-    )
-    route = router.succeed(f"ip -4 route show table {table}")
-    assert "wan1" in route and "via" not in route, (
-        f"failover-table {table} route mismatch (want scope-link via wan1):\n{route}"
-    )
+    # 5. The default route must now use the backup interface.
+    observe.wait_default_route("v4", "wan1", group="home-uplink")
 
-    # 6. wanwatch_group_decisions_total has incremented for the
-    #    "carrier" reason — proves the metrics path also reacted.
-    #    Poll the scrape: prometheus Vec series only materialize on
-    #    first .Inc() call, so under runner pressure the series can
-    #    appear shortly after the Decision lands.
-    router.wait_until_succeeds(
-        "${pkgs.curl}/bin/curl -s --unix-socket /run/wanwatch/metrics.sock "
-        "http://wanwatch/metrics | "
-        "grep -q 'wanwatch_group_decisions_total{group=\"home-uplink\",reason=\"carrier\"}'",
-        timeout=10,
-    )
+    # 6. The carrier-reason counter must appear on the live endpoint.
+    observe.wait_decisions("home-uplink", "carrier", minimum=1)
   '';
 }

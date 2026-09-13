@@ -85,20 +85,8 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
-
-    def wait_for(predicate, timeout=15, what="condition"):
-        for _ in range(timeout * 4):
-            try:
-                if predicate():
-                    return
-            except Exception:
-                pass
-            router.execute("sleep 0.25")
-        raise AssertionError(f"{what} never became true within {timeout}s")
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     start_all()
     isp.wait_for_unit("multi-user.target")
@@ -106,36 +94,17 @@ pkgs.testers.runNixOSTest {
     router.wait_for_unit("systemd-networkd.service")
     router.succeed("ip link set eth1 up")
 
-    # 1. The kernel really did install the default route the
-    #    daemon needs to discover. Poll: systemd-networkd may
-    #    still be applying the Gateway= directive when
-    #    wait_for_unit returns. Mirrors gateway-discovery-v6.nix.
-    router.wait_until_succeeds(
-        "ip -4 route show default | grep -q 'via 192.168.1.1'", timeout=15
+    # networkd must first install the main-table default to discover.
+    observe.wait_default_route(
+        "v4", "eth1", gateway="192.168.1.1", timeout=15
     )
 
-    # 2. The daemon publishes state.json with schema=1 + the
-    #    discovered gateway in wans.uplink.gateways.v4.
-    def has_gateway():
-        state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-        if state["schema"] != 1:
-            return False
-        return state["wans"]["uplink"]["gateways"]["v4"] == "192.168.1.1"
+    # State must publish the discovered next-hop under schema 1.
+    observe.wait_gateway("uplink", "v4", "192.168.1.1")
 
-
-    wait_for(has_gateway, what="state.json gateway")
-
-    # 3. The daemon wrote a `via 192.168.1.1` default route into
-    #    the group's table — proves the non-PtP apply path works
-    #    end-to-end (RouteEvent → cache → applyRoutes).
-    def has_group_default():
-        table = router.succeed(
-            "jq -r '.groups.home.table' /etc/wanwatch/config.json"
-        ).strip()
-        out = router.succeed(f"ip -4 route show table {table}")
-        return "192.168.1.1" in out and "eth1" in out
-
-
-    wait_for(has_group_default, what="group-table default route")
+    # Independently verify the non-PtP Apply path in the Group's kernel table.
+    observe.wait_default_route(
+        "v4", "eth1", group="home", gateway="192.168.1.1", timeout=15
+    )
   '';
 }

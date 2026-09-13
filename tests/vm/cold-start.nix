@@ -92,52 +92,8 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
-
-    def wait_for_active(router, want, timeout=15):
-        """Poll state.json until groups.home-uplink.active == want."""
-        for _ in range(timeout * 4):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            active = json.loads(out)["groups"]["home-uplink"]["active"]
-            if active == want:
-                return
-            router.execute("sleep 0.25")
-        raise AssertionError(
-            f"active never reached {want!r}; last state =\n{out}"
-        )
-
-
-    def scrape(router):
-        """Fetch the Prometheus scrape body over the Unix socket."""
-        return router.succeed(
-            "${pkgs.curl}/bin/curl -s --unix-socket "
-            "/run/wanwatch/metrics.sock http://wanwatch/metrics"
-        )
-
-
-    def metric(body, series):
-        """Value of an exact `name{labels}` series, or 0.0 if absent
-        — Prometheus elides Vec series with no observations."""
-        prefix = series + " "
-        for line in body.splitlines():
-            if line.startswith(prefix):
-                return float(line[len(prefix):])
-        return 0.0
-
-
-    def wait_for_metric(router, series, want, timeout=30):
-        """Poll the scrape until `series` reaches `want`."""
-        for _ in range(timeout * 4):
-            if metric(scrape(router), series) == want:
-                return
-            router.execute("sleep 0.25")
-        raise AssertionError(
-            f"{series} never reached {want}; last scrape =\n"
-            + scrape(router)
-        )
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     start_all()
     isp.wait_for_unit("multi-user.target")
@@ -165,50 +121,35 @@ pkgs.testers.runNixOSTest {
 
     # 1. Cold start: primary is Selected on carrier alone, before
     #    any probe has cooked (PLAN §8 cold-start carrier health).
-    wait_for_active(router, "primary")
+    observe.wait_active("home-uplink", "primary")
 
     # 2. Let the first good probe Window land and seed the
     #    hysteresis. wanwatch_wan_family_healthy reaching 1 proves a
     #    ProbeResult has been folded in with a healthy verdict.
-    #    (client_golang sorts label pairs alphabetically in the
-    #    scrape, so it's `family` before `wan`.)
-    wait_for_metric(
-        router,
-        'wanwatch_wan_family_healthy{family="v4",wan="primary"}',
-        1.0,
-    )
+    observe.wait_family_metrics("primary", {"v4": True}, timeout=30)
 
     # 3. The load-bearing assertion. The first probe Window seeds
     #    the hysteresis (PLAN §8) instead of ramping it from false,
     #    so the WAN's effective health never changes and no
     #    health-reason Decision is emitted. Pre-fix the ramp drops
     #    the WAN for consecutiveUp-1 cycles → a spurious down + up.
-    body = scrape(router)
-    health = metric(
-        body,
-        'wanwatch_group_decisions_total'
-        '{group="home-uplink",reason="health"}',
-    )
+    health = observe.decisions("home-uplink", "health")
     assert health == 0, (
         f"health-reason Decisions = {health}, want 0 — a healthy WAN "
         f"flapped during cold-start warm-up (hysteresis ramped "
-        f"instead of seeding). Scrape:\n{body}"
+        f"instead of seeding)."
     )
 
     # 4. The cold-start carrier Selection did register as a Decision
     #    — the foil the anti-flap check above is measured against.
-    carrier = metric(
-        body,
-        'wanwatch_group_decisions_total'
-        '{group="home-uplink",reason="carrier"}',
-    )
+    carrier = observe.decisions("home-uplink", "carrier")
     assert carrier >= 1, (
         f"carrier-reason Decisions = {carrier}, want >= 1 (the "
         f"cold-start Selection)"
     )
 
     # 5. Sanity: the Selection held throughout.
-    state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+    state = observe.state()
     active = state["groups"]["home-uplink"]["active"]
     assert active == "primary", f"active = {active!r}, want 'primary'"
   '';

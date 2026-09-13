@@ -46,7 +46,7 @@ pkgs.testers.runNixOSTest {
         address = [ "fd00:1::1/64" ];
         # Disable DAD on the netdev — the framework's default
         # accept_dad=1 means the address spends ~1 s in tentative
-        # state, racing the router's wait_until_succeeds below.
+        # state, racing the router's route observation below.
         networkConfig.IPv6AcceptRA = false;
         linkConfig.RequiredForOnline = "no";
       };
@@ -106,49 +106,8 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
-
-    def diagnostics(router):
-        """Dump state.json + every routing table + the daemon's recent
-        journal at failure time so the CI log captures enough to
-        distinguish 'daemon never received RTM_NEWROUTE' from 'daemon
-        received it but decoded Gw=nil' from 'state.json wasn't
-        rewritten'."""
-        try:
-            state = router.succeed("cat /run/wanwatch/state.json")
-        except Exception as e:
-            state = f"<failed to read state.json: {e}>"
-        try:
-            routes = router.succeed("ip -6 route show table all")
-        except Exception as e:
-            routes = f"<failed: {e}>"
-        try:
-            journal = router.succeed(
-                "journalctl -u wanwatch.service --no-pager -n 50 -o cat"
-            )
-        except Exception as e:
-            journal = f"<failed: {e}>"
-        return (
-            "===== state.json =====\n" + state
-            + "\n===== ip -6 route show table all =====\n" + routes
-            + "\n===== last 50 wanwatch.service log lines =====\n" + journal
-        )
-
-
-    def wait_for(predicate, timeout=15, what="condition"):
-        for _ in range(timeout * 4):
-            try:
-                if predicate():
-                    return
-            except Exception:
-                pass
-            router.execute("sleep 0.25")
-        raise AssertionError(
-            f"{what} never became true within {timeout}s\n" + diagnostics(router)
-        )
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     start_all()
     isp.wait_for_unit("multi-user.target")
@@ -160,43 +119,24 @@ pkgs.testers.runNixOSTest {
     # regardless of the per-network override. Setting the sysctl
     # imperatively guarantees the address is usable on the next
     # check without a one-second tentative window racing the
-    # wait_until_succeeds.
+    # route observation.
     isp.succeed("sysctl -w net.ipv6.conf.eth1.accept_dad=0")
     router.succeed("sysctl -w net.ipv6.conf.eth1.accept_dad=0")
 
     router.succeed("ip link set eth1 up")
     isp.succeed("ip link set eth1 up")
 
-    # 1. The kernel really did install the default route the
-    #    daemon needs to discover. Poll: systemd-networkd may
-    #    still be applying the Gateway= directive when
-    #    wait_for_unit returns.
-    router.wait_until_succeeds(
-        "ip -6 route show default | grep -q 'via fd00:1::1'", timeout=15
+    # networkd must first install the main-table default to discover.
+    observe.wait_default_route(
+        "v6", "eth1", gateway="fd00:1::1", timeout=15
     )
 
-    # 2. The daemon publishes state.json with schema=1 + the
-    #    discovered gateway in wans.uplink.gateways.v6.
-    def has_gateway():
-        state = json.loads(router.succeed("cat /run/wanwatch/state.json"))
-        if state["schema"] != 1:
-            return False
-        return state["wans"]["uplink"]["gateways"]["v6"] == "fd00:1::1"
+    # State must publish the discovered next-hop under schema 1.
+    observe.wait_gateway("uplink", "v6", "fd00:1::1")
 
-
-    wait_for(has_gateway, what="state.json v6 gateway")
-
-    # 3. The daemon wrote a `via fd00:1::1` default route into
-    #    the group's table — proves the non-PtP v6 apply path
-    #    works end-to-end (RouteEvent → cache → applyRoutes).
-    def has_group_default():
-        table = router.succeed(
-            "jq -r '.groups.home.table' /etc/wanwatch/config.json"
-        ).strip()
-        out = router.succeed(f"ip -6 route show table {table}")
-        return "fd00:1::1" in out and "eth1" in out
-
-
-    wait_for(has_group_default, what="group-table v6 default route")
+    # Independently verify the non-PtP Apply path in the Group's kernel table.
+    observe.wait_default_route(
+        "v6", "eth1", group="home", gateway="fd00:1::1", timeout=15
+    )
   '';
 }

@@ -101,21 +101,8 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
-
-    def wait_for_active(router, want, timeout=15):
-        for _ in range(timeout * 4):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            active = json.loads(out)["groups"]["home-uplink"]["active"]
-            if active == want:
-                return
-            router.execute("sleep 0.25")
-        raise AssertionError(
-            f"active never reached {want!r}; last state =\n{out}"
-        )
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     def carrier(router, iface, state):
         if router.execute(f"ip link set {iface} carrier {state}")[0] != 0:
@@ -130,33 +117,20 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set wan1 up")
-    wait_for_active(router, "primary")
+    observe.wait_active("home-uplink", "primary")
 
     carrier(router, "wan0", "off")
-    wait_for_active(router, "backup")
+    observe.wait_active("home-uplink", "backup")
 
     # The recovery arm: bring carrier back on. With cold-start
     # carrier-only health, restoring carrier on the higher-priority
     # member should flip the Selection back without waiting for
     # any probe sample.
     carrier(router, "wan0", "on")
-    wait_for_active(router, "primary")
+    observe.wait_active("home-uplink", "primary")
 
-    # Decisions counter should now show two carrier-driven changes
-    # (down→backup, up→primary). wait_for_active only proves the
-    # latest state.json was rewritten, not that the metric counter's
-    # second Inc has surfaced — poll the metric to its expected
-    # value rather than reading a single snapshot.
-    # awk note: `exit N` inside a pattern action does NOT exit
-    # immediately — it transfers control to the END block, whose
-    # `exit 1` then overrides. Use a flag and let the END block be
-    # the only exit point.
-    router.wait_until_succeeds(
-        "${pkgs.curl}/bin/curl -s --unix-socket /run/wanwatch/metrics.sock "
-        "http://wanwatch/metrics | "
-        "awk '/^wanwatch_group_decisions_total\\{group=\"home-uplink\",reason=\"carrier\"\\}/ "
-        "{ if ($2+0 >= 2) found=1 } END { exit !found }'",
-        timeout=10,
-    )
+    # State publication and the live counter can become visible separately.
+    # Both carrier-driven changes (down→backup, up→primary) must be counted.
+    observe.wait_decisions("home-uplink", "carrier", minimum=2)
   '';
 }

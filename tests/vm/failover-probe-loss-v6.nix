@@ -162,78 +162,8 @@ pkgs.testers.runNixOSTest {
       };
   };
 
-  testScript = ''
-    import json
-
-
-    def wait_for_active(router, want, timeout=10):
-        for _ in range(timeout * 10):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            active = json.loads(out)["groups"]["home-uplink"]["active"]
-            if active == want:
-                return
-            router.execute("sleep 0.1")
-        raise AssertionError(
-            f"active never reached {want!r}; last state =\n{out}"
-        )
-
-
-    def wait_for_wan_healthy(router, wan, timeout=15):
-        for _ in range(timeout * 10):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            if json.loads(out)["wans"][wan]["healthy"]:
-                return
-            router.execute("sleep 0.1")
-        raise AssertionError(
-            f"wan {wan!r} never became probe-healthy; last state =\n{out}"
-        )
-
-
-    def scrape(router):
-        return router.succeed(
-            "${pkgs.curl}/bin/curl -s --unix-socket "
-            "/run/wanwatch/metrics.sock http://wanwatch/metrics"
-        )
-
-
-    def metric(body, series):
-        prefix = series + " "
-        for line in body.splitlines():
-            if line.startswith(prefix):
-                return float(line[len(prefix):])
-        return 0.0
-
-
-    def wait_for_probe_loss(router, wan, family, low, high=1.0, timeout=10):
-        """Poll the live Prometheus gauge until it enters [low, high]."""
-        series = (
-            'wanwatch_probe_loss_ratio{family="'
-            + family
-            + '",wan="'
-            + wan
-            + '"}'
-        )
-        prefix = series + " "
-        last = None
-        for _ in range(timeout * 10):
-            body = scrape(router)
-            if any(line.startswith(prefix) for line in body.splitlines()):
-                last = metric(body, series)
-                if low <= last <= high:
-                    return last
-            router.execute("sleep 0.1")
-        raise AssertionError(
-            f"{series} never entered [{low}, {high}]; last value = {last}"
-        )
-
-
-    def health_decisions(router, group):
-        series = (
-            'wanwatch_group_decisions_total{group="'
-            + group + '",reason="health"}'
-        )
-        return metric(scrape(router), series)
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     start_all()
     isp1.wait_for_unit("multi-user.target")
@@ -268,36 +198,33 @@ pkgs.testers.runNixOSTest {
 
     # ==== Phase A — cold-start cook + 100% loss ⇒ failover ====
 
-    wait_for_active(router, "primary")
-    wait_for_wan_healthy(router, "primary")
-    wait_for_wan_healthy(router, "backup")
+    observe.wait_active("home-uplink", "primary", timeout=10)
+    observe.wait_healthy("primary")
+    observe.wait_healthy("backup")
 
-    before_a = health_decisions(router, "home-uplink")
+    before_a = observe.decisions("home-uplink", "health")
     router.succeed("tc qdisc add dev eth1 root netem loss 100%")
-    wait_for_active(router, "backup")
-    after_a = health_decisions(router, "home-uplink")
-    assert after_a > before_a, (
-        f"phase A: health-decisions did not advance: {before_a} → {after_a}"
-    )
+    observe.wait_active("home-uplink", "backup", timeout=10)
+    observe.wait_decisions("home-uplink", "health", minimum=before_a + 1)
     # state.json is transition-driven, not a live probe-stat stream.
     # The Decision snapshot must show the unhealthy verdict and the
     # configured 25% down threshold, but it can freeze below 50% when
     # hysteresis flips before the 100%-loss window fully converges.
-    state_a = json.loads(router.succeed("cat /run/wanwatch/state.json"))
+    state_a = observe.state()
     family_a = state_a["wans"]["primary"]["families"]["v6"]
     assert family_a["healthy"] is False, f"phase A family state = {family_a}"
     assert family_a["lossRatio"] >= 0.25, (
         f"phase A transition lossRatio = {family_a['lossRatio']}, want ≥ 0.25"
     )
     # Per-sample stats continue updating only on the Prometheus surface.
-    wait_for_probe_loss(router, "primary", "v6", 0.5)
+    observe.wait_probe_loss("primary", "v6", 0.5)
 
     # ==== Phase B — clear netem ⇒ recovery ====
 
     router.succeed("tc qdisc del dev eth1 root")
-    wait_for_active(router, "primary")
+    observe.wait_active("home-uplink", "primary", timeout=10)
     # Poll live probe stats; state.json changes only on transitions.
-    wait_for_probe_loss(router, "primary", "v6", 0.0, 0.10)
+    observe.wait_probe_loss("primary", "v6", 0.0, 0.10)
 
     # ==== Phase C — blip suppression (REMOVED) ====
     #
@@ -336,12 +263,12 @@ pkgs.testers.runNixOSTest {
 
     # D1 — fail
     router.succeed("tc qdisc add dev eth1 root netem loss 50%")
-    wait_for_active(router, "backup", timeout=15)
+    observe.wait_active("home-uplink", "backup", timeout=15)
     # Soft window: 50% configured loss can give anywhere from 30%
     # to 70% over a 10-sample window — assert "above the 25%
     # threshold," not an exact value. Read the live metric because
     # state.json intentionally freezes probe stats between transitions.
-    wait_for_probe_loss(router, "primary", "v6", 0.25)
+    observe.wait_probe_loss("primary", "v6", 0.25)
 
     # ==== Phase D2 — band-pass hold (REMOVED) ====
     #
@@ -374,8 +301,8 @@ pkgs.testers.runNixOSTest {
 
     # D3 — clear ⇒ recovery
     router.succeed("tc qdisc del dev eth1 root")
-    wait_for_active(router, "primary", timeout=15)
-    wait_for_probe_loss(router, "primary", "v6", 0.0, 0.10)
+    observe.wait_active("home-uplink", "primary", timeout=15)
+    observe.wait_probe_loss("primary", "v6", 0.0, 0.10)
 
     # ==== Phase E — per-target aggregation ====
     #
@@ -387,15 +314,15 @@ pkgs.testers.runNixOSTest {
     # healthy and this would never trigger.
 
     isp1.succeed("ip -6 addr del fd00:1::2/64 dev eth1")
-    wait_for_active(router, "backup", timeout=15)
+    observe.wait_active("home-uplink", "backup", timeout=15)
     # Aggregate should be in [0.3, 0.7] (one target ~0%, one ~100%
     # averaged). Poll the live metric so window convergence after the
     # Decision remains observable without forcing state.json writes.
-    wait_for_probe_loss(router, "primary", "v6", 0.3, 0.7)
+    observe.wait_probe_loss("primary", "v6", 0.3, 0.7)
 
     isp1.succeed("ip -6 addr add fd00:1::2/64 dev eth1")
     router.wait_until_succeeds("ping -6 -c 1 -W 1 fd00:1::2", timeout=10)
-    wait_for_active(router, "primary", timeout=15)
+    observe.wait_active("home-uplink", "primary", timeout=15)
 
     # ==== Phase F — daemon restart ====
     #
@@ -409,15 +336,13 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("systemctl restart wanwatch.service")
     router.wait_for_unit("wanwatch.service")
-    # wait_for_active polls state.json's `active` field — proves
-    # both freshness (was rewritten after the restart) and value.
-    # A bare wait_for_file would only prove existence and could
-    # match the pre-restart file before the new bootstrap commits.
-    wait_for_active(router, "primary", timeout=15)
+    # The service's READY notification gates the new bootstrap publication;
+    # now wait for its cold-start Selection to become primary.
+    observe.wait_active("home-uplink", "primary", timeout=15)
 
     # Probes converge again — the WAN flips back to probe-healthy
     # within the window-cook time (~2s) + consecUp (600ms).
-    wait_for_wan_healthy(router, "primary", timeout=15)
-    wait_for_wan_healthy(router, "backup", timeout=15)
+    observe.wait_healthy("primary", timeout=15)
+    observe.wait_healthy("backup", timeout=15)
   '';
 }
