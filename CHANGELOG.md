@@ -6,7 +6,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ### Fixed
 
-- Gateway discovery now subscribes to route changes before taking its initial snapshot. Default routes installed during daemon startup are retained, and queued additions/deletions are delivered after the snapshot, preventing a missed Gateway from indefinitely deferring a Group route write.
+- Gateway discovery now subscribes to route changes before taking its initial snapshot. Default routes installed during daemon startup are retained, preventing a missed Gateway from indefinitely deferring a Group route write. Buffered and subsequent notifications trigger current-route reads, so obsolete additions/deletions cannot regress a newer Gateway in State or a Group's route table.
 
 ### Changed
 

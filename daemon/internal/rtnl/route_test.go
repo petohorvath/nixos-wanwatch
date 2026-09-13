@@ -291,7 +291,10 @@ func TestRouteRunLoopForwardsEvent(t *testing.T) {
 	updates <- mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil)
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- s.runLoop(ctx, updates, out) }()
+	listFn := func(netlink.Link, int) ([]netlink.Route, error) {
+		return []netlink.Route{mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil).Route}, nil
+	}
+	go func() { errCh <- s.runLoop(ctx, updates, listFn, out) }()
 
 	select {
 	case ev := <-out:
@@ -314,7 +317,7 @@ func TestRouteRunLoopReturnsOnUpdatesClosed(t *testing.T) {
 	out := make(chan RouteEvent, 1)
 	close(updates)
 
-	err := (&RouteSubscriber{}).runLoop(context.Background(), updates, out)
+	err := (&RouteSubscriber{}).runLoop(context.Background(), updates, emptyRouteList, out)
 	if !errors.Is(err, errSubscriptionClosed) {
 		t.Fatalf("runLoop on closed channel = %v, want errSubscriptionClosed", err)
 	}
@@ -327,7 +330,7 @@ func TestRouteRunLoopCancelsBetweenUpdates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := (&RouteSubscriber{}).runLoop(ctx, updates, out)
+	err := (&RouteSubscriber{}).runLoop(ctx, updates, emptyRouteList, out)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
@@ -372,7 +375,7 @@ func TestRouteSubscriberStartWrapsSubscribeError(t *testing.T) {
 	subscribe := func(chan<- netlink.RouteUpdate, <-chan struct{}, netlink.RouteSubscribeOptions) error {
 		return want
 	}
-	_, err := (&RouteSubscriber{}).startVia(context.Background(), subscribe, emptyRouteList, make(chan RouteEvent, 1))
+	_, err := (&RouteSubscriber{}).StartWith(context.Background(), subscribe, emptyRouteList, make(chan RouteEvent, 1))
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want subscribe-error chained via %%w", err)
 	}
@@ -406,7 +409,18 @@ func TestRouteSubscriberStartWiresSubscribeToRunLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done, err := s.startVia(ctx, subscribe, emptyRouteList, out)
+	listed := false
+	listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
+		if family != unix.AF_INET {
+			return nil, nil
+		}
+		if !listed {
+			listed = true
+			return nil, nil
+		}
+		return []netlink.Route{mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 7, nil).Route}, nil
+	}
+	done, err := s.StartWith(ctx, subscribe, listFn, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +512,7 @@ func TestRouteSubscriberStartSurfacesErrorCallbackCause(t *testing.T) {
 		close(ch)
 		return nil
 	}
-	done, err := (&RouteSubscriber{}).startVia(context.Background(), subscribe, emptyRouteList, make(chan RouteEvent, 1))
+	done, err := (&RouteSubscriber{}).StartWith(context.Background(), subscribe, emptyRouteList, make(chan RouteEvent, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,15 +547,24 @@ func TestRouteSubscriberStartCapturesGatewayDuringSnapshot(t *testing.T) {
 		closeRouteUpdatesOnStop(ch, done)
 		return nil
 	}
+	var installed []netlink.Route
 	listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
-		// The IPv6 snapshot is empty. A default route arrives just
-		// after it was taken, so only a live subscription can see it.
-		if family == unix.AF_INET6 && updates != nil {
-			updates <- mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET6, unix.RT_TABLE_MAIN, net.ParseIP("fd00:1::1"), 7, nil)
+		if family != unix.AF_INET6 {
+			return nil, nil
 		}
-		return nil, nil
+		if installed == nil {
+			// The IPv6 snapshot is empty. Install a route just after
+			// that read; only the already-open subscription catches it.
+			upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET6, unix.RT_TABLE_MAIN, net.ParseIP("fd00:1::1"), 7, nil)
+			installed = []netlink.Route{upd.Route}
+			if updates != nil {
+				updates <- upd
+			}
+			return nil, nil
+		}
+		return installed, nil
 	}
-	exited, err := s.startVia(ctx, subscribe, listFn, out)
+	exited, err := s.StartWith(ctx, subscribe, listFn, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +586,7 @@ func TestRouteSubscriberStartCapturesGatewayDuringSnapshot(t *testing.T) {
 	}
 }
 
-func TestRouteSubscriberStartOrdersSnapshotBeforeQueuedChanges(t *testing.T) {
+func TestRouteSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 	t.Parallel()
 	old := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET6, unix.RT_TABLE_MAIN, net.ParseIP("fd00:1::1"), 7, nil)
 	removed := old
@@ -572,6 +595,7 @@ func TestRouteSubscriberStartOrdersSnapshotBeforeQueuedChanges(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		snapshot []netlink.Route
+		current  []netlink.Route
 		queued   []netlink.RouteUpdate
 		want     []string
 	}{
@@ -584,19 +608,21 @@ func TestRouteSubscriberStartOrdersSnapshotBeforeQueuedChanges(t *testing.T) {
 		{
 			name:   "add then delete after empty snapshot",
 			queued: []netlink.RouteUpdate{old, removed},
-			want:   []string{"add fd00:1::1", "del fd00:1::1"},
+			want:   []string{"del fd00:1::1", "del fd00:1::1"},
 		},
 		{
 			name:     "replacement after snapshot",
 			snapshot: []netlink.Route{old.Route},
+			current:  []netlink.Route{replacement.Route},
 			queued:   []netlink.RouteUpdate{removed, replacement},
-			want:     []string{"add fd00:1::1", "del fd00:1::1", "add fd00:1::3"},
+			want:     []string{"add fd00:1::1", "add fd00:1::3", "add fd00:1::3"},
 		},
 		{
 			name:     "snapshot already includes queued changes",
 			snapshot: []netlink.Route{replacement.Route},
+			current:  []netlink.Route{replacement.Route},
 			queued:   []netlink.RouteUpdate{old, removed, replacement},
-			want:     []string{"add fd00:1::3", "add fd00:1::1", "del fd00:1::1", "add fd00:1::3"},
+			want:     []string{"add fd00:1::3", "add fd00:1::3", "add fd00:1::3", "add fd00:1::3"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -612,10 +638,15 @@ func TestRouteSubscriberStartOrdersSnapshotBeforeQueuedChanges(t *testing.T) {
 				updates = ch
 				return nil
 			}
+			listed := false
 			listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
 				if family != unix.AF_INET6 {
 					return nil, nil
 				}
+				if listed {
+					return tc.current, nil
+				}
+				listed = true
 				for _, upd := range tc.queued {
 					updates <- upd
 				}
@@ -623,7 +654,7 @@ func TestRouteSubscriberStartOrdersSnapshotBeforeQueuedChanges(t *testing.T) {
 				return tc.snapshot, nil
 			}
 			out := make(chan RouteEvent, len(tc.want))
-			exited, err := s.startVia(ctx, subscribe, listFn, out)
+			exited, err := s.StartWith(ctx, subscribe, listFn, out)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -673,7 +704,7 @@ func TestRouteSubscriberStartClosesSubscriptionOnSnapshotFailure(t *testing.T) {
 				}
 				return nil, nil
 			}
-			exited, err := (&RouteSubscriber{}).startVia(context.Background(), subscribe, listFn, make(chan RouteEvent, 1))
+			exited, err := (&RouteSubscriber{}).StartWith(context.Background(), subscribe, listFn, make(chan RouteEvent, 1))
 			if !errors.Is(err, want) || exited != nil {
 				t.Fatalf("Start = %v, %v; want no worker and wrapped snapshot failure", exited, err)
 			}
@@ -710,7 +741,7 @@ func TestRouteSubscriberStartCancelsBlockedDelivery(t *testing.T) {
 				return nil, nil
 			}
 			out := make(chan RouteEvent) // No consumer: every event send blocks.
-			exited, err := s.startVia(ctx, subscribe, listFn, out)
+			exited, err := s.StartWith(ctx, subscribe, listFn, out)
 			if phase == "snapshot" {
 				if !errors.Is(err, context.Canceled) || exited != nil {
 					t.Fatalf("Start = %v, %v; want no worker and context.Canceled", exited, err)
@@ -786,7 +817,7 @@ func TestRouteSubscriberStartSnapshotFailureUnblocksReceiver(t *testing.T) {
 				return nil, want
 			}
 			s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{7: "eth0"})
-			_, err := s.startVia(ctx, subscribe, listFn, make(chan RouteEvent))
+			_, err := s.StartWith(ctx, subscribe, listFn, make(chan RouteEvent))
 			if !errors.Is(err, want) {
 				t.Fatalf("Start = %v, want %v", err, want)
 			}
@@ -794,6 +825,75 @@ func TestRouteSubscriberStartSnapshotFailureUnblocksReceiver(t *testing.T) {
 			case <-finished:
 			case <-time.After(time.Second):
 				t.Fatal("netlink receiver stayed blocked after snapshot failure")
+			}
+		})
+	}
+}
+
+func TestRouteSubscriberReconcileFailureUnblocksReceiver(t *testing.T) {
+	t.Parallel()
+	for _, want := range []error{errors.New("route read failed"), netlink.ErrDumpInterrupted} {
+		t.Run(want.Error(), func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			finished := make(chan struct{})
+			upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 7, nil)
+			subscribe := func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, _ netlink.RouteSubscribeOptions) error {
+				ch <- upd
+				for i := 1; i < cap(ch); i++ {
+					ch <- netlink.RouteUpdate{}
+				}
+				go func() {
+					defer close(finished)
+					defer close(ch)
+					// Two sends keep the receiver blocked after runLoop
+					// takes the first update and the fresh read fails.
+					for range 2 {
+						select {
+						case ch <- netlink.RouteUpdate{}:
+						case <-ctx.Done():
+							return
+						}
+					}
+					<-done
+				}()
+				return nil
+			}
+			listed := false
+			listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
+				if family != unix.AF_INET {
+					return nil, nil
+				}
+				if !listed {
+					listed = true
+					return nil, nil
+				}
+				// Interrupted dumps may return partial results with an
+				// error. None of those routes may reach the consumer.
+				return []netlink.Route{upd.Route}, want
+			}
+			s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{7: "eth0"})
+			out := make(chan RouteEvent, 1)
+			exited, err := s.StartWith(ctx, subscribe, listFn, out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-exited:
+				if !errors.Is(err, want) || !strings.Contains(err.Error(), "rtnl: RouteList") {
+					t.Errorf("subscriber = %v; want wrapped %v", err, want)
+				}
+			case <-ctx.Done():
+				t.Fatal("subscriber stayed blocked after route read failure")
+			}
+			select {
+			case <-finished:
+			case <-ctx.Done():
+				t.Fatal("netlink receiver stayed blocked after route read failure")
+			}
+			if len(out) != 0 {
+				t.Error("failed route read emitted a Gateway observation")
 			}
 		})
 	}

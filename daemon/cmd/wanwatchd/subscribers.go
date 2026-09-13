@@ -41,9 +41,9 @@ func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cf
 // gateway on each WAN's interface from the kernel's main RIB.
 //
 // Start establishes the live subscription before queuing the initial
-// route snapshot synchronously. Defaults arriving during the snapshot
-// are buffered and delivered after it, so gateway discovery has no
-// gap between its initial dump and live updates.
+// route snapshot synchronously. Buffered and subsequent notifications
+// trigger current-route reads, so startup captures new defaults without
+// exposing obsolete route history to Apply or State.
 func startRouteSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.RouteEvent, error) {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.RouteSubscriber{Interfaces: watched}

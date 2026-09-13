@@ -14,14 +14,14 @@ import (
 // routeUpdateBuffer is the netlink RouteUpdate channel capacity.
 // Sized like updateChanBuffer: enough to absorb a route-flap burst
 // when an uplink renegotiates without the library's receive
-// goroutine blocking. Live updates queue here during the startup
-// snapshot and are processed after its events.
+// goroutine blocking. Notifications queue here during the startup
+// snapshot and trigger current-route reads afterward.
 const routeUpdateBuffer = 256
 
 // RouteSubscriber owns an rtnetlink RTNLGRP_IPV4_ROUTE +
 // RTNLGRP_IPV6_ROUTE subscription. It filters down to default
 // routes installed in the main routing table on watched interfaces
-// and emits a `RouteEvent` for every add/del.
+// and emits RouteEvents describing their current state.
 //
 // Concurrent subscriptions on the same RouteSubscriber are not supported.
 type RouteSubscriber struct {
@@ -44,21 +44,25 @@ type RouteSubscriber struct {
 }
 
 // Start subscribes before taking the initial v4 + v6 route snapshot,
-// queues its default routes on out, then starts forwarding live updates.
-// Updates received during the snapshot stay buffered until all snapshot
-// events have been queued, preserving add/delete order without racing
-// the interface cache.
+// queues its default routes on out, then reconciles live notifications.
+// Each matching notification triggers a current-route read: its payload may
+// describe history already superseded by the snapshot, even when it reaches
+// the receiver after Start returns. Replaying that payload could regress
+// consumers that immediately Apply the Gateway. Both phases own the
+// interface cache sequentially.
 //
 // Start returns after queuing the snapshot. Unless a consumer is already
 // reading, out must have room for every matching route. The returned
 // channel receives one terminal error and closes when ctx is cancelled
 // or the subscription fails. Start does not close out.
 func (s *RouteSubscriber) Start(ctx context.Context, out chan<- RouteEvent) (<-chan error, error) {
-	return s.startVia(ctx, netlink.RouteSubscribeWithOptions, netlink.RouteList, out)
+	return s.StartWith(ctx, netlink.RouteSubscribeWithOptions, netlink.RouteList, out)
 }
 
-// startVia is the complete startup path with injectable netlink operations.
-func (s *RouteSubscriber) startVia(ctx context.Context, subscribe routeSubscribeFn, listFn routeListFn, out chan<- RouteEvent) (<-chan error, error) {
+// StartWith runs Start with supplied netlink operations. The subscription must
+// close its update channel when done closes, just like RouteSubscribeWithOptions.
+// This seam lets integration tests exercise discovery and its consumers together.
+func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscribeFn, listFn routeListFn, out chan<- RouteEvent) (<-chan error, error) {
 	updates := make(chan netlink.RouteUpdate, routeUpdateBuffer)
 	done := make(chan struct{})
 	var subErr atomic.Pointer[error]
@@ -91,7 +95,7 @@ func (s *RouteSubscriber) startVia(ctx context.Context, subscribe routeSubscribe
 	exited := make(chan error, 1)
 	go func() {
 		defer close(exited)
-		err := translateSubClose(s.runLoop(ctx, updates, out), &subErr, "route")
+		err := translateSubClose(s.runLoop(ctx, updates, listFn, out), &subErr, "route")
 		stop()
 		exited <- err
 	}()
@@ -132,11 +136,10 @@ func (s *RouteSubscriber) primeVia(ctx context.Context, listFn routeListFn, out 
 	return nil
 }
 
-// runLoop drains `updates`, folds each via handleUpdate, and
-// pushes resulting events to `out`. Exits on ctx cancellation or
-// when `updates` closes. Split from Start so tests can drive it
-// without a netlink socket.
-func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.RouteUpdate, out chan<- RouteEvent) error {
+// runLoop treats matching updates as invalidations, reads the affected
+// interface/family's current default, and queues that observation on out.
+// It exits on cancellation, a failed route read, or subscription closure.
+func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.RouteUpdate, listFn routeListFn, out chan<- RouteEvent) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -149,6 +152,10 @@ func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Ro
 			if !emit {
 				continue
 			}
+			ev, err := s.reconcileVia(ctx, listFn, ev)
+			if err != nil {
+				return err
+			}
 			select {
 			case out <- ev:
 			case <-ctx.Done():
@@ -156,6 +163,29 @@ func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Ro
 			}
 		}
 	}
+}
+
+// reconcileVia returns an Add for the current default, or a Del only if
+// the interface/family has none. A stale delete must not clear a replacement.
+func (s *RouteSubscriber) reconcileVia(ctx context.Context, listFn routeListFn, ev RouteEvent) (RouteEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return RouteEvent{}, err
+	}
+	routes, err := listFn(nil, int(ev.Family))
+	if err != nil {
+		return RouteEvent{}, fmt.Errorf("rtnl: RouteList family=%d: %w", ev.Family, err)
+	}
+	ev.Op = RouteEventDel
+	for _, route := range routes {
+		current, emit := s.handleUpdate(netlink.RouteUpdate{Type: unix.RTM_NEWROUTE, Route: route})
+		if emit && current.Iface == ev.Iface && current.Family == ev.Family {
+			// Match the snapshot's last default for this pair when the
+			// kernel lists more than one, without emitting each candidate.
+			ev = current
+		}
+	}
+	ev.Time = time.Now().UTC()
+	return ev, nil
 }
 
 // handleUpdate folds one RouteUpdate into a RouteEvent.

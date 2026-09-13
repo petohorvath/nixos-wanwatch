@@ -145,9 +145,14 @@ changed family and produce no new Decision or Hook.
 
 Gateway discovery opens its live route subscription before listing the
 kernel's existing IPv4 and IPv6 routes. It queues snapshot events before
-the event loop starts, then forwards buffered live additions and deletions
-in receive order. The route subscriber owns both phases so a route installed
-during startup cannot fall between the snapshot and subscription.
+the event loop starts. Each matching notification then triggers a fresh
+route read for the affected interface/family. The subscriber emits the current
+default, or a deletion only when none remains. Buffered history, including
+messages delivered by the receiver after startup, cannot replay an obsolete
+Gateway over a newer snapshot and into Apply or State. Failed or interrupted
+reads terminate the subscriber through the existing subsystem restart path.
+The route subscriber owns both phases so a route installed during startup
+cannot fall between the snapshot and subscription.
 
 ## Data flow on a switch
 
