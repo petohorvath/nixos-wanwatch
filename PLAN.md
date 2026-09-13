@@ -673,9 +673,17 @@ both families per Decision.
 ### `internal/state`
 
 Atomic JSON writer (write to `.tmp` + `os.Rename`) for
-`/run/wanwatch/state.json`. Hook runner — enumerates
-`/etc/wanwatch/hooks/{up,down,switch}.d/*`, executes each with the
-env vars from §5.5, captures exit status, applies a 5s timeout.
+`/run/wanwatch/state.json`. `HookNotifier` accepts captured Decision
+data through `Notify` and owns ordered, best-effort delivery. Its
+32-event queue drops the newest event when full, keeping script
+execution off the event loop. `Close` drains accepted events; daemon
+context cancellation kills in-flight scripts and discards queued
+events. The execution adapter stays private to `internal/state` —
+it enumerates `/etc/wanwatch/hooks/{up,down,switch}.d/*`, runs up to
+eight executable files in lexicographic order with the env vars from
+§5.5 and the configured per-hook timeout (5s by default), and captures
+exit status and bounded output. The notifier logs failures and skipped
+scripts and records Hook invocation metrics.
 
 ### `internal/metrics`
 

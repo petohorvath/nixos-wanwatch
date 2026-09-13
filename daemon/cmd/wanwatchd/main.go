@@ -7,7 +7,7 @@
 // File layout:
 //   - main.go         — process lifecycle (flags, logging, signals)
 //   - daemon.go       — daemon struct + Decision pipeline (handlers,
-//     recompute, applyRoutes, writeStateSnapshot, runHooks)
+//     recompute, applyRoutes, writeStateSnapshot, notifyHooks)
 //   - probers.go      — startProbers + probe-target helpers
 //     (identKeysFor, targetsFor, familiesFromTargets)
 //   - subscribers.go  — startLinkSubscriber, startRouteSubscriber
@@ -141,7 +141,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 
 	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
 
-	d := newDaemon(&cfg, mreg, logger)
+	d := newDaemon(ctx, &cfg, mreg, logger)
 	if err := d.bootstrap(ctx); err != nil {
 		cancel(fmt.Errorf("bootstrap: %w", err))
 		return exitError(ctx, metricsDone, logger)
@@ -176,7 +176,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 	go runWatchdog(ctx, logger, watchdogChallenges)
 
 	eventLoop(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
-	d.stopHooks()
+	d.hooks.Close()
 	return exitError(ctx, metricsDone, logger)
 }
 

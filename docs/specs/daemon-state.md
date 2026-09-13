@@ -129,9 +129,12 @@ Hooks under `<hooksDir>/{up,down,switch}.d/*` receive the following env vars on 
 
 ### Hook execution
 
+- The daemon submits captured Decision data after Apply. Accepted notifications run in Decision order on a worker, retaining their captured timestamps. The queue holds 32 waiting events; a full queue drops the newest event and logs a warning.
 - Files are executed in lexicographic order (`a-first.sh`, `b-second.sh`, …) — matches `run-parts` convention.
-- Each invocation gets a fresh process with a 5-second timeout (`state.DefaultHookTimeout`).
+- At most eight executable files run per event; the remaining files are skipped and logged.
+- Each invocation gets a fresh process with the configured `global.hookTimeoutMs` timeout (5 seconds by default, `state.DefaultHookTimeout`).
 - Non-zero exits and timeouts are logged + counted via `wanwatch_hook_invocations_total{event,result}` but do not abort the apply transaction. Hooks are notifications, not gates.
+- Daemon shutdown cancels in-flight scripts, kills their process groups, discards queued events, and waits for the worker to finish.
 
 ### Example hook
 

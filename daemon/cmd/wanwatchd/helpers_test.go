@@ -47,9 +47,14 @@ func readCounter(t *testing.T, c prometheus.Counter) float64 {
 // bootstrap() — netlink rule install isn't available in unit tests.
 func testDaemon(t *testing.T, cfg *config.Config) *daemon {
 	t.Helper()
+	return testDaemonWithContext(t.Context(), t, cfg)
+}
+
+func testDaemonWithContext(ctx context.Context, t *testing.T, cfg *config.Config) *daemon {
+	t.Helper()
 	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
 	cfg.Global.HooksDir = t.TempDir()
-	d := newDaemon(cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d := newDaemon(ctx, cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	// Default the apply seams to succeeding fakes: the sandbox has no
 	// CAP_NET_ADMIN, so the real netlink path can't run. Tests that
 	// exercise an apply *failure* override the relevant seam.
@@ -57,7 +62,7 @@ func testDaemon(t *testing.T, cfg *config.Config) *daemon {
 	d.writeRoute = func(context.Context, apply.DefaultRoute) error { return nil }
 	d.interfaceAddrs = func(string) ([]net.IP, error) { return nil, nil }
 	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) { return 0, nil }
-	t.Cleanup(d.stopHooks)
+	t.Cleanup(d.hooks.Close)
 	return d
 }
 

@@ -46,11 +46,11 @@ type HookContext struct {
 	Timestamp    time.Time
 }
 
-// HookResult records the outcome of one hook: invoked (with its
+// hookResult records the outcome of one hook: invoked (with its
 // exit code, timeout flag, and captured output), or skipped because
-// Runner.MaxHooks was reached. Returned in a slice from Runner.Run;
+// hookRunner.MaxHooks was reached. Returned in a slice from hookRunner.run;
 // hooks that timed out have `TimedOut = true` and `ExitCode = -1`.
-type HookResult struct {
+type hookResult struct {
 	Path     string
 	ExitCode int
 	TimedOut bool
@@ -60,24 +60,24 @@ type HookResult struct {
 	Output   string // combined stdout+stderr, capped at maxHookOutput
 }
 
-// Runner dispatches hooks for a given Event by scanning
+// hookRunner dispatches hooks for a given Event by scanning
 // `<Dir>/<event>.d/` for executable files and running each with
 // the env vars derived from HookContext.
 //
 // Timeout is the per-hook deadline, wired from the config's
 // `global.hookTimeoutMs` (PLAN §12 OQ #5). A zero Timeout falls back
-// to DefaultHookTimeout — the value a Runner constructed directly,
+// to DefaultHookTimeout — the value a hookRunner constructed directly,
 // without a config, gets. MaxHooks caps how many hooks one event
-// runs — the rest come back as HookResult{Skipped: true}; zero
+// runs — the rest come back as hookResult{Skipped: true}; zero
 // MaxHooks means unlimited.
-type Runner struct {
+type hookRunner struct {
 	Dir      string
 	Timeout  time.Duration
 	MaxHooks int
 }
 
 // DefaultHookTimeout is the per-hook deadline applied when
-// Runner.Timeout is zero. Matches PLAN §12 OQ #5.
+// hookRunner.Timeout is zero. Matches PLAN §12 OQ #5.
 const DefaultHookTimeout = 5 * time.Second
 
 // maxHookOutput caps the combined stdout+stderr captured per hook.
@@ -106,8 +106,8 @@ const (
 	EnvTimestamp    = "WANWATCH_TS"
 )
 
-// Run executes the hooks under `<Dir>/<ctx.Event>.d/` with the env
-// vars in PLAN §5.5. Returns one HookResult per file. A missing
+// run executes the hooks under `<Dir>/<ctx.Event>.d/` with the env
+// vars in PLAN §5.5. Returns one hookResult per file. A missing
 // event directory returns nil — not an error; users with no hooks
 // shouldn't see noise in the logs.
 //
@@ -115,14 +115,14 @@ const (
 // its own context with the configured timeout. At most MaxHooks of
 // them run; the rest are returned with `Skipped = true` so the
 // caller can surface the cap rather than starving them silently.
-func (r *Runner) Run(parent context.Context, ctx HookContext) []HookResult {
+func (r *hookRunner) run(parent context.Context, ctx HookContext) []hookResult {
 	eventDir := filepath.Join(r.Dir, string(ctx.Event)+".d")
 	entries, err := os.ReadDir(eventDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return []HookResult{{Path: eventDir, Err: err}}
+		return []hookResult{{Path: eventDir, Err: err}}
 	}
 
 	timeout := r.Timeout
@@ -145,10 +145,10 @@ func (r *Runner) Run(parent context.Context, ctx HookContext) []HookResult {
 	}
 	sort.Strings(paths)
 
-	results := make([]HookResult, 0, len(paths))
+	results := make([]hookResult, 0, len(paths))
 	for i, p := range paths {
 		if r.MaxHooks > 0 && i >= r.MaxHooks {
-			results = append(results, HookResult{Path: p, Skipped: true})
+			results = append(results, hookResult{Path: p, Skipped: true})
 			continue
 		}
 		results = append(results, runOne(parent, p, env, timeout))
@@ -156,7 +156,7 @@ func (r *Runner) Run(parent context.Context, ctx HookContext) []HookResult {
 	return results
 }
 
-func runOne(parent context.Context, path string, env []string, timeout time.Duration) HookResult {
+func runOne(parent context.Context, path string, env []string, timeout time.Duration) hookResult {
 	hookCtx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
@@ -184,7 +184,7 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 	err := cmd.Run()
 	dur := time.Since(start)
 
-	res := HookResult{Path: path, Duration: dur, Output: out.String()}
+	res := hookResult{Path: path, Duration: dur, Output: out.String()}
 	if hookCtx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
 		res.ExitCode = -1

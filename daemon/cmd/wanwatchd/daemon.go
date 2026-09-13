@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
@@ -115,13 +114,7 @@ type daemon struct {
 	cfg      *config.Config
 	metrics  *metrics.Registry
 	stateW   *state.Writer
-	hookR    *state.Runner
-	hookRun  func(context.Context, state.HookContext) []state.HookResult
-	hookWG   sync.WaitGroup
-	hookOnce sync.Once
-	hookStop sync.Once
-	hookJobs chan hookJob
-	hookDone chan struct{}
+	hooks    *state.HookNotifier
 	logger   *slog.Logger
 	wans     map[string]*wanState
 	groups   map[string]*groupState
@@ -141,16 +134,13 @@ type daemon struct {
 // newDaemon constructs the runtime state from `cfg` — the per-WAN
 // and per-group slices plus a fresh hysteresis state machine per
 // (WAN, family). It performs no I/O and starts no goroutines.
-func newDaemon(cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *daemon {
+func newDaemon(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
 		cfg:     cfg,
 		metrics: mreg,
 		stateW:  &state.Writer{Path: cfg.Global.StatePath},
-		hookR: &state.Runner{
-			Dir:      cfg.Global.HooksDir,
-			MaxHooks: maxHooksPerEvent,
-			Timeout:  time.Duration(cfg.Global.HookTimeoutMs) * time.Millisecond,
-		},
+		hooks: state.NewHookNotifier(ctx, cfg.Global.HooksDir,
+			time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger),
 		logger:         logger,
 		wans:           make(map[string]*wanState, len(cfg.Wans)),
 		groups:         make(map[string]*groupState, len(cfg.Groups)),
@@ -420,7 +410,7 @@ func (d *daemon) commitDecision(ctx context.Context, g *groupState) {
 	// state.json's `updatedAt` against the hook's WANWATCH_TS see
 	// identical values rather than millisecond-drift twins.
 	d.writeStateSnapshot(now)
-	d.runHooks(ctx, g, old, next, now)
+	d.notifyHooks(g, old, next, now)
 }
 
 // flushSwitchedConntrack clears the conntrack entries pinned to the
@@ -679,23 +669,11 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 	d.metrics.StatePublications.Inc()
 }
 
-// runHooks captures the event matching the old→next active transition
-// (see hookEventFor in decision.go), then enqueues it for serial,
-// best-effort execution. Every field read from event-loop-owned state is
-// copied into HookContext on the event-loop goroutine before enqueue.
-//
-// Hooks run under `parent` — the daemon context — so shutdown cancels
-// in-flight processes and skips queued jobs. The bounded queue prevents
-// notification work from stalling the event loop.
-//
-// `now` populates HookContext.Timestamp (WANWATCH_TS); pass the
-// zero value to let state.buildEnv fill it with time.Now().UTC().
-func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selector.Active, now time.Time) {
+// notifyHooks captures the Decision data on the event-loop goroutine before
+// submitting it to the notifier. The worker never reads daemon-owned state.
+func (d *daemon) notifyHooks(g *groupState, old, next selector.Active, now time.Time) {
 	event := hookEventFor(old, next)
 	if event == "" {
-		return
-	}
-	if parent.Err() != nil {
 		return
 	}
 
@@ -721,97 +699,8 @@ func (d *daemon) runHooks(parent context.Context, g *groupState, old, next selec
 		Mark:         g.cfg.Mark,
 		Timestamp:    now,
 	}
-	d.startHooks(parent)
-	d.hookWG.Add(1)
-	select {
-	case d.hookJobs <- hookJob{ctx: hookCtx}:
-	default:
-		d.hookWG.Done()
-		d.logger.Warn("hook event dropped: queue full", "event", string(hookCtx.Event), "capacity", hookQueueCapacity)
-	}
+	d.hooks.Notify(hookCtx)
 }
-
-type hookJob struct {
-	ctx state.HookContext
-}
-
-// hookQueueCapacity bounds best-effort notification backlog. A full queue
-// drops the newest event rather than making the event loop wait.
-const hookQueueCapacity = 32
-
-// startHooks lazily launches the daemon's sole hook worker. It is called on
-// the event-loop goroutine, so accepted jobs enter hookJobs in Decision order.
-func (d *daemon) startHooks(parent context.Context) {
-	d.hookOnce.Do(func() {
-		d.hookJobs = make(chan hookJob, hookQueueCapacity)
-		d.hookDone = make(chan struct{})
-		go func() {
-			defer close(d.hookDone)
-			for job := range d.hookJobs {
-				if parent.Err() == nil {
-					d.executeHooks(parent, job.ctx)
-				}
-				d.hookWG.Done()
-			}
-		}()
-	})
-}
-
-// executeHooks performs the blocking filesystem/process work after
-// runHooks has captured an immutable HookContext and yielded back to
-// the event loop.
-func (d *daemon) executeHooks(parent context.Context, hookCtx state.HookContext) {
-	run := d.hookR.Run
-	if d.hookRun != nil {
-		run = d.hookRun
-	}
-	results := run(parent, hookCtx)
-	for _, r := range results {
-		if r.Skipped {
-			d.logger.Warn("hook skipped: per-event limit reached",
-				"event", string(hookCtx.Event), "hook", r.Path, "limit", maxHooksPerEvent)
-			continue
-		}
-		result := "ok"
-		switch {
-		case r.TimedOut:
-			result = "timeout"
-		case r.ExitCode != 0:
-			result = "nonzero"
-		}
-		d.metrics.HookInvocations.WithLabelValues(string(hookCtx.Event), result).Inc()
-		if result != "ok" {
-			d.logger.Warn("hook failed",
-				"event", string(hookCtx.Event), "hook", r.Path, "result", result,
-				"exitCode", r.ExitCode, "err", r.Err, "output", r.Output)
-		}
-	}
-}
-
-// waitHooks waits for every accepted hook job. Call only after no further
-// event-loop enqueue can occur, so Wait never races with Add.
-func (d *daemon) waitHooks() {
-	d.hookWG.Wait()
-}
-
-// stopHooks closes and drains the single hook worker. Production calls it
-// after eventLoop returns; tests register it as cleanup so idle workers do
-// not outlive their test.
-func (d *daemon) stopHooks() {
-	d.hookStop.Do(func() {
-		if d.hookDone == nil {
-			return
-		}
-		close(d.hookJobs)
-		<-d.hookDone
-	})
-}
-
-// maxHooksPerEvent caps how many hooks one event's `.d` directory
-// may run, bounding process work spawned by one Decision. Hooks past
-// the cap are logged and skipped, not silently starved of their
-// timeout.
-const maxHooksPerEvent = 8
 
 func (d *daemon) recordProbeMetrics(r probe.ProbeResult, stableHealthy bool) {
 	famLabel := r.Family.String()
