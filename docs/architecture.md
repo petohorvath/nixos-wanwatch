@@ -90,7 +90,7 @@ daemon/
   internal/rtnl/        — RTNLGRP_LINK subscriber, LinkEvent dedup
   internal/selector/    — strategies + per-WAN hysteresis state
   internal/apply/       — route / rule / conntrack via vishvananda/netlink
-  internal/state/       — atomic state.json writer + hook runner
+  internal/state/       — atomic state.json writer + Hook notification delivery
   internal/metrics/     — Prometheus registry + Unix socket server
 ```
 
@@ -125,7 +125,7 @@ LinkEvent  ─────►  wan.carrier/operstate  ────────�
                                           if changed:
                                             apply.WriteDefault per family
                                             state.Writer.Write
-                                            state.Runner.Run (hooks)
+                                            state.HookNotifier.Notify
                                             metrics.GroupDecisions++
 ```
 
@@ -155,13 +155,19 @@ LinkEvent  ─────►  wan.carrier/operstate  ────────�
 7. state.Writer.Write publishes the new state.json
        │
        ▼
-8. state.Runner.Run dispatches /etc/wanwatch/hooks/switch.d/*
+8. state.HookNotifier.Notify queues captured Decision data
        │
        ▼
 9. Prometheus gauges + decisions counter update
 ```
 
-Steps 6-9 run in order on a single goroutine — the apply layer never races with itself.
+The event loop captures Hook data and submits notifications after Apply
+and the State write. `state.HookNotifier` owns the bounded queue, serial
+script execution, result logs and metrics, and shutdown. Accepted events
+retain Decision order and their captured timestamps. A full queue drops
+the newest event, so slow Hooks cannot stall routing or watchdog replies.
+`Close` drains delivery; cancellation of the daemon context kills running
+scripts and discards queued events.
 
 ## Where to look for what
 

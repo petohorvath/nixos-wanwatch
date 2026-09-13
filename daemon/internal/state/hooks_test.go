@@ -22,7 +22,7 @@ import (
 // have the FD open for writing, the child inherits a writable copy
 // and holds it through its own fork→execve window. During that
 // window the kernel rejects execve on the same file with ETXTBSY
-// ("text file busy"), so any test that does writeHook + r.Run in
+// ("text file busy"), so any test that does writeHook + r.run in
 // parallel with a fork-heavy sibling test occasionally flakes with
 // `Err = fork/exec …: text file busy` and (0.00s) test duration.
 //
@@ -54,8 +54,8 @@ func writeHook(t *testing.T, eventDir, name, script string) string {
 
 func TestRunNoEventDirReturnsNil(t *testing.T) {
 	t.Parallel()
-	r := Runner{Dir: t.TempDir()}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: t.TempDir()}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 	if results != nil {
 		t.Errorf("Run with no event dir = %v, want nil", results)
 	}
@@ -66,8 +66,8 @@ func TestRunExecutesHookSuccessfully(t *testing.T) {
 	dir := t.TempDir()
 	writeHook(t, filepath.Join(dir, "up.d"), "ok.sh", "exit 0")
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 	if got := len(results); got != 1 {
 		t.Fatalf("len(results) = %d, want 1", got)
 	}
@@ -84,8 +84,8 @@ func TestRunCapturesNonZeroExit(t *testing.T) {
 	dir := t.TempDir()
 	writeHook(t, filepath.Join(dir, "down.d"), "bad.sh", "exit 7")
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventDown})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventDown})
 	if results[0].ExitCode != 7 {
 		t.Errorf("ExitCode = %d, want 7", results[0].ExitCode)
 	}
@@ -99,9 +99,9 @@ func TestRunHonorsTimeout(t *testing.T) {
 	dir := t.TempDir()
 	writeHook(t, filepath.Join(dir, "switch.d"), "slow.sh", "sleep 5")
 
-	r := Runner{Dir: dir, Timeout: 200 * time.Millisecond}
+	r := hookRunner{Dir: dir, Timeout: 200 * time.Millisecond}
 	start := time.Now()
-	results := r.Run(context.Background(), HookContext{Event: EventSwitch})
+	results := r.run(context.Background(), HookContext{Event: EventSwitch})
 	elapsed := time.Since(start)
 
 	if elapsed > 2*time.Second {
@@ -122,8 +122,8 @@ func TestRunPassesEnvVars(t *testing.T) {
 	writeHook(t, filepath.Join(dir, "up.d"), "env.sh",
 		`echo "$WANWATCH_EVENT|$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_GATEWAY_V4_NEW|$WANWATCH_FAMILIES|$WANWATCH_TABLE" > `+outFile)
 
-	r := Runner{Dir: dir}
-	r.Run(context.Background(), HookContext{
+	r := hookRunner{Dir: dir}
+	r.run(context.Background(), HookContext{
 		Event:        EventUp,
 		Group:        "home",
 		WanNew:       "primary",
@@ -154,8 +154,8 @@ func TestRunIgnoresNonExecutableFiles(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 	if len(results) != 0 {
 		t.Errorf("Run with only non-executable files = %v, want empty", results)
 	}
@@ -170,8 +170,8 @@ func TestRunIgnoresSubdirectories(t *testing.T) {
 	}
 	writeHook(t, eventDir, "real.sh", "exit 0")
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 	if got := len(results); got != 1 {
 		t.Errorf("len(results) = %d, want 1 (subdirs should be skipped)", got)
 	}
@@ -189,8 +189,8 @@ func TestRunSortsHooksLexicographically(t *testing.T) {
 	writeHook(t, eventDir, "a-first.sh", "echo a >> "+out)
 	writeHook(t, eventDir, "b-second.sh", "echo b >> "+out)
 
-	r := Runner{Dir: dir}
-	r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	r.run(context.Background(), HookContext{Event: EventUp})
 
 	data, err := os.ReadFile(out)
 	if err != nil {
@@ -213,8 +213,8 @@ func TestRunExecutesAllHooksEvenAfterFailure(t *testing.T) {
 	writeHook(t, eventDir, "a-fails.sh", "exit 5")
 	writeHook(t, eventDir, "b-ok.sh", "echo ran >> "+out)
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 
 	if got := len(results); got != 2 {
 		t.Errorf("len(results) = %d, want 2", got)
@@ -231,8 +231,8 @@ func TestRunTimestampFallback(t *testing.T) {
 	out := filepath.Join(dir, "ts.txt")
 	writeHook(t, filepath.Join(dir, "up.d"), "ts.sh", `echo "$WANWATCH_TS" > `+out)
 
-	r := Runner{Dir: dir}
-	r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	r.run(context.Background(), HookContext{Event: EventUp})
 
 	data, _ := os.ReadFile(out)
 	got := strings.TrimSpace(string(data))
@@ -266,9 +266,9 @@ func TestRunBoundsMultipleSlowHooks(t *testing.T) {
 		writeHook(t, eventDir, name, "sleep 5")
 	}
 
-	r := Runner{Dir: dir, Timeout: 100 * time.Millisecond}
+	r := hookRunner{Dir: dir, Timeout: 100 * time.Millisecond}
 	start := time.Now()
-	results := r.Run(context.Background(), HookContext{Event: EventSwitch})
+	results := r.run(context.Background(), HookContext{Event: EventSwitch})
 	elapsed := time.Since(start)
 
 	if len(results) != 3 {
@@ -289,7 +289,7 @@ func TestRunBoundsMultipleSlowHooks(t *testing.T) {
 // TestRunCapturesNonExitError: when the kernel refuses to exec the
 // script at all (missing interpreter), cmd.Run() returns a non-
 // `*exec.ExitError`. The runOne handler must still produce a
-// HookResult with ExitCode=-1 and a wrapped Err — not panic on
+// hookResult with ExitCode=-1 and a wrapped Err — not panic on
 // the errors.As branch.
 func TestRunCapturesNonExitError(t *testing.T) {
 	t.Parallel()
@@ -311,8 +311,8 @@ func TestRunCapturesNonExitError(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 	if len(results) != 1 {
 		t.Fatalf("len(results) = %d, want 1", len(results))
 	}
@@ -340,8 +340,8 @@ func TestRunTimeoutKillsBackgroundedDescendants(t *testing.T) {
 	writeHook(t, filepath.Join(dir, "up.d"), "fork.sh",
 		"(sleep 1; touch "+sentinel+") &\nsleep 5")
 
-	r := Runner{Dir: dir, Timeout: 200 * time.Millisecond}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir, Timeout: 200 * time.Millisecond}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 	if !results[0].TimedOut {
 		t.Fatalf("setup: hook did not time out (TimedOut = false)")
 	}
@@ -355,7 +355,7 @@ func TestRunTimeoutKillsBackgroundedDescendants(t *testing.T) {
 }
 
 // TestRunCapturesOutput: a hook's combined stdout+stderr is captured
-// into HookResult.Output, so a failing hook is diagnosable beyond
+// into hookResult.Output, so a failing hook is diagnosable beyond
 // its exit code.
 func TestRunCapturesOutput(t *testing.T) {
 	t.Parallel()
@@ -363,8 +363,8 @@ func TestRunCapturesOutput(t *testing.T) {
 	writeHook(t, filepath.Join(dir, "down.d"), "noisy.sh",
 		`echo "stdout line"; echo "stderr line" >&2; exit 3`)
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventDown})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventDown})
 	if results[0].ExitCode != 3 {
 		t.Errorf("ExitCode = %d, want 3", results[0].ExitCode)
 	}
@@ -385,8 +385,8 @@ func TestRunBoundsOutput(t *testing.T) {
 	writeHook(t, filepath.Join(dir, "up.d"), "flood.sh",
 		"head -c 200000 /dev/zero")
 
-	r := Runner{Dir: dir}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 
 	out := results[0].Output
 	if len(out) > maxHookOutput+64 {
@@ -545,8 +545,8 @@ func TestRunCapsHookCount(t *testing.T) {
 		writeHook(t, eventDir, n, "echo "+n+" >> "+ran)
 	}
 
-	r := Runner{Dir: dir, MaxHooks: 2}
-	results := r.Run(context.Background(), HookContext{Event: EventUp})
+	r := hookRunner{Dir: dir, MaxHooks: 2}
+	results := r.run(context.Background(), HookContext{Event: EventUp})
 
 	if len(results) != 4 {
 		t.Fatalf("len(results) = %d, want 4 (2 run + 2 skipped)", len(results))

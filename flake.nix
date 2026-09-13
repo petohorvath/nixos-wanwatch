@@ -485,6 +485,21 @@
             ];
           };
         }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          # Minimal review tools, without the default shell's Git hook setup.
+          # mkShell supplies GCC for fresh Go race tests; the Go version and
+          # dependencies come from the lock file and daemon/vendor, not from
+          # the review sandbox's preinstalled SDK or module proxy.
+          review = pkgs.mkShell {
+            packages = [ pkgs.go ];
+            GOTOOLCHAIN = "local";
+            GOENV = "off";
+            GOFLAGS = "-mod=vendor";
+            GOPROXY = "off";
+            GOSUMDB = "off";
+            CGO_ENABLED = "1";
+          };
+        }
       );
     };
 }

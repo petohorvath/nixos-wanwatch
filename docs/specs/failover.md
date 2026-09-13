@@ -55,7 +55,7 @@ t=1      carrier drops on wan0
          apply.WriteDefault(family=v4, table=100, gw=backup.v4, ifindex=wan1)
          apply.WriteDefault(family=v6, table=100, gw=backup.v6, ifindex=wan1)
          state.Writer.Write: active=backup, activeSince=t1
-         state.Runner.Run /etc/wanwatch/hooks/switch.d/*
+         state.HookNotifier.Notify queues the switch notification
          wanwatch_group_decisions_total{reason=carrier}++
 
 t=2      table 100 reflects backup; traffic that was marked routes via wan1
