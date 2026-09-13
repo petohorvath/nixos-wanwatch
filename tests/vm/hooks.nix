@@ -136,28 +136,15 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
-
-    def wait_for_active(router, want, timeout=15):
-        for _ in range(timeout * 4):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            active = json.loads(out)["groups"]["home-uplink"]["active"]
-            if active == want:
-                return
-            router.execute("sleep 0.25")
-        raise AssertionError(
-            f"active never reached {want!r}; last state =\n{out}"
-        )
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     router.wait_for_unit("wanwatch.service")
     router.wait_for_unit("systemd-networkd.service")
 
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set wan1 up")
-    wait_for_active(router, "primary")
+    observe.wait_active("home-uplink", "primary")
 
     # The initial up Decision should have fired the up.d hook —
     # remove the captured file so the next assertion only sees
@@ -166,7 +153,7 @@ pkgs.testers.runNixOSTest {
 
     if router.execute("ip link set wan0 carrier off")[0] != 0:
         router.succeed("ip link set wan0 down")
-    wait_for_active(router, "backup")
+    observe.wait_active("home-uplink", "backup")
     router.wait_for_file("/run/wanwatch/last-hook.env")
 
     captured = router.succeed("cat /run/wanwatch/last-hook.env")

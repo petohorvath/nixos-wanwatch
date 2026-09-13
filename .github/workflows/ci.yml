@@ -117,8 +117,8 @@ jobs:
           purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
           purge-created: 0
           purge-primary-key: never
-      - name: Build unit checks
-        run: nix build --print-build-logs .#checks.${{ matrix.system }}.unit
+      - name: Build unit and observation checks
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.unit .#checks.${{ matrix.system }}.observation
 
   # The `daemon` flake check runs `go test ./...` against the
   # vendored sources inside a Nix sandbox. Same matrix as unit —

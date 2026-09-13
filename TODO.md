@@ -192,10 +192,10 @@ Root cause analysis is incomplete. Three plausible mechanisms:
    haven't read the code to confirm. A regression in the library
    pinning could narrow that silently.
 
-Diagnostic is already in place: `tests/vm/gateway-discovery-v6.nix`
-dumps `state.json`, `ip -6 route show table all`, and the last
-50 lines of the daemon journal on a `wait_for` timeout. Next
-time it flakes, those three sections distinguish:
+Diagnostic is already in place: the shared `tests/vm/observation.py`
+waits used by `gateway-discovery-v6.nix` dump `state.json`, live
+metrics, both families' kernel routes, and the last 50 lines of the
+daemon journal on timeout. Next time it flakes, that evidence distinguishes:
 
 - empty `state.json` v6 gateway + kernel route present + no
   daemon "route event" log → option 1 or 3 (subscription gap)

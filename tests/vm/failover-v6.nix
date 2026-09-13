@@ -104,21 +104,8 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
-    import json
-
-
-    def wait_for_active(router, want, timeout=15):
-        for _ in range(timeout * 4):
-            out = router.succeed("cat /run/wanwatch/state.json")
-            active = json.loads(out)["groups"]["home-uplink"]["active"]
-            if active == want:
-                return
-            router.execute("sleep 0.25")
-        raise AssertionError(
-            f"active never reached {want!r}; last state =\n{out}"
-        )
-
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     router.wait_for_unit("wanwatch.service")
     router.wait_for_unit("systemd-networkd.service")
@@ -126,35 +113,17 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set wan1 up")
 
-    wait_for_active(router, "primary")
+    observe.wait_active("home-uplink", "primary")
 
-    # wait_for_active means state.json shows active=primary, but
-    # `ip link set wan0 up` also nudges systemd-networkd to
-    # reconfigure wan0, and the kernel-side route can briefly
-    # disappear around that reconfigure. Poll for the route to
-    # land before asserting on its shape.
-    table = router.succeed(
-        "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
-    ).strip()
-    router.wait_until_succeeds(
-        f"ip -6 route show table {table} | grep -q ' dev wan0'", timeout=10
-    )
-    route = router.succeed(f"ip -6 route show table {table}")
-    assert "wan0" in route and "via" not in route, (
-        f"initial v6 table {table} route mismatch (want scope-link via wan0):\n{route}"
-    )
+    # Verify the direct default route in the kernel, allowing networkd
+    # reconfiguration to settle after the link comes up.
+    observe.wait_default_route("v6", "wan0", group="home-uplink")
 
     if router.execute("ip link set wan0 carrier off")[0] != 0:
         router.succeed("ip link set wan0 down")
 
-    wait_for_active(router, "backup")
+    observe.wait_active("home-uplink", "backup")
 
-    router.wait_until_succeeds(
-        f"ip -6 route show table {table} | grep -q ' dev wan1'", timeout=10
-    )
-    route = router.succeed(f"ip -6 route show table {table}")
-    assert "wan1" in route and "via" not in route, (
-        f"failover v6 table {table} route mismatch (want scope-link via wan1):\n{route}"
-    )
+    observe.wait_default_route("v6", "wan1", group="home-uplink")
   '';
 }
