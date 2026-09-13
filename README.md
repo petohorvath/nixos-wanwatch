@@ -82,6 +82,12 @@ nix build .#wanwatchd # build the daemon binary
 nix develop           # devshell with go, gopls, golangci-lint
 ```
 
+For executable reviews in a minimal Linux sandbox, use
+`bash tooling/review-env.sh COMMAND [ARG...]`. It provides the locked Go
+toolchain and GCC with vendored dependencies. See
+[review environment setup](.greptile/rules.md) for the optional upstream
+Nix bootstrap and focused validation commands.
+
 ## Documentation
 
 - [`PLAN.md`](./PLAN.md) — authoritative v1 design.

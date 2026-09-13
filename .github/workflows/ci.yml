@@ -146,6 +146,8 @@ jobs:
           purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
           purge-created: 0
           purge-primary-key: never
+      - name: Verify executable review environment
+        run: bash tests/ci/review-env.sh
       - name: Build daemon check (go test ./...)
         run: nix build --print-build-logs .#checks.${{ matrix.system }}.daemon
       - name: Build wanwatchd package
