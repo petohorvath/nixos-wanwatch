@@ -6,8 +6,8 @@
 //
 // File layout:
 //   - main.go         — process lifecycle (flags, logging, signals)
-//   - daemon.go       — daemon struct + Decision pipeline (handlers,
-//     recompute, applyRoutes, writeStateSnapshot, notifyHooks)
+//   - daemon.go       — event handlers, Apply adapter and commit publication
+//     (Selection progression lives in internal/decision)
 //   - probers.go      — startProbers + probe-target helpers
 //     (identKeysFor, targetsFor, familiesFromTargets)
 //   - subscribers.go  — startLinkSubscriber, startRouteSubscriber

@@ -147,12 +147,11 @@ This table lives in `docs/glossary.md` and is referenced from
 │   ┌──────────┐                                                     │
 │   │ probe    │──┐                                                  │
 │   │ (icmp+v6)│  │   ┌────────┐   ┌───────┐   ┌────────┐           │
-│   └──────────┘  ├──▶│selector│──▶│ apply │──▶│ kernel │           │
-│   ┌──────────┐  │   │ (pure) │   │(nlnk) │   │        │           │
+│   └──────────┘  ├──▶│decision│──▶│ apply │──▶│ kernel │           │
+│   ┌──────────┐  │   │ Group  │   │(nlnk) │   │        │           │
 │   │ rtnl     │──┘   └────┬───┘   └───────┘   └────────┘           │
-│   │ events   │           │                                          │
-│   └──────────┘           ├──▶ state   ──▶ /run/wanwatch/           │
-│                          ├──▶ hooks   ──▶ /etc/wanwatch/           │
+│   │ events   │           ├──▶ selector (pure Strategy)              │
+│   └──────────┘           ├──▶ commit ──▶ state + hooks              │
 │                          └──▶ metrics ──▶ unix socket               │
 └──────────────────────────────────────────────────────────────────┘
                               │
@@ -176,8 +175,8 @@ This table lives in `docs/glossary.md` and is referenced from
   creates state dir + hooks dir). `telegraf.nix` is an opt-in
   companion that pre-configures Telegraf's `inputs.prometheus`
   scrape target.
-- **`daemon/`** — self-contained Go module. Seven internal packages
-  (`config`, `probe`, `rtnl`, `selector`, `apply`, `state`, `metrics`)
+- **`daemon/`** — self-contained Go module. Internal packages
+  (`config`, `probe`, `rtnl`, `selector`, `decision`, `apply`, `state`, `metrics`)
   plus `cmd/wanwatchd` (entrypoint). Single binary, no IPC, no
   subprocess management.
 - **`docs/`** — audience-targeted, matching nftzones discipline.
@@ -648,6 +647,26 @@ var strategies = map[string]Strategy{
 partial-recovery, flapping-suppressed, sticky-preference) are
 exhaustively table-tested.
 
+### `internal/decision`
+
+Owns each Group's pending and committed Selection, Decision counts,
+active-member gauges and commit timestamps. `Recompute` uses the pure
+Strategy with current Member Health; `Probe` retries a pending target;
+`GatewayChanged` retries all families while pending or refreshes only
+the changed family of a committed Selection. Callers receive a commit
+record for State and Hook publication and read `Snapshot` for the
+externalized Group State. Pending state stays inside the module.
+
+The Apply adapter is scoped to a Group's routing table and retains the
+existing kernel functions. Hard failures defer commit, including when
+some families have already succeeded. A newer Selection supersedes the
+pending target; unchanged targets and retries do not increment Decision
+counts. Missing Gateways remain soft skips, so a committed Selection
+does not guarantee a new route in every family. All-down retains routes
+and the last non-null `activeSince`. Methods run on the event-loop
+goroutine; Probe retries preserve their ordering before the cycle's
+Health-triggered recomputation.
+
 ### `internal/apply`
 
 Mutates kernel state via `vishvananda/netlink` — no shellouts to `ip`.
@@ -811,6 +830,9 @@ Per-package `_test.go` files. Table-driven tests using `t.Run` and
   (empty, partial, full, after-drop, monotonic RTT, oscillating RTT).
 - `internal/selector/*_test.go` — every Strategy under every Health
   permutation + hysteresis state.
+- `internal/decision/group_test.go` — event sequences through the Group
+  interface: deferred Apply, retries, superseding targets, Gateway
+  refresh scope, commit timestamps, snapshots and Decision metrics.
 - `internal/apply/*_test.go` — table-driven netlink message construction;
   separate netns-based integration test (gated by `-tags=netns`,
   runs in CI under privileged container or sandbox with `unshare`).
@@ -821,6 +843,7 @@ Coverage gate (measured by `go test -cover` on the package, line
 coverage, excluding `_test.go` files and `cmd/`):
 
 - `internal/selector/` — ≥95% (pure logic; no excuse)
+- `internal/decision/` — 100% (Group lifecycle with an Apply test adapter)
 - `internal/probe/stats.go` — ≥95% (pure math)
 - `internal/probe/` overall — ≥90%
 - `internal/config/` — ≥90% (JSON parsing edge cases)

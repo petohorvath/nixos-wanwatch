@@ -32,8 +32,8 @@ Three layers, bottom-up: pure-Nix library, NixOS module, Go daemon. The library 
 │   config ─────────────┐                                    │
 │                       ▼                                    │
 │   ┌──────────┐   ┌─────────┐    ┌────────┐                 │
-│   │ probe[N] │──▶│ selector│───▶│ apply  │──▶ kernel       │
-│   └──────────┘   │  + hyst │    └────────┘                 │
+│   │ probe[N] │──▶│ decision│───▶│ apply  │──▶ kernel       │
+│   └──────────┘   │per Group│    └────────┘                 │
 │   ┌──────────┐   └────┬────┘         │                     │
 │   │ rtnl     │────────┘              ▼                     │
 │   └──────────┘             ┌─────────────────┐             │
@@ -89,45 +89,59 @@ daemon/
   internal/probe/       — Pinger goroutine, ICMP wire format, WindowStats
   internal/rtnl/        — RTNLGRP_LINK subscriber, LinkEvent dedup
   internal/selector/    — strategies + per-WAN hysteresis state
+  internal/decision/    — per-Group Selection, Apply retries and commits
   internal/apply/       — route / rule / conntrack via vishvananda/netlink
   internal/state/       — atomic state.json writer + Hook notification delivery
   internal/metrics/     — Prometheus registry + Unix socket server
 ```
 
-Event loop (`cmd/wanwatchd/daemon.go`):
+Event loop (`cmd/wanwatchd/eventloop.go`):
 
 ```go
 for {
     select {
     case <-ctx.Done():           return
-    case r := <-probeResults:    d.handleProbeResult(r)
-    case e := <-linkEvents:      d.handleLinkEvent(e)
+    case r := <-probeResults:    d.handleProbeResult(ctx, r)
+    case e := <-linkEvents:      d.handleLinkEvent(ctx, e)
+    case e := <-routeEvents:     d.handleRouteEvent(ctx, e)
     }
 }
 ```
 
-Decision pipeline (`cmd/wanwatchd/state.go`):
+Decision progression (`internal/decision/group.go`):
 
 ```
-ProbeResult  ─►  evaluateThresholds  ─►  hysteresis.Observe
-                                                  │
-                                                  ▼
-                                          combineFamilies(policy)
-                                                  │
-LinkEvent  ─────►  wan.carrier/operstate  ────────┤
-                                                  ▼
-                                          buildMemberHealth
-                                                  │
-                                                  ▼
-                                          selector.Select →  Selection
-                                                  │
-                                                  ▼
-                                          if changed:
-                                            apply.WriteDefault per family
-                                            state.Writer.Write
-                                            state.HookNotifier.Notify
-                                            metrics.GroupDecisions++
+ProbeResult → thresholds + per-WAN Hysteresis ─┐
+LinkEvent → carrier / operstate ──────────────┴→ Member Health
+                                                     │
+                                                     ▼
+                                               Group.Recompute
+                                                     │
+                                               selector.Select
+                                                     │
+                                                     ▼
+ProbeResult → Group.Probe ──────────────→ pending Selection → Apply
+RouteEvent → Gateway cache → Group.GatewayChanged ────┘        │
+                                                             ▼
+                                                   committed Selection
+                                                             │
+                                                        commit record
+                                                             │
+                                                             ▼
+                                               conntrack → State → Hook
 ```
+
+The Group Decision module owns pending and committed Selections,
+Decision counts, active-member gauges and commit timestamps. The daemon
+forwards events and publishes returned commits; `Snapshot` supplies each
+Group's externalized State. Strategy remains pure in `internal/selector`.
+
+A hard Apply failure leaves the target pending and keeps State and Hooks
+on the committed Selection. Probe cycles and Gateway changes retry all
+families for that target. A newer Selection supersedes it. Missing
+Gateways remain soft skips: a commit can leave a family's existing route
+untouched. Gateway changes on a committed Selection refresh only the
+changed family and produce no new Decision or Hook.
 
 ## Data flow on a switch
 
@@ -141,24 +155,24 @@ LinkEvent  ─────►  wan.carrier/operstate  ────────�
 3. handleLinkEvent sets wan0.carrier = down
        │
        ▼
-4. recomputeAffectedGroups runs selector for every group
-   containing wan0
+4. recomputeAffectedGroups sends current Member Health to
+   each decision.Group containing wan0
        │
        ▼
-5. selector.Select returns Selection{Active="backup"}
+5. Group.Recompute uses selector.Select and records the
+   pending backup Selection and Decision count
        │
        ▼
-6. apply.WriteDefault writes the v4+v6 default in the
-   group's table via backup's gateway
+6. Apply writes the probed families with known Gateways.
+   A hard failure defers commit until a retry succeeds
        │
        ▼
-7. state.Writer.Write publishes the new state.json
+7. The Group commits backup and updates active gauges.
+   The daemon flushes the vacated WAN and writes State
        │
        ▼
-8. state.HookNotifier.Notify queues captured Decision data
-       │
-       ▼
-9. Prometheus gauges + decisions counter update
+8. state.HookNotifier.Notify queues a switch Hook with
+   the same commit timestamp as the State publication
 ```
 
 The event loop captures Hook data and submits notifications after Apply
