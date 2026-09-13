@@ -49,7 +49,7 @@ staging work.
 Pre-hooks stay notification-only: a pre-hook that *gates* or *blocks*
 the apply would make hooks part of the apply transaction, which PLAN
 §5.5 explicitly rules out — promoting them would need a PLAN change
-first. `daemon/cmd/wanwatchd/daemon.go` (notifyHooks / commitDecision),
+first. `daemon/cmd/wanwatchd/daemon.go` (notifyHooks / publishDecision),
 PLAN §5.5 env-var contract.
 
 ### Stale-route policy on family-set shrink

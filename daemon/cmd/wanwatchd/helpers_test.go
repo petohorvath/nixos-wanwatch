@@ -68,7 +68,7 @@ func testDaemonWithContext(ctx context.Context, t *testing.T, cfg *config.Config
 
 // failingIfindex is a d.ifindexOf stub that always fails — the
 // ifindex-lookup hard failure applyRoutes must surface and
-// commitDecision must hold pending.
+// the Group Decision module must hold pending.
 func failingIfindex(string) (int, error) {
 	return 0, errors.New("apply test: no such interface")
 }

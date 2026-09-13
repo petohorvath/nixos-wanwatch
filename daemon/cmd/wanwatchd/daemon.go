@@ -9,6 +9,7 @@ import (
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/decision"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
@@ -81,33 +82,6 @@ func (w *wanState) healthy() bool {
 	return w.carrierUp() && combineFamilies(w.families, w.cfg.Probe.FamilyHealthPolicy)
 }
 
-// groupState is the per-group runtime slice.
-//
-// `active` is the last Decision whose routes actually landed in the
-// kernel — what state.json reports and what hooks fire for. When the
-// selector makes a Decision whose apply hasn't fully converged yet,
-// the target is held in `pendingActive` with `applyPending` set;
-// state.json and hooks stay deferred until it converges, so they
-// never report a switch the kernel hasn't made.
-type groupState struct {
-	cfg            selector.Group
-	active         selector.Active
-	activeSince    *time.Time
-	decisionsTotal int
-
-	applyPending  bool
-	pendingActive selector.Active
-}
-
-// intent is the group's current target Selection: the pending
-// Decision if one is mid-apply, otherwise the converged active.
-func (g *groupState) intent() selector.Active {
-	if g.applyPending {
-		return g.pendingActive
-	}
-	return g.active
-}
-
 // daemon bundles the runtime state and subsystem handles. Wired
 // once in run(), then driven by eventLoop's dispatch.
 type daemon struct {
@@ -117,7 +91,7 @@ type daemon struct {
 	hooks    *state.HookNotifier
 	logger   *slog.Logger
 	wans     map[string]*wanState
-	groups   map[string]*groupState
+	groups   map[string]*decision.Group
 	gateways *gatewayCache
 
 	// The syscall-touching seams of the apply path — newDaemon wires
@@ -143,7 +117,7 @@ func newDaemon(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, 
 			time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger),
 		logger:         logger,
 		wans:           make(map[string]*wanState, len(cfg.Wans)),
-		groups:         make(map[string]*groupState, len(cfg.Groups)),
+		groups:         make(map[string]*decision.Group, len(cfg.Groups)),
 		gateways:       newGatewayCache(),
 		ifindexOf:      interfaceIndex,
 		writeRoute:     apply.WriteDefault,
@@ -175,7 +149,9 @@ func newDaemon(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, 
 		d.wans[name] = ws
 	}
 	for name, g := range cfg.Groups {
-		d.groups[name] = &groupState{cfg: g}
+		d.groups[name] = decision.New(g, func(ctx context.Context, wan string, families ...probe.Family) error {
+			return d.applyRoutes(ctx, g, wan, families...)
+		}, mreg, logger)
 	}
 	return d
 }
@@ -237,7 +213,7 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	// regardless of cold-start state.
 	if !fs.cooked && !r.Stats.WindowFilled {
 		d.recordProbeMetrics(r, false)
-		d.retryPendingApply(ctx, r.Wan)
+		d.retryGroupDecisions(ctx, r.Wan)
 		return
 	}
 
@@ -263,7 +239,7 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 
 	// A probe result means r.Wan is reachable — retry any of its
 	// Decisions whose apply hasn't landed yet.
-	d.retryPendingApply(ctx, r.Wan)
+	d.retryGroupDecisions(ctx, r.Wan)
 
 	if prevCooked && stable == fs.healthy {
 		return
@@ -277,7 +253,7 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	}
 	// Republish state.json on any per-family verdict transition.
 	// A family flip that *does* move the aggregate has already
-	// been captured by commitDecision via recomputeAffectedGroups
+	// been captured by publishDecision via recomputeAffectedGroups
 	// above; one that doesn't (e.g. v4 drops while v6 holds under
 	// familyHealthPolicy=any) wouldn't otherwise update state.json
 	// at all, leaving wans[<name>].families[<f>].healthy stale
@@ -334,83 +310,28 @@ func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
 	}
 }
 
-// recomputeAffectedGroups runs selector.Select for every group
-// containing `wan` and applies any resulting change.
+// recomputeAffectedGroups forwards current Member Health to every Group
+// containing wan. The Group owns Selection, retries and commit readiness.
 func (d *daemon) recomputeAffectedGroups(ctx context.Context, wan string, reason decisionReason) {
-	for _, g := range d.groups {
-		if !groupContainsWAN(g.cfg, wan) {
+	for name, g := range d.cfg.Groups {
+		if !groupContainsWAN(g, wan) {
 			continue
 		}
-		d.recomputeGroup(ctx, g, reason)
+		committed := d.groups[name].Recompute(ctx, buildMemberHealth(g, d.wans), string(reason))
+		d.publishDecision(ctx, g, committed)
 	}
 }
 
-// recomputeGroup is the per-group Decision path: run the selector,
-// detect a change against the group's current intent, record the
-// Decision (decisionsTotal, the GroupDecisions metric, the log
-// line), and hand it to commitDecision — which defers the visible
-// effects until the routes converge.
-func (d *daemon) recomputeGroup(ctx context.Context, g *groupState, reason decisionReason) {
-	healths := buildMemberHealth(g.cfg, d.wans)
-	sel, err := selector.Select(g.cfg, healths)
-	if err != nil {
-		d.logger.Error("selector", "group", g.cfg.Name, "err", err)
+// publishDecision externalizes a commit returned by the Group Decision
+// module. Failed Apply and Gateway refreshes return no commit. The module
+// has already updated its snapshot and gauges before publication begins.
+func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committed *decision.Commit) {
+	if committed == nil {
 		return
 	}
-	if sel.Active == g.intent() {
-		return
-	}
-
-	d.logger.Info(
-		"decision",
-		"group", g.cfg.Name,
-		"reason", reason,
-		"old", g.active.Wan,
-		"new", sel.Active.Wan,
-	)
-	g.applyPending = true
-	g.pendingActive = sel.Active
-	g.decisionsTotal++
-	d.metrics.GroupDecisions.WithLabelValues(g.cfg.Name, string(reason)).Inc()
-
-	d.commitDecision(ctx, g)
-}
-
-// commitDecision applies the routes for the group's pending Decision.
-// Once they land it publishes the Decision's visible effects —
-// promote pendingActive to `active`, refresh the gauge, write
-// state.json, fire the hook. A hard apply failure returns with the
-// Decision still pending, so state.json and hooks never report a
-// switch the kernel hasn't made; retryPendingApply or
-// handleRouteEvent re-drives it.
-func (d *daemon) commitDecision(ctx context.Context, g *groupState) {
-	if !g.applyPending {
-		return
-	}
-	next := g.pendingActive
-	if next.Has {
-		if err := d.applyRoutes(ctx, g, next.Wan); err != nil {
-			d.logger.Warn("decision apply incomplete; will retry",
-				"group", g.cfg.Name, "wan", next.Wan, "err", err)
-			return
-		}
-	}
-
-	old := g.active
-	g.active = next
-	g.applyPending = false
-	g.pendingActive = selector.Active{}
-	now := time.Now().UTC()
-	if next.Has {
-		g.activeSince = &now
-	}
-	d.updateGroupActiveGauge(g)
-	d.flushSwitchedConntrack(ctx, g, old, next)
-	// One timestamp for both writes so consumers correlating
-	// state.json's `updatedAt` against the hook's WANWATCH_TS see
-	// identical values rather than millisecond-drift twins.
-	d.writeStateSnapshot(now)
-	d.notifyHooks(g, old, next, now)
+	d.flushSwitchedConntrack(ctx, g, committed.Old, committed.New)
+	d.writeStateSnapshot(committed.At)
+	d.notifyHooks(g, committed.Old, committed.New, committed.At)
 }
 
 // flushSwitchedConntrack clears the conntrack entries pinned to the
@@ -423,7 +344,7 @@ func (d *daemon) commitDecision(ctx context.Context, g *groupState) {
 // left in place, so a flush would only churn. Best-effort per
 // PLAN §6.1 — a resolve or flush failure is logged and metered but
 // never fails the Decision; the routes have already converged.
-func (d *daemon) flushSwitchedConntrack(ctx context.Context, g *groupState, old, next selector.Active) {
+func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, old, next selector.Active) {
 	if !old.Has || !next.Has {
 		return
 	}
@@ -434,8 +355,8 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g *groupState, old,
 	addrs, err := d.interfaceAddrs(ws.cfg.Interface)
 	if err != nil {
 		d.logger.Warn("conntrack flush: resolve vacated WAN addresses",
-			"group", g.cfg.Name, "wan", old.Wan, "iface", ws.cfg.Interface, "err", err)
-		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "conntrack_flush").Inc()
+			"group", g.Name, "wan", old.Wan, "iface", ws.cfg.Interface, "err", err)
+		d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "conntrack_flush").Inc()
 		return
 	}
 	for _, ip := range addrs {
@@ -446,46 +367,39 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g *groupState, old,
 		n, err := d.flushConntrack(ctx, family, ip)
 		if err != nil {
 			d.logger.Warn("conntrack flush",
-				"group", g.cfg.Name, "wan", old.Wan, "family", family, "ip", ip, "err", err)
-			d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "conntrack_flush").Inc()
+				"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "err", err)
+			d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "conntrack_flush").Inc()
 			continue
 		}
 		d.logger.Info("conntrack flushed",
-			"group", g.cfg.Name, "wan", old.Wan, "family", family, "ip", ip, "entries", n)
+			"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "entries", n)
 	}
 }
 
-// retryPendingApply re-attempts commitDecision for any group whose
-// pending Decision targets `wan`. Called from handleProbeResult:
-// probe results arrive every cycle for an active WAN, so a transient
-// apply failure converges within one probe interval without a
-// dedicated retry timer.
-func (d *daemon) retryPendingApply(ctx context.Context, wan string) {
-	for _, g := range d.groups {
-		if g.applyPending && g.pendingActive.Has && g.pendingActive.Wan == wan {
-			d.commitDecision(ctx, g)
-		}
+// retryGroupDecisions forwards each Probe cycle. Groups decide whether
+// this WAN can advance a pending Decision; callers never inspect intent.
+func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
+	for name, g := range d.groups {
+		d.publishDecision(ctx, d.cfg.Groups[name], g.Probe(ctx, wan))
 	}
 }
 
 // applyRoutes writes the default route per family of the active
 // WAN. With no `families` argument it writes every family the WAN
-// probes (commitDecision's full pass); handleRouteEvent passes a
-// single family — the one whose gateway changed — to skip the
-// netlink work for families that didn't. Families the WAN doesn't
-// probe are skipped either way.
+// probes. The Decision module limits Gateway refreshes to the changed
+// family. Families the WAN doesn't probe are skipped either way.
 //
 // PointToPoint WANs get scope-link routes (no gateway needed);
 // non-PtP WANs use the gateway the gatewayCache learned from the
 // kernel's main routing table.
 //
 // It returns an error if any family *hard*-fails — the ifindex
-// lookup, or a netlink write — so commitDecision can hold the
+// lookup, or a netlink write — so the Decision module can hold the
 // Decision pending and retry. A family with no gateway cached yet
 // is *not* a failure: that write is intentionally deferred (PLAN
 // §6), and handleRouteEvent reapplies it once the gateway is
 // discovered.
-func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan string, families ...probe.Family) error {
+func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan string, families ...probe.Family) error {
 	ws, ok := d.wans[activeWan]
 	if !ok {
 		return fmt.Errorf("apply routes: unknown wan %q", activeWan)
@@ -493,7 +407,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 	ifindex, err := d.ifindexOf(ws.cfg.Interface)
 	if err != nil {
 		d.logger.Error("ifindex lookup", "iface", ws.cfg.Interface, "err", err)
-		d.metrics.ApplyOpErrors.WithLabelValues(g.cfg.Name, "ifindex_lookup").Inc()
+		d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "ifindex_lookup").Inc()
 		return fmt.Errorf("apply routes: ifindex %q: %w", ws.cfg.Interface, err)
 	}
 
@@ -506,7 +420,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 		famLabel := fam.String()
 		route := apply.DefaultRoute{
 			Family:  fam,
-			Table:   g.cfg.Table,
+			Table:   g.Table,
 			IfIndex: ifindex,
 		}
 		switch {
@@ -516,7 +430,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 			gw, ok := d.gateways.get(ws.cfg.Interface, rtnl.RouteFamily(fam))
 			if !ok || gw == nil {
 				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
-					"group", g.cfg.Name, "wan", activeWan, "family", famLabel,
+					"group", g.Name, "wan", activeWan, "family", famLabel,
 					"iface", ws.cfg.Interface)
 				return false
 			}
@@ -524,10 +438,10 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 		}
 		started := time.Now()
 		err := d.writeRoute(ctx, route)
-		d.metrics.ApplyRouteDuration.WithLabelValues(g.cfg.Name, famLabel).Observe(time.Since(started).Seconds())
+		d.metrics.ApplyRouteDuration.WithLabelValues(g.Name, famLabel).Observe(time.Since(started).Seconds())
 		if err != nil {
-			d.logger.Error("route write", "group", g.cfg.Name, "family", famLabel, "err", err)
-			d.metrics.ApplyRouteErrors.WithLabelValues(g.cfg.Name, famLabel).Inc()
+			d.logger.Error("route write", "group", g.Name, "family", famLabel, "err", err)
+			d.metrics.ApplyRouteErrors.WithLabelValues(g.Name, famLabel).Inc()
 			return true
 		}
 		return false
@@ -560,14 +474,9 @@ func (d *daemon) applyRoutes(ctx context.Context, g *groupState, activeWan strin
 }
 
 // handleRouteEvent absorbs an rtnetlink default-route observation
-// into the gateway cache and reapplies any group whose active WAN
-// runs on the affected interface. RTM_NEWROUTE updates the cache
-// (and if the gateway differs from the prior entry, kicks a
-// reapply); RTM_DELROUTE clears the entry.
-//
-// The reapply rewrites only the family whose gateway changed —
-// RouteReplace is idempotent so a full rewrite would be harmless,
-// but per-family halves the netlink syscall count under flap.
+// into the gateway cache and forwards changes to the Group Decision
+// module for each WAN on the affected interface. The module owns
+// whether to retry a Decision or refresh a committed Selection.
 func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	prev, hadPrev := d.gateways.get(e.Iface, e.Family)
 	switch e.Op {
@@ -582,30 +491,18 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 		return
 	}
 
-	for _, g := range d.groups {
-		want := g.intent()
-		if !want.Has {
+	for wan, ws := range d.wans {
+		if ws.cfg.Interface != e.Iface {
 			continue
 		}
-		ws, ok := d.wans[want.Wan]
-		if !ok || ws.cfg.Interface != e.Iface {
-			continue
+		for name, g := range d.groups {
+			committed := g.GatewayChanged(ctx, wan, probe.Family(e.Family))
+			d.publishDecision(ctx, d.cfg.Groups[name], committed)
 		}
-		if g.applyPending {
-			// A freshly discovered gateway may complete a Decision
-			// whose apply was waiting on it.
-			d.commitDecision(ctx, g)
-			continue
-		}
-		// Already converged; rewrite just the family whose gateway
-		// changed. applyRoutes logs its own failures and the health
-		// pipeline handles a vanished interface, so a failure here
-		// needs no further action.
-		_ = d.applyRoutes(ctx, g, want.Wan, probe.Family(e.Family))
 	}
 	// Republish state.json on any gateway-cache mutation. A change
 	// that completes a pending Decision was captured by
-	// commitDecision above; everything else (a new gateway on the
+	// publishDecision above; everything else (a new gateway on the
 	// already-active WAN, a gateway disappearing on the standby)
 	// wouldn't otherwise update state.json, leaving the
 	// wans[<name>].gateways[v4|v6] fields stale.
@@ -619,7 +516,7 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 // `now` controls state.json's `updatedAt`: the zero value defers
 // to state.Writer (which falls back to `time.Now().UTC()` at write
 // time), while a non-zero value pins the stamp so it can match a
-// concurrent hook invocation (commitDecision).
+// concurrent hook invocation (publishDecision).
 func (d *daemon) writeStateSnapshot(now time.Time) {
 	snap := state.State{
 		UpdatedAt: now,
@@ -649,18 +546,8 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 			Families: fams,
 		}
 	}
-	for _, g := range d.groups {
-		var active *string
-		if g.active.Has {
-			a := g.active.Wan
-			active = &a
-		}
-		snap.Groups[g.cfg.Name] = state.Group{
-			Active:         active,
-			ActiveSince:    g.activeSince,
-			DecisionsTotal: g.decisionsTotal,
-			Strategy:       g.cfg.Strategy,
-		}
+	for name, g := range d.groups {
+		snap.Groups[name] = g.Snapshot()
 	}
 	if err := d.stateW.Write(snap); err != nil {
 		d.logger.Error("state write", "err", err)
@@ -671,7 +558,7 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 
 // notifyHooks captures the Decision data on the event-loop goroutine before
 // submitting it to the notifier. The worker never reads daemon-owned state.
-func (d *daemon) notifyHooks(g *groupState, old, next selector.Active, now time.Time) {
+func (d *daemon) notifyHooks(g selector.Group, old, next selector.Active, now time.Time) {
 	event := hookEventFor(old, next)
 	if event == "" {
 		return
@@ -681,7 +568,7 @@ func (d *daemon) notifyHooks(g *groupState, old, next selector.Active, now time.
 	nextIface := ifaceFor(d.wans, next)
 	hookCtx := state.HookContext{
 		Event:    event,
-		Group:    g.cfg.Name,
+		Group:    g.Name,
 		WanOld:   old.Wan,
 		WanNew:   next.Wan,
 		IfaceOld: oldIface,
@@ -695,8 +582,8 @@ func (d *daemon) notifyHooks(g *groupState, old, next selector.Active, now time.
 		GatewayV6Old: d.gateways.string(oldIface, rtnl.RouteFamilyV6),
 		GatewayV6New: d.gateways.string(nextIface, rtnl.RouteFamilyV6),
 		Families:     probedFamiliesFor(d.wans, next),
-		Table:        g.cfg.Table,
-		Mark:         g.cfg.Mark,
+		Table:        g.Table,
+		Mark:         g.Mark,
 		Timestamp:    now,
 	}
 	d.hooks.Notify(hookCtx)
@@ -710,14 +597,4 @@ func (d *daemon) recordProbeMetrics(r probe.ProbeResult, stableHealthy bool) {
 		d.metrics.ProbeRTT.WithLabelValues(r.Wan, t.Target, famLabel).Set(float64(t.RTTMicros) / 1e6)
 	}
 	d.metrics.WanFamilyHealthy.WithLabelValues(r.Wan, famLabel).Set(boolToFloat(stableHealthy))
-}
-
-func (d *daemon) updateGroupActiveGauge(g *groupState) {
-	for _, m := range g.cfg.Members {
-		v := 0.0
-		if g.active.Has && g.active.Wan == m.Wan {
-			v = 1
-		}
-		d.metrics.GroupActive.WithLabelValues(g.cfg.Name, m.Wan).Set(v)
-	}
 }

@@ -28,7 +28,7 @@ modules/
   telegraf.nix            optional metrics-scraping integration
 daemon/
   cmd/wanwatchd/          process lifecycle and event loop
-  internal/               apply, config, metrics, probe, rtnl, selector, state
+  internal/               apply, config, decision, metrics, probe, rtnl, selector, state
   vendor/                 vendored Go dependencies; do not reformat manually
 pkgs/wanwatchd.nix        daemon package
 tests/
@@ -132,7 +132,7 @@ NixOS configuration
   -> lib validation and daemon-config rendering
   -> modules/wanwatch.nix writes /etc/wanwatch/config.json
   -> wanwatchd consumes Probe and rtnetlink events
-  -> selector computes a Selection
+  -> decision manages per-Group Selection and Apply retries using the pure selector
   -> apply mutates route/rule/conntrack state
   -> State, Hooks, and metrics expose the result
 ```

@@ -21,7 +21,7 @@ A Group always has exactly one Selection (which may be `null`). The selector emi
 | Daemon startup | Initial Selection from cold-start carrier-only health | (none yet — `startup` reserved) |
 | `wanwatchctl set <group> <wan>` | Manual override | `manual` (reserved for post-v1) |
 
-A given event recomputes every Group containing the affected WAN. Each Group's `recomputeGroup` is independent; one Group's Decision does not gate another's.
+A given event recomputes every Group containing the affected WAN. Each `decision.Group` owns its Selection independently; one Group's pending Decision does not prevent another's from committing.
 
 ## Cold-start invariant
 
@@ -97,18 +97,17 @@ Both have unit tests that assert determinism across many invocations.
 
 | Failure mode | Daemon behavior |
 |---|---|
-| `apply.WriteDefault` errors | Decision proceeds; route stays stale until next Decision retries. `wanwatch_apply_route_errors_total{group,family}` increments. |
+| `apply.WriteDefault` errors | Decision remains pending; committed Selection and Hooks stay unchanged. Probe cycles or Gateway changes on the pending WAN retry Apply. `wanwatch_apply_route_errors_total{group,family}` increments. |
 | `state.Writer.Write` errors | Logged; metric increments; previous `state.json` stays in place (atomic write semantics). |
 | A hook times out (5 s default) | Logged; counted; next hooks in the .d directory still run. |
 | ProbeResult arrives during Decision | Queued on channel buffer; processed after the current Decision completes. |
 | LinkEvent arrives during Decision | Same — single goroutine drains both channels in order. |
-| All members unhealthy | `active = null`; routes left in place from the previous Selection; no Decision fires (the previous Selection wasn't changed *to* null this cycle — it just observed unhealthy members). |
+| All members unhealthy | A transition to `active = null` commits without route writes and emits a down Hook if a Member was active. Routes remain in place; repeated all-down observations emit no Decision. |
 
 The "stale routes when all unhealthy" point is intentional. Tearing down the last default route would create a different problem (no egress at all). Operators wanting a different policy can write a hook that runs `ip route flush table <T>` on the `down` event.
 
 ## What's out of scope for v1
 
-- Conntrack flush on failover (`apply.FlushBySource` exists but isn't wired into `recomputeGroup`; PLAN §12 OQ #3).
 - Per-Group override at runtime (`wanwatchctl set`).
 - Notification of unhealthy WANs that are *not* currently the Active — the daemon publishes per-WAN Health in `state.json` and `wanwatch_wan_healthy` but emits no Decision until the *Selection* changes.
 - Probe-failure recovery while carrier stays up — covered by hysteresis, but no explicit "wait 30 minutes before re-trying" backoff. Probing continues at `intervalMs` forever.

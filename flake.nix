@@ -325,6 +325,7 @@
                 cat > coverage.thresholds <<'EOF'
                 internal/apply:90
                 internal/config:100
+                internal/decision:100
                 internal/metrics:88
                 internal/probe:86
                 internal/rtnl:91

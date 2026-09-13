@@ -255,7 +255,7 @@ func TestHandleProbeResultDefersSeedUntilWindowFilled(t *testing.T) {
 // TestColdStartCookHealthyDoesNotBumpDecisions: PLAN §8 cold-start
 // requires hysteresis to seed from the first healthy probe Window
 // rather than ramp up from false, so a WAN that's already healthy
-// via carrier-only never flaps during warm-up. recomputeGroup
+// via carrier-only never flaps during warm-up. recomputeAffectedGroups
 // fires the carrier-up Decision once; the subsequent cook with a
 // healthy raw verdict must not produce a second Decision. The VM
 // cold-start scenario asserts this end-to-end; this is the
@@ -281,12 +281,12 @@ func TestColdStartCookHealthyDoesNotBumpDecisions(t *testing.T) {
 
 	g := d.groups["home"]
 	// Carrier-up Decision lands primary as active. decisionsTotal=1.
-	d.recomputeGroup(t.Context(), g, reasonCarrier)
-	if g.decisionsTotal != 1 {
-		t.Fatalf("setup: decisionsTotal = %d, want 1 (cold-start carrier Decision)", g.decisionsTotal)
+	d.recomputeAffectedGroups(t.Context(), "primary", reasonCarrier)
+	if g.Snapshot().DecisionsTotal != 1 {
+		t.Fatalf("setup: decisionsTotal = %d, want 1 (cold-start carrier Decision)", g.Snapshot().DecisionsTotal)
 	}
-	if !g.active.Has || g.active.Wan != "primary" {
-		t.Fatalf("setup: active = %+v, want primary", g.active)
+	if g.Snapshot().Active == nil || *g.Snapshot().Active != "primary" {
+		t.Fatalf("setup: active = %+v, want primary", g.Snapshot().Active)
 	}
 
 	// First full Window for v4 lands healthy. Cook fires;
@@ -310,9 +310,9 @@ func TestColdStartCookHealthyDoesNotBumpDecisions(t *testing.T) {
 	if !fs.healthy {
 		t.Fatalf("post-cook precondition: family.healthy = false, want true (Seed adopted raw=true)")
 	}
-	if g.decisionsTotal != 1 {
+	if g.Snapshot().DecisionsTotal != 1 {
 		t.Errorf("decisionsTotal = %d, want 1 — cold-start cook on a healthy Window must not produce a health Decision",
-			g.decisionsTotal)
+			g.Snapshot().DecisionsTotal)
 	}
 }
 
@@ -417,76 +417,6 @@ func TestHandleRouteEventDelClearsCache(t *testing.T) {
 	}
 }
 
-// TestUpdateGroupActiveGauge: the per-member `wanwatch_group_active`
-// gauge must read 1 for the active member and 0 for every other
-// member of the group. Drives the function directly because the
-// pipeline that normally calls it (recomputeGroup) needs a
-// healthy WAN + clean apply path to fire.
-func TestUpdateGroupActiveGauge(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, &config.Config{
-		Wans: testCfg().Wans,
-		Groups: map[string]selector.Group{
-			"home": {
-				Name:     "home",
-				Strategy: "primary-backup",
-				Table:    100,
-				Mark:     0x100,
-				Members: []selector.Member{
-					{Wan: "primary", Priority: 1},
-					{Wan: "backup", Priority: 2},
-				},
-			},
-		},
-	})
-	g := d.groups["home"]
-	g.active = selector.Active{Wan: "primary", Has: true}
-
-	d.updateGroupActiveGauge(g)
-
-	// Verify by scraping the registry — that's the consumer
-	// contract; reading the gauge directly via Prometheus's
-	// internal types would bypass it.
-	pri := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary"))
-	bak := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "backup"))
-	if pri != 1 {
-		t.Errorf("active member primary: gauge = %v, want 1", pri)
-	}
-	if bak != 0 {
-		t.Errorf("inactive member backup: gauge = %v, want 0", bak)
-	}
-}
-
-// TestUpdateGroupActiveGaugeAbsentClearsAll: when no member is
-// active (Selection.Has == false), every per-member gauge should
-// read 0.
-func TestUpdateGroupActiveGaugeAbsentClearsAll(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, &config.Config{
-		Wans: testCfg().Wans,
-		Groups: map[string]selector.Group{
-			"home": {
-				Name:     "home",
-				Strategy: "primary-backup",
-				Members: []selector.Member{
-					{Wan: "primary", Priority: 1},
-					{Wan: "backup", Priority: 2},
-				},
-			},
-		},
-	})
-	g := d.groups["home"]
-	// Seed: pretend primary was active, then clear it.
-	g.active = selector.Active{Wan: "primary", Has: true}
-	d.updateGroupActiveGauge(g)
-	g.active = selector.NoActive
-	d.updateGroupActiveGauge(g)
-
-	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 0 {
-		t.Errorf("primary after clear: gauge = %v, want 0", v)
-	}
-}
-
 // TestHandleLinkEventUpdatesEveryWANOnSharedInterface guards the
 // supported shape where multiple WANs monitor one interface. The
 // subscriber emits one LinkEvent per interface, so the handler must
@@ -535,30 +465,30 @@ func TestHandleLinkEventSharedInterfaceAvoidsIntermediateDecisions(t *testing.T)
 	g := d.groups["home"]
 
 	for cycle := range 32 {
-		before := g.decisionsTotal
+		before := g.Snapshot().DecisionsTotal
 		d.handleLinkEvent(t.Context(), rtnl.LinkEvent{
 			Name:      "eth0",
 			Carrier:   rtnl.CarrierUp,
 			Operstate: rtnl.OperstateUp,
 		})
-		if delta := g.decisionsTotal - before; delta != 1 {
+		if delta := g.Snapshot().DecisionsTotal - before; delta != 1 {
 			t.Fatalf("cycle %d carrier-up produced %d Decisions, want 1", cycle, delta)
 		}
-		if !g.active.Has || g.active.Wan != "primary" {
-			t.Fatalf("cycle %d carrier-up active = %+v, want primary", cycle, g.active)
+		if g.Snapshot().Active == nil || *g.Snapshot().Active != "primary" {
+			t.Fatalf("cycle %d carrier-up active = %+v, want primary", cycle, g.Snapshot().Active)
 		}
 
-		before = g.decisionsTotal
+		before = g.Snapshot().DecisionsTotal
 		d.handleLinkEvent(t.Context(), rtnl.LinkEvent{
 			Name:      "eth0",
 			Carrier:   rtnl.CarrierDown,
 			Operstate: rtnl.OperstateDown,
 		})
-		if delta := g.decisionsTotal - before; delta != 1 {
+		if delta := g.Snapshot().DecisionsTotal - before; delta != 1 {
 			t.Fatalf("cycle %d carrier-down produced %d Decisions, want 1", cycle, delta)
 		}
-		if g.active.Has {
-			t.Fatalf("cycle %d carrier-down active = %+v, want none", cycle, g.active)
+		if g.Snapshot().Active != nil {
+			t.Fatalf("cycle %d carrier-down active = %+v, want none", cycle, g.Snapshot().Active)
 		}
 	}
 }
@@ -619,15 +549,15 @@ func TestRecomputeGroupColdToPrimary(t *testing.T) {
 	markHealthy(d, "primary", "backup")
 
 	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
+	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
 
-	if !g.active.Has || g.active.Wan != "primary" {
-		t.Errorf("g.active = %+v, want primary present", g.active)
+	if g.Snapshot().Active == nil || *g.Snapshot().Active != "primary" {
+		t.Errorf("g.Snapshot().Active = %+v, want primary present", g.Snapshot().Active)
 	}
-	if g.decisionsTotal != 1 {
-		t.Errorf("decisionsTotal = %d, want 1", g.decisionsTotal)
+	if g.Snapshot().DecisionsTotal != 1 {
+		t.Errorf("decisionsTotal = %d, want 1", g.Snapshot().DecisionsTotal)
 	}
-	if g.activeSince == nil {
+	if g.Snapshot().ActiveSince == nil {
 		t.Error("activeSince = nil, want non-nil on up transition")
 	}
 	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 1 {
@@ -636,55 +566,6 @@ func TestRecomputeGroupColdToPrimary(t *testing.T) {
 	// state.json should have been written.
 	if _, err := os.Stat(d.cfg.Global.StatePath); err != nil {
 		t.Errorf("state file not written: %v", err)
-	}
-}
-
-// TestRecomputeGroupNoChange: a second recomputeGroup with the
-// same input must not bump decisionsTotal — the change-detection
-// guard at the top of the function is what keeps the metric
-// honest under flap-free traffic.
-func TestRecomputeGroupNoChange(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
-
-	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	first := g.decisionsTotal
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if g.decisionsTotal != first {
-		t.Errorf("decisionsTotal advanced on no-op recompute: %d → %d", first, g.decisionsTotal)
-	}
-}
-
-// TestRecomputeGroupSwitch: primary unhealthy, backup healthy →
-// active flips from primary to backup; the prior primary gauge
-// drops to 0 and the new active gauge reads 1.
-func TestRecomputeGroupSwitch(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
-
-	g := d.groups["home"]
-	// First decision: primary wins.
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if g.active.Wan != "primary" {
-		t.Fatalf("setup: want primary active, got %+v", g.active)
-	}
-	// Sicken primary via failed probes — carrier stays up.
-	markUnhealthy(d, "primary")
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if !g.active.Has || g.active.Wan != "backup" {
-		t.Errorf("after primary failure: g.active = %+v, want backup", g.active)
-	}
-	if g.decisionsTotal != 2 {
-		t.Errorf("decisionsTotal = %d, want 2 (cold→primary, primary→backup)", g.decisionsTotal)
-	}
-	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 0 {
-		t.Errorf("primary gauge after switch = %v, want 0", v)
-	}
-	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "backup")); v != 1 {
-		t.Errorf("backup gauge after switch = %v, want 1", v)
 	}
 }
 
@@ -703,7 +584,7 @@ func TestFlushSwitchedConntrackFlushesVacatedWAN(t *testing.T) {
 		return 3, nil
 	}
 
-	g := d.groups["home"]
+	g := d.cfg.Groups["home"]
 	old := selector.Active{Wan: "primary", Has: true}
 	next := selector.Active{Wan: "backup", Has: true}
 	d.flushSwitchedConntrack(t.Context(), g, old, next)
@@ -728,7 +609,7 @@ func TestFlushSwitchedConntrackSkipsNonSwitch(t *testing.T) {
 		return nil, nil
 	}
 
-	g := d.groups["home"]
+	g := d.cfg.Groups["home"]
 	primary := selector.Active{Wan: "primary", Has: true}
 	// down: a WAN is vacated but has no healthy successor — the old
 	// route stays, so a flush would only churn.
@@ -753,7 +634,7 @@ func TestFlushSwitchedConntrackMetersResolveFailure(t *testing.T) {
 		return 0, nil
 	}
 
-	g := d.groups["home"]
+	g := d.cfg.Groups["home"]
 	old := selector.Active{Wan: "primary", Has: true}
 	next := selector.Active{Wan: "backup", Has: true}
 	d.flushSwitchedConntrack(t.Context(), g, old, next)
@@ -781,7 +662,7 @@ func TestFlushSwitchedConntrackMetersFlushFailure(t *testing.T) {
 		return 5, nil
 	}
 
-	g := d.groups["home"]
+	g := d.cfg.Groups["home"]
 	old := selector.Active{Wan: "primary", Has: true}
 	next := selector.Active{Wan: "backup", Has: true}
 	d.flushSwitchedConntrack(t.Context(), g, old, next)
@@ -796,7 +677,7 @@ func TestFlushSwitchedConntrackMetersFlushFailure(t *testing.T) {
 }
 
 // TestRecomputeGroupSwitchFlushesConntrack: a switch driven through
-// recomputeGroup → commitDecision flushes the vacated WAN's conntrack
+// the Group Decision module flushes the vacated WAN's conntrack
 // entries; a cold-start "up" (nothing vacated) does not.
 func TestRecomputeGroupSwitchFlushesConntrack(t *testing.T) {
 	t.Parallel()
@@ -812,22 +693,21 @@ func TestRecomputeGroupSwitchFlushesConntrack(t *testing.T) {
 		return 1, nil
 	}
 
-	g := d.groups["home"]
 	// Cold start → primary: an "up", nothing vacated.
-	d.recomputeGroup(t.Context(), g, reasonHealth)
+	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
 	if len(flushedIfaces) != 0 {
 		t.Errorf("conntrack resolve on cold-start up = %v, want none", flushedIfaces)
 	}
 	// primary sickens → switch to backup: primary's iface is flushed.
 	markUnhealthy(d, "primary")
-	d.recomputeGroup(t.Context(), g, reasonHealth)
+	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
 	if len(flushedIfaces) != 1 || flushedIfaces[0] != "eth0" {
 		t.Errorf("conntrack resolve on switch = %v, want [eth0]", flushedIfaces)
 	}
 }
 
 // TestRecomputeAffectedGroupsFansOut: a per-WAN health change
-// drives recomputeGroup on every group containing that WAN, and
+// drives recomputeAffectedGroups on every group containing that WAN, and
 // only those groups. Builds two groups (home contains primary;
 // guest contains backup only) and asserts the fan-out predicate
 // fires correctly.
@@ -855,40 +735,17 @@ func TestRecomputeAffectedGroupsFansOut(t *testing.T) {
 	// `primary` only belongs to `home` — recomputing for primary
 	// should leave guest untouched.
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
-	if !d.groups["home"].active.Has {
-		t.Errorf("home should have an active after primary fanout; got %+v", d.groups["home"].active)
+	if d.groups["home"].Snapshot().Active == nil {
+		t.Errorf("home should have an active after primary fanout; got %+v", d.groups["home"].Snapshot().Active)
 	}
-	if d.groups["guest"].decisionsTotal != 0 {
-		t.Errorf("guest.decisionsTotal = %d, want 0 (primary not a member)", d.groups["guest"].decisionsTotal)
+	if d.groups["guest"].Snapshot().DecisionsTotal != 0 {
+		t.Errorf("guest.decisionsTotal = %d, want 0 (primary not a member)", d.groups["guest"].Snapshot().DecisionsTotal)
 	}
 
 	// `backup` belongs to both — touching it must fire both.
 	d.recomputeAffectedGroups(t.Context(), "backup", reasonCarrier)
-	if d.groups["guest"].decisionsTotal != 1 {
-		t.Errorf("guest.decisionsTotal = %d, want 1 after backup fanout", d.groups["guest"].decisionsTotal)
-	}
-}
-
-// TestRecomputeGroupAllUnhealthy: every member unhealthy → no
-// Selection. Active.Has flips to false; the prior gauge clears.
-func TestRecomputeGroupAllUnhealthy(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
-
-	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if !g.active.Has {
-		t.Fatal("setup: expected primary active after first decision")
-	}
-	// Both go unhealthy.
-	markUnhealthy(d, "primary", "backup")
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if g.active.Has {
-		t.Errorf("g.active = %+v, want absent when all members unhealthy", g.active)
-	}
-	if v := readGauge(t, d.metrics.GroupActive.WithLabelValues("home", "primary")); v != 0 {
-		t.Errorf("primary gauge after all-down = %v, want 0", v)
+	if d.groups["guest"].Snapshot().DecisionsTotal != 1 {
+		t.Errorf("guest.decisionsTotal = %d, want 1 after backup fanout", d.groups["guest"].Snapshot().DecisionsTotal)
 	}
 }
 
@@ -902,7 +759,7 @@ func TestNotifyHooksCapturesDecisionData(t *testing.T) {
 		`touch `+started+`; while [ ! -e `+release+` ]; do sleep 0.01; done`)
 	writeHook(t, filepath.Join(d.cfg.Global.HooksDir, "switch.d"), "env.sh", `env > `+outFile)
 
-	g := d.groups["home"]
+	g := d.cfg.Groups["home"]
 	primary := selector.Active{Wan: "primary", Has: true}
 	backup := selector.Active{Wan: "backup", Has: true}
 	d.notifyHooks(g, selector.NoActive, backup, time.Time{})
@@ -918,12 +775,13 @@ func TestNotifyHooksCapturesDecisionData(t *testing.T) {
 		state.EnvIfaceOld: "wwan0", state.EnvIfaceNew: "eth0",
 		state.EnvGatewayV4Old: "198.51.100.1", state.EnvGatewayV4New: "192.0.2.1",
 		state.EnvGatewayV6Old: "", state.EnvGatewayV6New: "2001:db8::1",
-		state.EnvTable: strconv.Itoa(g.cfg.Table), state.EnvMark: strconv.Itoa(g.cfg.Mark),
+		state.EnvTable: strconv.Itoa(g.Table), state.EnvMark: strconv.Itoa(g.Mark),
 		state.EnvTimestamp: now.Format(time.RFC3339Nano),
 	}
 	d.notifyHooks(g, backup, primary, now)
 	// Change all sources while delivery is held behind the first event.
-	g.cfg.Name, g.cfg.Table, g.cfg.Mark = "changed", 999, 999
+	g.Name, g.Table, g.Mark = "changed", 999, 999
+	d.cfg.Groups["home"] = g
 	d.wans["primary"].cfg.Interface = "changed0"
 	d.wans["backup"].cfg.Interface = "changed1"
 	delete(d.wans["primary"].families, probe.FamilyV6)
@@ -968,7 +826,7 @@ func TestNotifyHooksNoEventOnIdentical(t *testing.T) {
 		`touch `+sentinel)
 
 	active := selector.Active{Wan: "primary", Has: true}
-	d.notifyHooks(d.groups["home"], active, active, time.Time{})
+	d.notifyHooks(d.cfg.Groups["home"], active, active, time.Time{})
 	d.hooks.Close()
 
 	if _, err := os.Stat(sentinel); err == nil {
@@ -986,9 +844,9 @@ func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 	writes := countWrites(d)
 
 	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if g.active.Wan != "primary" {
-		t.Fatalf("setup: want primary active, got %+v", g.active)
+	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
+	if *g.Snapshot().Active != "primary" {
+		t.Fatalf("setup: want primary active, got %+v", g.Snapshot().Active)
 	}
 
 	before := *writes
@@ -1013,8 +871,7 @@ func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
 	markHealthy(d, "primary", "backup")
 	writes := countWrites(d)
 
-	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
+	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
 
 	before := *writes
 	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
@@ -1159,7 +1016,7 @@ func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) 
 // for the primary WAN must:
 //
 //  1. flow through eventLoop → handleLinkEvent
-//  2. trigger recomputeAffectedGroups → recomputeGroup
+//  2. trigger recomputeAffectedGroups → recomputeAffectedGroups
 //  3. produce a Selection with primary active (carrier up plus
 //     uncooked families ⇒ healthy(), no probe sample needed)
 //  4. invoke notifyHooks with EventUp
@@ -1296,137 +1153,6 @@ func TestRecordProbeMetricsEmptyPerTarget(t *testing.T) {
 	}
 }
 
-// TestCommitDecisionDefersOnApplyFailure: a hard apply failure
-// records the Decision internally (decisionsTotal, pendingActive)
-// but defers the visible effects — `active` stays absent and
-// state.json is not written, so neither reports a switch the kernel
-// hasn't made.
-func TestCommitDecisionDefersOnApplyFailure(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
-	d.ifindexOf = failingIfindex
-
-	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-
-	if g.decisionsTotal != 1 {
-		t.Errorf("decisionsTotal = %d, want 1 (Decision recorded even on apply failure)", g.decisionsTotal)
-	}
-	if !g.applyPending || g.pendingActive.Wan != "primary" {
-		t.Errorf("applyPending=%v pendingActive=%+v, want pending on primary", g.applyPending, g.pendingActive)
-	}
-	if g.active.Has {
-		t.Errorf("g.active = %+v, want absent — apply failed, switch not converged", g.active)
-	}
-	if _, err := os.Stat(d.cfg.Global.StatePath); err == nil {
-		t.Error("state.json written despite a failed apply — switch not converged")
-	}
-}
-
-// TestRetryPendingApplyConverges: once apply starts succeeding, the
-// next probe result for the pending WAN converges the Decision —
-// promoting `active`, writing state.json, and firing the deferred
-// up hook, none of which happened while the apply was failing.
-func TestRetryPendingApplyConverges(t *testing.T) {
-	t.Parallel()
-	cfg := testCfgWithGroup()
-	// Give primary real thresholds so the probe result below keeps it
-	// healthy — the result is only here to *trigger* the retry, not
-	// to change the health verdict.
-	cfg.Wans["primary"] = config.Wan{
-		Name:      "primary",
-		Interface: "eth0",
-		Probe: config.Probe{
-			Targets: config.Targets{
-				V4: []string{"1.1.1.1"},
-				V6: []string{"2606:4700:4700::1111"},
-			},
-			Thresholds: config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
-			Hysteresis: config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
-		},
-	}
-	d := testDaemon(t, cfg)
-	markHealthy(d, "primary", "backup")
-
-	sentinel := filepath.Join(d.cfg.Global.HooksDir, "up-ran.txt")
-	writeHook(t, filepath.Join(d.cfg.Global.HooksDir, "up.d"), "notify.sh",
-		"touch "+sentinel)
-
-	failing := true
-	d.ifindexOf = func(string) (int, error) {
-		if failing {
-			return 0, errors.New("no such interface")
-		}
-		return 1, nil
-	}
-
-	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if !g.applyPending {
-		t.Fatalf("setup: want applyPending after a failed apply, got %+v", g)
-	}
-	if _, err := os.Stat(sentinel); err == nil {
-		t.Fatal("up hook fired while the Decision was still pending")
-	}
-
-	// Apply now succeeds; a probe result for the pending WAN retries.
-	failing = false
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats:  probe.FamilyStats{LossRatio: 0, RTTMicros: 10_000},
-	})
-	d.hooks.Close()
-
-	if g.applyPending {
-		t.Error("still applyPending after a successful retry")
-	}
-	if !g.active.Has || g.active.Wan != "primary" {
-		t.Errorf("g.active = %+v, want primary after the retry converged", g.active)
-	}
-	if _, err := os.Stat(d.cfg.Global.StatePath); err != nil {
-		t.Errorf("state.json not written after the retry converged: %v", err)
-	}
-	if _, err := os.Stat(sentinel); err != nil {
-		t.Errorf("deferred up hook did not fire after the retry converged: %v", err)
-	}
-}
-
-// TestSupersedingDecisionWhilePending: a second Decision made while
-// the first is still un-converged replaces pendingActive, bumps
-// decisionsTotal, and — since nothing ever converged — leaves
-// `active` absent so state/hooks never reported the dropped switch.
-func TestSupersedingDecisionWhilePending(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
-	d.ifindexOf = failingIfindex
-
-	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if !g.applyPending || g.pendingActive.Wan != "primary" {
-		t.Fatalf("decision 1: want pending on primary, got pending=%v active=%+v",
-			g.applyPending, g.pendingActive)
-	}
-
-	// primary sickens — the selector now picks backup, superseding
-	// the still-pending primary Decision.
-	markUnhealthy(d, "primary")
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-
-	if !g.applyPending || g.pendingActive.Wan != "backup" {
-		t.Errorf("decision 2: want pending on backup, got pending=%v active=%+v",
-			g.applyPending, g.pendingActive)
-	}
-	if g.decisionsTotal != 2 {
-		t.Errorf("decisionsTotal = %d, want 2", g.decisionsTotal)
-	}
-	if g.active.Has {
-		t.Errorf("g.active = %+v, want absent — no Decision ever converged", g.active)
-	}
-}
-
 // TestApplyRoutesErrorContract: applyRoutes returns nil for a soft
 // gateway-skip (intentional deferral, not a failure) but an error
 // for every hard failure — unknown WAN, ifindex lookup, netlink
@@ -1434,7 +1160,7 @@ func TestSupersedingDecisionWhilePending(t *testing.T) {
 func TestApplyRoutesErrorContract(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	g := d.groups["home"]
+	g := d.cfg.Groups["home"]
 
 	// No gateway cached for primary (non-PtP) → every family is a
 	// soft skip, which is not a failure.
@@ -1482,7 +1208,7 @@ func TestApplyRoutesExplicitFamilyWritesOnlyThat(t *testing.T) {
 		return nil
 	}
 
-	if err := d.applyRoutes(t.Context(), d.groups["home"], "primary", probe.FamilyV4); err != nil {
+	if err := d.applyRoutes(t.Context(), d.cfg.Groups["home"], "primary", probe.FamilyV4); err != nil {
 		t.Fatalf("applyRoutes(primary, v4) = %v, want nil", err)
 	}
 	if len(fams) != 1 || fams[0] != probe.FamilyV4 {
@@ -1497,53 +1223,10 @@ func TestApplyRoutesExplicitFamilySkipsUnprobed(t *testing.T) {
 	// backup is v4-only in testCfg (its only target is 8.8.8.8), so
 	// passing FamilyV6 must be a no-op — the daemon has no route to
 	// maintain for an unprobed family.
-	if err := d.applyRoutes(t.Context(), d.groups["home"], "backup", probe.FamilyV6); err != nil {
+	if err := d.applyRoutes(t.Context(), d.cfg.Groups["home"], "backup", probe.FamilyV6); err != nil {
 		t.Errorf("applyRoutes(backup, v6) = %v, want nil (unprobed family is a no-op)", err)
 	}
 	if *writes != 0 {
 		t.Errorf("writes = %d, want 0 (unprobed family must not call writeRoute)", *writes)
-	}
-}
-
-// TestHandleRouteEventRewritesOnlyEventFamily: a route event for one
-// family rewrites that family's default route and not the other.
-// RouteReplace is idempotent so a full rewrite would be harmless,
-// but per-family halves the netlink syscall count under flap.
-func TestHandleRouteEventRewritesOnlyEventFamily(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
-
-	// Both families have a cached gateway up front so the cold-start
-	// commit's per-family writes can all land.
-	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	d.gateways.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
-
-	var written []probe.Family
-	d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
-		written = append(written, r.Family)
-		return nil
-	}
-
-	g := d.groups["home"]
-	d.recomputeGroup(t.Context(), g, reasonHealth)
-	if got := len(written); got != 2 {
-		t.Fatalf("cold-start writes = %d (families %v), want 2 (both)", got, written)
-	}
-
-	// A v4 RouteEvent must rewrite only v4.
-	cold := len(written)
-	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
-		Op:      rtnl.RouteEventAdd,
-		Iface:   "eth0",
-		Family:  rtnl.RouteFamilyV4,
-		Gateway: net.ParseIP("192.0.2.2"), // distinct → changed=true
-	})
-	after := written[cold:]
-	if len(after) != 1 {
-		t.Fatalf("RouteEvent writes = %d (families %v), want 1 (just v4)", len(after), after)
-	}
-	if after[0] != probe.FamilyV4 {
-		t.Errorf("RouteEvent rewrote family %v, want FamilyV4", after[0])
 	}
 }
