@@ -4,6 +4,10 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- Gateway discovery now subscribes to route changes before taking its initial snapshot. Default routes installed during daemon startup are retained, preventing a missed Gateway from indefinitely deferring a Group route write. Buffered and subsequent notifications trigger current-route reads, so obsolete additions/deletions cannot regress a newer Gateway in State or a Group's route table.
+
 ### Changed
 
 - **API break — `groups.<name>.mark` and `groups.<name>.table` are now required.** The hash + linear-probe auto-allocator (`lib/internal/{allocator,marks,tables}.nix`) was removed; users must declare both integers explicitly per group. Both fields are typed as `wanwatch.types.fwmark` / `wanwatch.types.routingTableId` — `lib.types.ints.between 1000 32767`, so the kernel-reserved tables (`253`/`254`/`255`) and small-integer values commonly used by ad-hoc scripts are excluded by construction. The NixOS module asserts no duplicate marks or tables across groups at eval time. `services.wanwatch.marks.<group>` and `.tables.<group>` outputs remain (read-only echoes of the user's input) so downstream consumers (nftzones, hand-rolled nftables) keep referencing them by name. Migration: per group, add `mark = N; table = N;` with any value in `1000..32767`; collisions surface as eval errors and can be resolved by picking different integers. Rationale: the auto-allocator's "function of the full group-name set" semantic meant adding a new group could silently shift another group's mark, surprising operators downstream; explicit declaration eliminates this and removes ~200 LOC + tests.

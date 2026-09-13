@@ -129,13 +129,11 @@ func (f RouteFamily) String() string {
 	return "v4"
 }
 
-// RouteEventOp tags a RouteEvent as the route appearing
-// (RouteEventAdd, RTM_NEWROUTE) or disappearing (RouteEventDel,
-// RTM_DELROUTE) on the main routing table.
+// RouteEventOp tags a RouteEvent as a current default-route observation
+// (RouteEventAdd) or an observation that no default remains (RouteEventDel).
 type RouteEventOp int
 
-// The two RouteEventOp values: add (kernel installed a route) and
-// del (kernel withdrew one).
+// The two RouteEventOp values: add (a default exists) and del (none exists).
 const (
 	RouteEventAdd RouteEventOp = iota
 	RouteEventDel
@@ -149,7 +147,7 @@ func (o RouteEventOp) String() string {
 	return "add"
 }
 
-// RouteEvent is a default-route lifecycle event observed on the
+// RouteEvent is a current default-route observation from the
 // kernel's main RIB for a watched interface. Drives the daemon's
 // gateway-discovery cache: each Add carries the current next-hop
 // for the (iface, family) pair; each Del marks the pair unknown.

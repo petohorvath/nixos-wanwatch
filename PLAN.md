@@ -735,6 +735,15 @@ A third channel feeds `RouteEvent`s from the per-WAN
 default routes into the per-WAN Gateway cache so Apply can write the
 per-Group table without re-reading the kernel on every Decision.
 
+The route subscriber establishes its live subscription before taking the
+initial IPv4 and IPv6 snapshots. Snapshot events are queued synchronously
+before the daemon's event loop starts. Live notifications buffer during the
+dump; every matching notification triggers a fresh read of the affected
+interface/family's current default instead of replaying its historical payload.
+This closes the startup gap where a default route could otherwise escape both
+sources, without allowing older notifications to regress a newer Gateway in
+State or Apply. A failed or interrupted read terminates the subscription.
+
 ### Cold-start behavior
 
 When the daemon starts, no Samples exist yet. Two questions are
