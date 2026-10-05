@@ -25,7 +25,7 @@ in
 {
   # ===== Happy path — minimal input =====
 
-  testMakeMinimalReturnsValue = {
+  testMemberMakeMinimalReturnsValue = {
     expr = builtins.isAttrs (member.make minimalInput);
     expected = true;
   };
@@ -47,7 +47,7 @@ in
 
   # ===== Happy path — full input =====
 
-  testMakeFullPreservesAllFields = {
+  testMemberMakeFullPreservesAllFields = {
     expr = {
       inherit (member.make fullInput) priority wan weight;
     };
@@ -122,7 +122,7 @@ in
 
   # ===== Multi-error aggregation =====
 
-  testMultipleErrorsAggregated = {
+  testMemberMultipleErrorsAggregated = {
     expr =
       let
         error = tryError {
@@ -142,29 +142,29 @@ in
 
   # ===== make throws =====
 
-  testMakeThrowsOnInvalid = {
+  testMemberMakeThrowsOnInvalid = {
     expr = evalThrows (member.make { wan = ""; });
     expected = true;
   };
 
   # ===== tryMake contract =====
 
-  testTryMakeOkOnValid = {
+  testMemberTryMakeOkOnValid = {
     expr = (member.tryMake minimalInput).success;
     expected = true;
   };
 
-  testTryMakeErrOnInvalid = {
+  testMemberTryMakeErrOnInvalid = {
     expr = (member.tryMake { wan = ""; }).success;
     expected = false;
   };
 
-  testTryMakeErrorNullOnSuccess = {
+  testMemberTryMakeErrorNullOnSuccess = {
     expr = (member.tryMake minimalInput).error;
     expected = null;
   };
 
-  testTryMakeValueNullOnFailure = {
+  testMemberTryMakeValueNullOnFailure = {
     expr = (member.tryMake { wan = ""; }).value;
     expected = null;
   };
@@ -178,7 +178,7 @@ in
 
   # ===== Defaults exposed =====
 
-  testDefaultsExposed = {
+  testMemberDefaultsExposed = {
     expr = member.defaults;
     expected = {
       weight = 100;
@@ -188,7 +188,7 @@ in
 
   # ===== Round-trip =====
 
-  testRoundTrip = {
+  testMemberRoundTrip = {
     # PLAN §9.1 (5): re-emitting the JSON shape after a second
     # `make` must be byte-identical to the first.
     expr =

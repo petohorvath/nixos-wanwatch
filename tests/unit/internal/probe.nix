@@ -55,7 +55,7 @@ in
 {
   # ===== Happy path — minimal input =====
 
-  testMakeMinimalReturnsValue = {
+  testProbeMakeMinimalReturnsValue = {
     expr = builtins.isAttrs (probe.make minimalInput);
     expected = true;
   };
@@ -561,7 +561,7 @@ in
 
   # ===== Aggregated error reporting =====
 
-  testMultipleErrorsAggregated = {
+  testProbeMultipleErrorsAggregated = {
     # Every violation in one input appears in the error message.
     expr =
       let
@@ -582,7 +582,7 @@ in
 
   # ===== tryMake contract =====
 
-  testTryMakeOkOnValid = {
+  testProbeTryMakeOkOnValid = {
     expr = (probe.tryMake minimalInput).success;
     expected = true;
   };
@@ -592,24 +592,24 @@ in
     expected = true;
   };
 
-  testTryMakeErrOnInvalid = {
+  testProbeTryMakeErrOnInvalid = {
     expr = (probe.tryMake { targets = { }; }).success;
     expected = false;
   };
 
-  testTryMakeErrorNullOnSuccess = {
+  testProbeTryMakeErrorNullOnSuccess = {
     expr = (probe.tryMake minimalInput).error;
     expected = null;
   };
 
-  testTryMakeValueNullOnFailure = {
+  testProbeTryMakeValueNullOnFailure = {
     expr = (probe.tryMake { targets = { }; }).value;
     expected = null;
   };
 
   # ===== Defaults exposed =====
 
-  testDefaultsExposed = {
+  testProbeDefaultsExposed = {
     # The option types read their defaults from probe.defaults.
     expr = probe.defaults.intervalMs;
     expected = 500;
@@ -617,7 +617,7 @@ in
 
   # ===== Round-trip =====
 
-  testRoundTrip = {
+  testProbeRoundTrip = {
     # PLAN §9.1 (5): `toJSONValue` output is itself a valid `make`
     # input, and re-emitting it after a second `make` is
     # byte-identical to the first.

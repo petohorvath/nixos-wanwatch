@@ -52,7 +52,7 @@ in
 {
   # ===== Happy path =====
 
-  testMakeMinimalReturnsValue = {
+  testGroupMakeMinimalReturnsValue = {
     expr = builtins.isAttrs (group.make minimalInput);
     expected = true;
   };
@@ -72,7 +72,7 @@ in
     };
   };
 
-  testMakeFullPreservesAllFields = {
+  testGroupMakeFullPreservesAllFields = {
     expr = {
       inherit (group.make fullInput)
         mark
@@ -104,7 +104,7 @@ in
 
   # ===== Error: groupInvalidName =====
 
-  testRejectsMissingName = {
+  testGroupRejectsMissingName = {
     expr = errorMatches "groupInvalidName" (tryError {
       members = [ { wan = "primary"; } ];
       mark = 1000;
@@ -113,7 +113,7 @@ in
     expected = true;
   };
 
-  testRejectsEmptyName = {
+  testGroupRejectsEmptyName = {
     expr = errorMatches "groupInvalidName" (tryError (minimalInput // { name = ""; }));
     expected = true;
   };
@@ -339,7 +339,7 @@ in
 
   # ===== Multi-error aggregation =====
 
-  testMultipleErrorsAggregated = {
+  testGroupMultipleErrorsAggregated = {
     expr =
       let
         error = tryError {
@@ -363,27 +363,27 @@ in
 
   # ===== make / tryMake contract =====
 
-  testMakeThrowsOnInvalid = {
+  testGroupMakeThrowsOnInvalid = {
     expr = evalThrows (group.make { name = ""; });
     expected = true;
   };
 
-  testTryMakeOkOnValid = {
+  testGroupTryMakeOkOnValid = {
     expr = (group.tryMake minimalInput).success;
     expected = true;
   };
 
-  testTryMakeErrOnInvalid = {
+  testGroupTryMakeErrOnInvalid = {
     expr = (group.tryMake { name = ""; }).success;
     expected = false;
   };
 
-  testTryMakeErrorNullOnSuccess = {
+  testGroupTryMakeErrorNullOnSuccess = {
     expr = (group.tryMake minimalInput).error;
     expected = null;
   };
 
-  testTryMakeValueNullOnFailure = {
+  testGroupTryMakeValueNullOnFailure = {
     expr = (group.tryMake { name = ""; }).value;
     expected = null;
   };
@@ -407,7 +407,7 @@ in
 
   # ===== Defaults exposed =====
 
-  testDefaultsExposed = {
+  testGroupDefaultsExposed = {
     # Only `strategy` has a default; table and mark are required.
     expr = group.defaults;
     expected = {
@@ -417,7 +417,7 @@ in
 
   # ===== Round-trip =====
 
-  testRoundTrip = {
+  testGroupRoundTrip = {
     # PLAN §9.1 (5): re-emitting the JSON shape after a second
     # `make` must be byte-identical to the first, nested members
     # included.

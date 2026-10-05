@@ -123,12 +123,12 @@ in
 
   # ===== Error: wanInvalidName =====
 
-  testRejectsMissingName = {
+  testWanRejectsMissingName = {
     expr = errorMatches "wanInvalidName" (tryError (removeAttrs dualStackInput [ "name" ]));
     expected = true;
   };
 
-  testRejectsEmptyName = {
+  testWanRejectsEmptyName = {
     expr = errorMatches "wanInvalidName" (tryError (dualStackInput // { name = ""; }));
     expected = true;
   };
@@ -198,7 +198,7 @@ in
 
   # ===== Aggregated multi-error =====
 
-  testMultipleErrorsAggregated = {
+  testWanMultipleErrorsAggregated = {
     # Violations across several fields are all reported.
     expr =
       let
@@ -254,36 +254,36 @@ in
 
   # ===== tryMake contract =====
 
-  testTryMakeOkOnValid = {
+  testWanTryMakeOkOnValid = {
     expr = (wan.tryMake dualStackInput).success;
     expected = true;
   };
 
-  testTryMakeErrOnInvalid = {
+  testWanTryMakeErrOnInvalid = {
     expr = (wan.tryMake { name = "bad"; }).success;
     expected = false;
   };
 
-  testTryMakeErrorNullOnSuccess = {
+  testWanTryMakeErrorNullOnSuccess = {
     expr = (wan.tryMake dualStackInput).error;
     expected = null;
   };
 
-  testTryMakeValueNullOnFailure = {
+  testWanTryMakeValueNullOnFailure = {
     expr = (wan.tryMake { name = "bad"; }).value;
     expected = null;
   };
 
   # ===== make throws =====
 
-  testMakeThrowsOnInvalid = {
+  testWanMakeThrowsOnInvalid = {
     expr = evalThrows (wan.make { name = "bad"; });
     expected = true;
   };
 
   # ===== Round-trip =====
 
-  testRoundTrip = {
+  testWanRoundTrip = {
     # PLAN §9.1 (5): re-emitting the JSON shape after a second
     # `make` must be byte-identical to the first, nested probe
     # included.

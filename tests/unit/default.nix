@@ -3,7 +3,8 @@
 
   Builds the library and the shared helpers once, passes them to every
   suite as one test context, and runs the merged `testFoo = { expr;
-  expected; }` attrsets through `runner.nix`.
+  expected; }` attrsets through `runner.nix`. Test names must be unique
+  across suites.
 */
 { pkgs, libnet }:
 let
@@ -16,6 +17,22 @@ let
     helpers = import ./helpers.nix { inherit pkgs; };
     wanwatch = import ../../lib { inherit lib libnet; };
   };
+
+  # `//` would let a later suite silently replace an equally named test.
+  mergeSuites =
+    suites:
+    let
+      duplicateNames = lib.pipe suites [
+        (lib.concatMap builtins.attrNames)
+        (lib.groupBy lib.id)
+        (lib.filterAttrs (_: occurrences: builtins.length occurrences > 1))
+        builtins.attrNames
+      ];
+    in
+    if duplicateNames == [ ] then
+      lib.mergeAttrsList suites
+    else
+      throw "wanwatch unit tests: duplicate test names: ${lib.concatStringsSep ", " duplicateNames}";
 in
 lib.pipe
   [
@@ -36,6 +53,6 @@ lib.pipe
   ]
   [
     (map (suitePath: import suitePath testContext))
-    lib.mergeAttrsList
+    mergeSuites
     runner.runTests
   ]
