@@ -137,7 +137,7 @@
       unstablePkgsFor = system: nixpkgs-unstable.legacyPackages.${system};
 
       # Every VM scenario built against `pkgs`. `extraArgs` supplies the
-      # additional modules some scenarios import.
+      # additional modules and libraries some scenarios take.
       makeVmChecks =
         pkgs:
         let
@@ -205,6 +205,8 @@
             GOFLAGS = "-mod=vendor";
             GOPROXY = "off";
             GOSUMDB = "off";
+            # Only `-race` needs cgo; netns, the one cgo dependency, is
+            # unreachable from wanwatch.
             CGO_ENABLED = if cgo then "1" else "0";
           }
           ''
@@ -331,7 +333,8 @@
               done < coverage.thresholds
 
               if [ "$fail" -ne 0 ]; then
-                  echo "coverage: a package fell below its floor" >&2
+                  echo "coverage: one or more packages regressed below" \
+                      "their floor" >&2
                   exit 1
               fi
             '';
