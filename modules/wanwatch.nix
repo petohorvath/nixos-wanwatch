@@ -1,10 +1,8 @@
 /*
-  services.wanwatch — declarative multi-WAN failover for NixOS.
-
-  Renders the user's `wans` + `groups` declarations into the daemon
-  config JSON (via `wanwatch.config.toJSON`), creates the
-  wanwatch:wanwatch system user, and emits a hardened systemd unit
-  for wanwatchd.
+  `services.wanwatch`: multi-WAN monitoring and failover. Renders the
+  declared WANs and Groups into the daemon configuration, creates the
+  `wanwatch` system user and group, and runs wanwatchd as a hardened
+  systemd service.
 
   Example:
 
@@ -14,16 +12,16 @@
         interface = "eth0";
         probe.targets.v4 = [ "1.1.1.1" ];
       };
-      groups.home-uplink.members = [
-        { wan = "primary"; priority = 1; }
-      ];
+      groups.home-uplink = {
+        members = [ { wan = "primary"; } ];
+        mark = 1000;
+        table = 1000;
+      };
     };
 
-  Cross-module wiring: `config.services.wanwatch.marks.<group>` and
-  `.tables.<group>` expose the allocated fwmark / routing-table id
-  for each group as read-only outputs, so nftzones (or any other
-  consumer) can reference them by name without hard-coding numbers
-  (PLAN §6).
+  The read-only `marks.<group>` and `tables.<group>` options echo each
+  Group's fwmark and routing table, so other modules such as nftzones
+  can reference them by name (PLAN §6).
 */
 { wanwatch }:
 
@@ -41,13 +39,12 @@ let
     inherit (wanwatch) version;
   };
 
-  # The option types accept already-validated user inputs; round-trip
-  # through `wanwatch.<type>.make` to get the tagged value form that
-  # the JSON renderer's accessors expect.
-  wanValues = lib.mapAttrs (_: w: wanwatch.wan.make w) cfg.wans;
-  groupValues = lib.mapAttrs (_: g: wanwatch.group.make g) cfg.groups;
+  # The renderer takes value-type values, and `make` also applies the
+  # cross-field checks that option types cannot express.
+  wanValues = lib.mapAttrs (_: wanwatch.wan.make) cfg.wans;
+  groupValues = lib.mapAttrs (_: wanwatch.group.make) cfg.groups;
 
-  resolved = wanwatch.config.resolveAllocations groupValues;
+  validatedGroups = wanwatch.config.resolveAllocations groupValues;
 
   renderedConfig = wanwatch.config.toJSON {
     inherit (cfg) global;
@@ -61,27 +58,27 @@ let
         type = lib.types.str;
         default = wanwatch.config.defaultGlobal.statePath;
         description = ''
-          Path the daemon writes state.json to atomically on every
-          Decision. Lives under `/run` by default — the systemd
-          unit creates the directory via RuntimeDirectory.
+          File the daemon atomically rewrites with its State on every
+          Decision. The default lives in the service's
+          RuntimeDirectory under `/run`.
         '';
       };
       hooksDir = lib.mkOption {
         type = lib.types.str;
         default = wanwatch.config.defaultGlobal.hooksDir;
         description = ''
-          Root of the hook-script tree. The daemon dispatches
-          `<hooksDir>/{up,down,switch}.d/*` on every Decision per
-          PLAN §5.5.
+          Root of the hook-script tree. On every Decision the daemon
+          runs the scripts in `<hooksDir>/{up,down,switch}.d/`
+          (PLAN §5.5).
         '';
       };
       metricsSocket = lib.mkOption {
         type = lib.types.str;
         default = wanwatch.config.defaultGlobal.metricsSocket;
         description = ''
-          Filesystem path the daemon listens on for Prometheus
-          scrapes. Mode 0660 — Telegraf reads via supplementary
-          group membership.
+          Unix socket on which the daemon serves Prometheus metrics.
+          The socket has mode 0660, so scrapers need membership in
+          the daemon's group.
         '';
       };
       logLevel = lib.mkOption {
@@ -101,10 +98,9 @@ let
         type = lib.types.ints.positive;
         default = wanwatch.config.defaultGlobal.hookTimeoutMs;
         description = ''
-          Per-hook execution deadline in milliseconds. A hook still
-          running past this is killed (its process group is sent
-          SIGKILL) and reported as a timeout. Applies to every script
-          under `hooksDir`.
+          Deadline in milliseconds for each script under `hooksDir`.
+          When it expires, the daemon sends SIGKILL to the hook's
+          process group and reports a timeout.
         '';
       };
     };
@@ -125,9 +121,8 @@ in
       type = lib.types.str;
       default = "wanwatch";
       description = ''
-        Unix user the daemon runs as. The default `wanwatch` is
-        created automatically; an override skips user creation and
-        assumes the caller manages the account.
+        User the daemon runs as. The module creates the default
+        `wanwatch` user; any other user must be managed elsewhere.
       '';
     };
 
@@ -135,8 +130,8 @@ in
       type = lib.types.str;
       default = "wanwatch";
       description = ''
-        Unix group the daemon runs as. Telegraf scraping the metrics
-        socket should join this group.
+        Group the daemon runs as. The module creates the default
+        `wanwatch` group; metrics scrapers such as Telegraf join it.
       '';
     };
 
@@ -144,7 +139,7 @@ in
       type = globalSubmodule;
       default = { };
       description = ''
-        Global daemon settings — paths, log level, hook timeout.
+        Global daemon settings: paths, log level, and hook timeout.
         Each field defaults to `wanwatch.config.defaultGlobal`.
       '';
     };
@@ -153,8 +148,8 @@ in
       type = lib.types.attrsOf wanwatch.types.wan;
       default = { };
       description = ''
-        WAN declarations — one per uplink the daemon manages.
-        The attribute key becomes the WAN's identifier.
+        WANs the daemon monitors, one per uplink. Each attribute name
+        is the WAN's identifier.
       '';
     };
 
@@ -162,42 +157,37 @@ in
       type = lib.types.attrsOf wanwatch.types.group;
       default = { };
       description = ''
-        Group declarations — each is an ordered set of Members
-        under a Strategy. The attribute key becomes the Group's
-        identifier.
+        Groups of Members under a Strategy. Each attribute name is the
+        Group's identifier.
       '';
     };
 
     marks = lib.mkOption {
       type = lib.types.attrsOf lib.types.int;
       readOnly = true;
-      default = lib.mapAttrs (_: g: g.mark) resolved;
+      default = lib.mapAttrs (_: group: group.mark) validatedGroups;
       defaultText = lib.literalMD ''
-        Echo of each group's user-declared value, after
-        `wanwatch.config.resolveAllocations` asserts no duplicates
-        across groups.
+        Each Group's declared value, after
+        `wanwatch.config.resolveAllocations` rejects duplicates.
       '';
       description = ''
-        Per-group fwmark — read-only echo of
-        `services.wanwatch.groups.<group>.mark`. Cross-module
-        consumers (e.g. nftzones) should reference this by name
-        rather than re-typing the integer.
+        Read-only copy of each `services.wanwatch.groups.<group>.mark`.
+        Other modules, such as nftzones, should reference these
+        values rather than repeat the integers.
       '';
     };
 
     tables = lib.mkOption {
       type = lib.types.attrsOf lib.types.int;
       readOnly = true;
-      default = lib.mapAttrs (_: g: g.table) resolved;
+      default = lib.mapAttrs (_: group: group.table) validatedGroups;
       defaultText = lib.literalMD ''
-        Echo of each group's user-declared value, after
-        `wanwatch.config.resolveAllocations` asserts no duplicates
-        across groups.
+        Each Group's declared value, after
+        `wanwatch.config.resolveAllocations` rejects duplicates.
       '';
       description = ''
-        Per-group routing-table id — read-only echo of
-        `services.wanwatch.groups.<group>.table`. Shared across v4
-        and v6 RIBs per PLAN §6.1.
+        Read-only copy of each `services.wanwatch.groups.<group>.table`,
+        shared by the IPv4 and IPv6 routing tables (PLAN §6.1).
       '';
     };
   };
@@ -205,20 +195,13 @@ in
   config = lib.mkIf cfg.enable {
     environment.etc."wanwatch/config.json".text = renderedConfig;
 
-    # Tell systemd-networkd to leave foreign routing-policy rules
-    # AND foreign routes alone. The wanwatch daemon installs both
-    # at bootstrap / on every Decision and depends on them
-    # surviving until the next update; networkd's defaults
-    # (`ManageForeignRoutingPolicyRules=yes` and
-    # `ManageForeignRoutes=yes` since systemd 246) would delete
-    # them during its periodic reconciliation pass — observed in
-    # the VM tier as flakes where wait_for_active sees
-    # `active=primary` (commitDecision wrote state.json after
-    # `applyRoutes` succeeded) but `ip route show table <T>`
-    # comes back empty because networkd's reconciliation ran in
-    # between and wiped the route. Only takes effect when networkd
-    # is in use, so this is conditional on the options existing —
-    # networkd-free deployments are unaffected.
+    /*
+      systemd-networkd deletes foreign routing-policy rules and routes
+      by default when it reconciles, removing the daemon's rules and
+      routes between Decisions; VM tests saw State report an active
+      WAN whose table was empty. The settings only affect hosts that
+      run networkd.
+    */
     systemd.network.config.networkConfig = {
       ManageForeignRoutingPolicyRules = lib.mkDefault false;
       ManageForeignRoutes = lib.mkDefault false;
@@ -242,21 +225,19 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network-pre.target" ];
 
-      # A subsystem goroutine that dies cancels the daemon context
-      # and forces a non-zero exit (cmd/wanwatchd/main.go), so
-      # Restart=on-failure restarts the whole process. Bound the
-      # loop: a persistent failure (missing capability, kernel
-      # rejecting the netlink subscription, broken config) trips
-      # StartLimitBurst and lands the unit in `failed` — surfacing
-      # it to alerting instead of looping silently every RestartSec.
+      /*
+        A failed daemon subsystem makes the process exit non-zero, and
+        Restart=on-failure restarts it. The start limit turns a
+        persistent failure, such as a missing capability or a broken
+        config, into a `failed` unit that alerting can see.
+      */
       startLimitIntervalSec = 300;
       startLimitBurst = 5;
 
       serviceConfig = {
-        # Type=notify: the daemon sends sd_notify READY=1 once every
-        # subsystem is wired, then a WATCHDOG=1 keepalive at half of
-        # WatchdogSec — a stuck event loop trips the watchdog and
-        # systemd restarts the unit.
+        # The daemon reports READY=1 once every subsystem runs, then sends
+        # WATCHDOG=1 at half of WatchdogSec, so systemd restarts a stuck
+        # event loop.
         Type = "notify";
         ExecStart = "${cfg.package}/bin/wanwatchd -config /etc/wanwatch/config.json";
         Restart = "on-failure";
@@ -277,15 +258,13 @@ in
           "CAP_NET_RAW"
         ];
 
-        # Runtime dirs — systemd creates them with the daemon's
-        # User:Group and tears them down on stop. statePath +
-        # metricsSocket land here by default.
+        # Holds the default statePath and metricsSocket; systemd creates
+        # it for the service user and removes it on stop.
         RuntimeDirectory = "wanwatch";
         RuntimeDirectoryMode = "0755";
 
-        # Hardening — drop everything the daemon doesn't need.
-        # Netlink sockets need AF_NETLINK; ICMP probes need AF_INET
-        # and AF_INET6; the metrics listener needs AF_UNIX.
+        # Hardening. Netlink needs AF_NETLINK, ICMP probes need AF_INET
+        # and AF_INET6, and the metrics listener needs AF_UNIX.
         NoNewPrivileges = true;
         ProtectSystem = "strict";
         ProtectHome = true;
