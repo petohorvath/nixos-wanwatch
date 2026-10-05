@@ -1136,7 +1136,7 @@ a specific commit and explained in the body.
 | Lint clean | every commit | `golangci-lint run` + `nixfmt --check` |
 | Test coverage | every commit | `go test -cover` per package + new-file-needs-test check |
 | Vulnerability scan | weekly + on release | GitHub Actions cron workflow (`.github/workflows/audit.yml`): runs pinned `govulncheck` against the built daemon and pinned `vulnix` against its runtime derivations; retries only recognized transient NVD network failures and fails on findings or persistent infrastructure errors |
-| Primary nixpkgs refresh | monthly | GitHub-native Dependabot Nix updates (`.github/dependabot.yml`): permits only the primary `nixpkgs` input, holds the channel at `nixos-26.05`, and opens a review-only PR that runs normal CI; merge only after reviewing the lock delta and all checks pass |
+| Primary nixpkgs refresh | monthly | GitHub-native Dependabot Nix updates (`.github/dependabot.yml`): permits only the primary `nixpkgs` input, holds the branch at `nixos-26.05`, and opens a review-only PR that runs normal CI; merge only after reviewing the lock delta and all checks pass |
 | Dependency-update review | monthly | manual: review `go.mod` and all non-primary-nixpkgs `flake.lock` deltas |
 | Public-API surface review | each minor version | manual: read `lib/default.nix` + daemon exports |
 | Glossary drift | each minor version | grep usage vs `docs/glossary.md` |
