@@ -1,8 +1,8 @@
 /*
   Skeleton meta-test: every value-type module (probe, member, wan,
   group) exports the common `make` / `tryMake` / `toJSONValue` API.
-  The per-type suites test what these functions do; this suite catches
-  a new value type that omits one of them.
+  The per-type suites test what these functions do; this suite checks
+  that they exist. Add each new value type to `valueTypes`.
 
   Pure-function modules (selector, config) use purpose-specific APIs
   and are not checked here.

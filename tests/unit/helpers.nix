@@ -23,7 +23,12 @@ let
     type: value:
     (lib.evalModules {
       modules = [
-        { options.value = lib.mkOption { inherit type; }; }
+        {
+          options.value = lib.mkOption {
+            inherit type;
+            description = "Value checked against the option type under test.";
+          };
+        }
         { config.value = value; }
       ];
     }).config.value;

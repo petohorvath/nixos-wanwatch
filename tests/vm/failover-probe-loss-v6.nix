@@ -11,7 +11,8 @@
   addresses: two per ISP (fd00:1::1-2 and fd00:2::1-2) so one target
   can fail without losing the WAN, and fd00:1::3 / fd00:2::3 on the
   router. Every phase shares one tuning (200 ms interval, 10-Sample
-  Window, consecutive{Up,Down} = 3) and ends healthy:
+  Window, consecutive{Up,Down} = 3) and leaves a known state for the
+  next:
 
     A  100% netem loss fails over to the backup.
     B  Clearing netem restores the primary.
@@ -188,10 +189,21 @@ pkgs.testers.runNixOSTest {
 
     # ==== Phase C — blip suppression (removed) ====
     #
-    # The driver cannot time a netem blip to the daemon's cycle phase,
-    # so a two-cycle blip often became three Lost cycles and a
-    # Decision. Go unit tests in internal/probe/ and internal/selector/
-    # cover Window damping and hysteresis deterministically.
+    # Tested that a two-cycle (400 ms) netem blip leaves the Window at
+    # 20% loss, below lossPctDown=25, so no Decision fires. It was too
+    # timing-fragile for the VM tier:
+    #
+    #   - `tc qdisc add` can take 200-400 ms to apply on a loaded
+    #     runner, stretching the blip past two cycles.
+    #   - `sleep 0.4` measures wall-clock time, not the daemon's cycle
+    #     phase, so a slow runner can fit a third cycle in the blip.
+    #   - Three Lost Samples per target make 30% loss, and after
+    #     consecutiveDown=3 cycles a Decision lands.
+    #
+    # Fixing it needs sub-cycle timing the driver lacks, a larger
+    # windowSize that slows every phase, or a daemon test hook. Go unit
+    # tests in internal/probe/ and internal/selector/ cover Window
+    # damping and hysteresis deterministically.
 
     # ==== Phase D — band-pass threshold ====
     #
@@ -207,10 +219,23 @@ pkgs.testers.runNixOSTest {
 
     # ==== Phase D2 — band-pass hold (removed) ====
     #
-    # With 15% loss, two 10-Sample targets occasionally both read zero
-    # loss; three such correlated Windows recovered the WAN in about
-    # 23% of runs against unstable nixpkgs (CI run 25958981356).
-    # internal/selector/hysteresis_test.go covers the hold instead.
+    # Tested that 15% netem loss, between lossPctUp=5 and
+    # lossPctDown=25, holds the unhealthy verdict: active stays
+    # "backup" with no Decision for 3 seconds. Sample variance made it
+    # flaky against unstable nixpkgs:
+    #
+    #   - With 10 Samples per target, P(no loss on one target) =
+    #     0.85^10 ≈ 0.197, and on both targets ≈ 0.039. Such a Window
+    #     falls below lossPctUp and reads healthy.
+    #   - consecutiveUp=3 needs three such Windows in a row. Sliding
+    #     Windows share all but the newest Sample, so given the first,
+    #     three in a row has P ≈ 0.85^4 ≈ 0.522. Per cycle that is
+    #     ≈ 0.020, or ~23% over the 13 cycles in 3 seconds:
+    #     https://github.com/petohorvath/nixos-wanwatch/actions/runs/25958981356
+    #
+    # Fixing it needs windowSize ≈ 25 or per-test tuning, both slowing
+    # every phase. internal/selector/hysteresis_test.go covers the hold
+    # deterministically.
 
     # D3 — clear ⇒ recovery
     router.succeed("tc qdisc del dev eth1 root")

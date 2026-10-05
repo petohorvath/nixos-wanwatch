@@ -31,7 +31,7 @@ checks = {
     "monthly schedule": r'^\s*interval:\s*["\']monthly["\']\s*$',
     "single open PR": r'^\s*open-pull-requests-limit:\s*1\s*$',
     "nixpkgs allow rule": r'allow:\s*\n\s*-\s*dependency-name:\s*["\']nixpkgs["\']',
-    "nixpkgs channel guard": r'ignore:\s*\n\s*-\s*dependency-name:\s*["\']nixpkgs["\']\s*\n\s*versions:\s*\n\s*-\s*["\']> 26\.05["\']',
+    "nixpkgs branch guard": r'ignore:\s*\n\s*-\s*dependency-name:\s*["\']nixpkgs["\']\s*\n\s*versions:\s*\n\s*-\s*["\']> 26\.05["\']',
     "commit prefix": r'^\s*prefix:\s*["\']flake["\']\s*$',
 }
 for name, pattern in checks.items():
@@ -57,7 +57,7 @@ if allowed != ["nixpkgs"]:
 flake_text = flake_path.read_text()
 expected_url = 'nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";'
 if expected_url not in flake_text:
-    raise SystemExit(f"primary nixpkgs channel is not fixed to nixos-26.05: {expected_url}")
+    raise SystemExit(f"primary nixpkgs branch is not fixed to nixos-26.05: {expected_url}")
 
 print("nixpkgs Dependabot contract passed")
 PY
