@@ -188,18 +188,18 @@ jobs:
   # `ubuntu-24.04-arm` is not guaranteed and pkgs.testers.nixosTest
   # would refuse to start without `/dev/kvm`.
   #
-  # Matrixed over two nixpkgs channels:
+  # Matrixed over two nixpkgs branches:
   #   - "stable"   → checks.x86_64-linux.vm-<scenario>
   #   - "unstable" → checks.x86_64-linux.vm-unstable-<scenario>
   # The default `vm-*` set catches what release users will see;
   # `vm-unstable-*` surfaces the newer-kernel / newer-systemd issues
   # stable will pick up next. Independent jobs so each gets its
-  # own /nix/store cache and a single channel's failure is
+  # own /nix/store cache and a single branch's failure is
   # obvious in the run status.
   #
   # Scenarios are enumerated dynamically from the flake's own
   # `checks.<system>` attrs — adding a new VM scenario to
-  # `mkVmChecks` in flake.nix picks it up here automatically, no
+  # `makeVmChecks` in flake.nix picks it up here automatically, no
   # CI edit required. All scenarios still build in one
   # `nix build` invocation so the NixOS-test machinery and shared
   # store paths are realized once, not 15+ times. `--keep-going`
@@ -253,7 +253,7 @@ jobs:
           # Enumerate every checks.x86_64-linux.<PFX>* attribute via
           # the flake's own attrNames. `select($pfx != "vm-" or
           # (startswith("vm-unstable-") | not))` is the
-          # cross-channel guard: when PFX=vm-, a bare
+          # cross-branch guard: when PFX=vm-, a bare
           # startswith("vm-") would also match every vm-unstable-*
           # attribute, so we exclude the longer prefix explicitly.
           TARGETS=$(nix eval --json .#checks.x86_64-linux \
