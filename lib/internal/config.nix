@@ -110,6 +110,13 @@ in
     toJSON
     ;
 
-  # Alias of `render`, matching the value types' `toJSONValue`.
+  /*
+    Alias of `render`, so the renderer exports the same `toJSONValue`
+    name as the value types.
+
+    `config`: the attrset accepted by `render`.
+
+    Returns the JSON-shaped attrset `render` returns.
+  */
   toJSONValue = render;
 }

@@ -125,7 +125,7 @@ let
         type = primitives.positiveInt;
         default = defaults.intervalMs;
         description = ''
-          Milliseconds between probe cycles. Probes may overlap, so
+          Milliseconds between probe cycles. Samples may overlap, so
           `timeoutMs` is independent of `intervalMs`.
         '';
       };
@@ -133,7 +133,8 @@ let
         type = primitives.positiveInt;
         default = defaults.timeoutMs;
         description = ''
-          Per-probe timeout in milliseconds. May exceed `intervalMs`.
+          Timeout for each Sample in milliseconds. May exceed
+          `intervalMs`.
         '';
       };
       windowSize = mkOption {

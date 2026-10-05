@@ -157,8 +157,8 @@ in
       type = lib.types.attrsOf wanwatch.types.group;
       default = { };
       description = ''
-        Groups of Members under a Strategy. Each attribute name is the
-        Group's identifier.
+        Groups, each an ordered list of Members under a Strategy. Each
+        attribute name is the Group's identifier.
       '';
     };
 
@@ -186,8 +186,8 @@ in
         `wanwatch.config.resolveAllocations` rejects duplicates.
       '';
       description = ''
-        Read-only copy of each `services.wanwatch.groups.<group>.table`,
-        shared by the IPv4 and IPv6 routing tables (PLAN §6.1).
+        Read-only copy of each `services.wanwatch.groups.<group>.table`.
+        Each table ID serves both IPv4 and IPv6 routes (PLAN §6.1).
       '';
     };
   };

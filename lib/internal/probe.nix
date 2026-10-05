@@ -7,7 +7,7 @@
     targets            — { v4; v6; } lists of libnet IP values; at least
                          one family is non-empty
     intervalMs         — milliseconds between probe cycles
-    timeoutMs          — per-probe timeout in milliseconds
+    timeoutMs          — timeout for each Sample in milliseconds
     windowSize         — number of Samples in the sliding window
     thresholds         — loss and RTT thresholds in both directions
     hysteresis         — consecutive-cycle counters in both directions
@@ -58,7 +58,7 @@ let
     "any"
   ];
 
-  isPct = value: builtins.isInt value && value >= 0 && value <= 100;
+  isPercentage = value: builtins.isInt value && value >= 0 && value <= 100;
 
   parseTargets = partitionTry libnet.ip.tryParse;
 
@@ -121,8 +121,8 @@ let
     let
       down = thresholds.lossPctDown or null;
       up = thresholds.lossPctUp or null;
-      isDownValid = isPct down;
-      isUpValid = isPct up;
+      isDownValid = isPercentage down;
+      isUpValid = isPercentage up;
     in
     check "probeLossPctOutOfRange" isDownValid
       "thresholds.lossPctDown must be an int in [0,100]; got ${builtins.toJSON down}"

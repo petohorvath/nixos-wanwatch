@@ -1,8 +1,8 @@
 /*
   Option types for Group Members, exported through `wanwatch.types`:
 
-    memberWan      — wanwatch identifier of a declared WAN; the module
-                     checks the reference, not the type
+    memberWan      — wanwatch identifier of a declared WAN; the daemon
+                     checks the reference when it loads its config
     memberWeight   — positive integer, default 100
     memberPriority — positive integer, default 1; lower is preferred
     member         — the complete Member submodule

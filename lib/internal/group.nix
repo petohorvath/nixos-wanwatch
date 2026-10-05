@@ -8,8 +8,8 @@
     members  — non-empty list of member values, built from the
                `members` inputs
     strategy — "primary-backup", the only Strategy
-    table    — routing-table ID in [1000, 32767], shared by the IPv4
-               and IPv6 routing tables
+    table    — routing-table ID in [1000, 32767], serving both IPv4
+               and IPv6 routes
     mark     — fwmark in [1000, 32767] that selects `table`
 */
 {

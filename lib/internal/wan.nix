@@ -58,7 +58,7 @@ let
     probeResult:
     check "wanInvalidProbe" probeResult.success (if probeResult.success then "" else probeResult.error);
 
-  prepareInput = input: {
+  mergeWithDefaults = input: {
     name = input.name or null;
     interface = input.interface or null;
     pointToPoint = input.pointToPoint or false;
@@ -89,7 +89,7 @@ let
   tryMake =
     input:
     let
-      fields = prepareInput input;
+      fields = mergeWithDefaults input;
       probeResult = probe.tryMake fields.probeInput;
       errors = collectErrors fields probeResult;
     in
