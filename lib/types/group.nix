@@ -11,8 +11,8 @@
 
   Option types cannot compare fields or sibling attributes, so
   `internal.group.tryMake` checks members and
-  `internal.config.resolveAllocations` checks marks and tables across
-  Groups.
+  `internal.config.assertUniqueMarksAndTables` checks marks and tables
+  across Groups.
 */
 {
   lib,

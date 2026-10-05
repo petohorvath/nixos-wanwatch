@@ -226,7 +226,7 @@ that resolve to the operational modules.
 | `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `toJSONValue`, `families` accessor; `pointToPoint` toggles scope-link vs gateway-discovery apply path |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
 | `lib/internal/selector.nix` *(Pass 4)* | pure `compute` + closed-set strategy registry (v1: `primary-backup`) |
-| `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string`; `resolveAllocations` (duplicate-mark/table assertions) |
+| `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string`; `assertUniqueMarksAndTables` (duplicate-mark/table assertions) |
 | `lib/types/default.nix` | aggregates per-type option-type files via `lib.mergeAttrsList` |
 | `lib/types/primitives.nix` | shared option-type primitives (Pass 5) |
 | `lib/types/probe.nix` | probe-related NixOS option types (Pass 5) |

@@ -44,7 +44,7 @@ let
   wanValues = lib.mapAttrs (_: wanwatch.wan.make) cfg.wans;
   groupValues = lib.mapAttrs (_: wanwatch.group.make) cfg.groups;
 
-  validatedGroups = wanwatch.config.resolveAllocations groupValues;
+  validatedGroups = wanwatch.config.assertUniqueMarksAndTables groupValues;
 
   renderedConfig = wanwatch.config.toJSON {
     inherit (cfg) global;
@@ -168,7 +168,8 @@ in
       default = lib.mapAttrs (_: group: group.mark) validatedGroups;
       defaultText = lib.literalMD ''
         Each Group's declared value, after
-        `wanwatch.config.resolveAllocations` rejects duplicates.
+        `wanwatch.config.assertUniqueMarksAndTables` rejects
+        duplicates.
       '';
       description = ''
         Read-only copy of each `services.wanwatch.groups.<group>.mark`.
@@ -183,7 +184,8 @@ in
       default = lib.mapAttrs (_: group: group.table) validatedGroups;
       defaultText = lib.literalMD ''
         Each Group's declared value, after
-        `wanwatch.config.resolveAllocations` rejects duplicates.
+        `wanwatch.config.assertUniqueMarksAndTables` rejects
+        duplicates.
       '';
       description = ''
         Read-only copy of each `services.wanwatch.groups.<group>.table`.

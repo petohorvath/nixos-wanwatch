@@ -49,16 +49,15 @@ let
     ];
 
   /*
-    Check that no two Groups share a mark or a table. The name predates
-    the removal of automatic allocation and is kept for compatibility;
-    the function only validates.
+    Reject Groups that share a mark or a table, because their traffic
+    would be routed through the wrong table.
 
     `groups`: an attrset of group values keyed by name.
 
     Returns `groups` unchanged. Throws a message listing every shared
     mark and table.
   */
-  resolveAllocations =
+  assertUniqueMarksAndTables =
     groups:
     let
       messages = describeSharedValues "mark" groups ++ describeSharedValues "table" groups;
@@ -89,7 +88,7 @@ let
       schema = schemaVersion;
       global = defaultGlobal // global;
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
-      groups = builtins.mapAttrs (_: group.toJSONValue) (resolveAllocations groups);
+      groups = builtins.mapAttrs (_: group.toJSONValue) (assertUniqueMarksAndTables groups);
     };
 
   /*
@@ -103,12 +102,23 @@ let
 in
 {
   inherit
+    assertUniqueMarksAndTables
     defaultGlobal
     render
-    resolveAllocations
     schemaVersion
     toJSON
     ;
+
+  /*
+    Deprecated name of `assertUniqueMarksAndTables`, from when marks and
+    tables were allocated automatically. Warns when used.
+
+    `groups`: an attrset of group values keyed by name.
+
+    Returns `groups` unchanged. Throws when Groups share a mark or a
+    table.
+  */
+  resolveAllocations = lib.warn "wanwatch: config.resolveAllocations is deprecated; use config.assertUniqueMarksAndTables" assertUniqueMarksAndTables;
 
   /*
     Alias of `render`, so the renderer exports the same `toJSONValue`

@@ -144,7 +144,7 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 |---|---|
 | Option types (`lib/types/`) | Wrong field types, enum mismatch, malformed IP literals (via libnet). |
 | `wanwatch.<type>.tryMake` | Cross-field invariants (family coupling, duplicate members, threshold ordering). |
-| `config.resolveAllocations` | Mark / table duplicates across groups. |
+| `config.assertUniqueMarksAndTables` | Mark / table duplicates across groups. |
 | `daemon/internal/config/Validate` | Structural sanity after deserialization: name/key agreement, dangling `member.wan` references, empty paths in `global`. |
 
 ## Compatibility policy

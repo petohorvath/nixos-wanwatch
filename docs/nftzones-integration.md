@@ -115,14 +115,14 @@ Two failure modes:
 wanwatch sidesteps both by keeping the integer in one place — `services.wanwatch.groups.<group>.mark` — and re-exposing it as `services.wanwatch.marks.<group>` for cross-module reference:
 
 - Same name everywhere → same int, by construction.
-- `config.resolveAllocations` asserts no two groups share a `mark` or `table` at module-eval time and refuses to render on duplicate.
+- `config.assertUniqueMarksAndTables` asserts no two groups share a `mark` or `table` at module-eval time and refuses to render on duplicate.
 - The `wanwatch.types.fwmark` / `routingTableId` types pin the integer to `[1000, 32767]`, well clear of the kernel-reserved tables `{253, 254, 255}` and the small-integer space ad-hoc scripts often use.
 
 ## Cross-references
 
 | File | What |
 |---|---|
-| `lib/internal/config.nix:resolveAllocations` | Cross-group duplicate-mark / duplicate-table detection. |
+| `lib/internal/config.nix:assertUniqueMarksAndTables` | Cross-group duplicate-mark / duplicate-table detection. |
 | `lib/internal/marks.nix` / `tables.nix` | Allocators (hash + linear probe). |
 | `daemon/internal/apply/rule.go:EnsureRule` | Installs the fwmark policy rules at startup. |
 | `daemon/internal/apply/route.go:WriteDefault` | Rewrites the table's default on every Decision. |

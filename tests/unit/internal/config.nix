@@ -1,7 +1,7 @@
 /*
   Unit tests for `lib/internal/config.nix`, the daemon-config JSON
   renderer: global defaults and overrides, cross-group duplicate
-  mark/table detection in `resolveAllocations`, the rendered shape,
+  mark/table detection in `assertUniqueMarksAndTables`, the rendered shape,
   and the `toJSON` string form.
 */
 {
@@ -99,15 +99,15 @@ in
     expected = 1;
   };
 
-  # ===== resolveAllocations — pass-through =====
+  # ===== assertUniqueMarksAndTables — pass-through =====
 
-  testResolveAllocationsEmptyInput = {
-    expr = config.resolveAllocations { };
+  testUniqueMarksAndTablesEmptyInput = {
+    expr = config.assertUniqueMarksAndTables { };
     expected = { };
   };
 
-  testResolveAllocationsReturnsGroupsUnchanged = {
-    # resolveAllocations validates without transforming: distinct
+  testUniqueMarksAndTablesReturnsGroupsUnchanged = {
+    # The check validates without transforming: distinct
     # marks and tables echo the input back untouched.
     expr =
       let
@@ -116,14 +116,14 @@ in
           work = workGroup;
         };
       in
-      config.resolveAllocations input == input;
+      config.assertUniqueMarksAndTables input == input;
     expected = true;
   };
 
-  testResolveAllocationsPreservesExplicitValues = {
+  testUniqueMarksAndTablesPreservesExplicitValues = {
     expr =
       let
-        resolved = config.resolveAllocations {
+        resolved = config.assertUniqueMarksAndTables {
           home = homeGroup;
           work = workGroup;
         };
@@ -142,7 +142,7 @@ in
     };
   };
 
-  testResolveAllocationsAllowsMarkEqualToTable = {
+  testUniqueMarksAndTablesAllowsMarkEqualToTable = {
     # Marks and tables are independent number spaces, so duplicates
     # are checked within each field, not across them.
     expr =
@@ -152,16 +152,16 @@ in
           table = 1500;
         };
       in
-      (config.resolveAllocations { inherit sameNumbers; }).sameNumbers.mark == 1500;
+      (config.assertUniqueMarksAndTables { inherit sameNumbers; }).sameNumbers.mark == 1500;
     expected = true;
   };
 
-  # ===== resolveAllocations — duplicate detection =====
+  # ===== assertUniqueMarksAndTables — duplicate detection =====
 
-  testResolveAllocationsThrowsOnDuplicateMark = {
+  testUniqueMarksAndTablesThrowsOnDuplicateMark = {
     expr =
       evalThrows
-        (config.resolveAllocations {
+        (config.assertUniqueMarksAndTables {
           a = makeGroup "a" {
             mark = 1500;
             table = 1500;
@@ -174,10 +174,10 @@ in
     expected = true;
   };
 
-  testResolveAllocationsThrowsOnDuplicateTable = {
+  testUniqueMarksAndTablesThrowsOnDuplicateTable = {
     expr =
       evalThrows
-        (config.resolveAllocations {
+        (config.assertUniqueMarksAndTables {
           a = makeGroup "a" {
             mark = 1500;
             table = 1500;
@@ -190,10 +190,10 @@ in
     expected = true;
   };
 
-  testResolveAllocationsThreeWayDuplicateMark = {
+  testUniqueMarksAndTablesThreeWayDuplicateMark = {
     expr =
       evalThrows
-        (config.resolveAllocations {
+        (config.assertUniqueMarksAndTables {
           a = makeGroup "a" {
             mark = 1500;
             table = 1500;
@@ -205,6 +205,36 @@ in
           c = makeGroup "c" {
             mark = 1500;
             table = 1700;
+          };
+        }).a.mark;
+    expected = true;
+  };
+
+  # ===== resolveAllocations — deprecated alias =====
+
+  testResolveAllocationsAliasReturnsGroupsUnchanged = {
+    expr =
+      let
+        input = {
+          home = homeGroup;
+          work = workGroup;
+        };
+      in
+      config.resolveAllocations input == input;
+    expected = true;
+  };
+
+  testResolveAllocationsAliasThrowsOnDuplicateMark = {
+    expr =
+      evalThrows
+        (config.resolveAllocations {
+          a = makeGroup "a" {
+            mark = 1500;
+            table = 1500;
+          };
+          b = makeGroup "b" {
+            mark = 1500;
+            table = 1600;
           };
         }).a.mark;
     expected = true;
