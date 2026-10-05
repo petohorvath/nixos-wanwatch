@@ -1,72 +1,33 @@
 /*
-  wanwatch.member — a WAN's per-Group membership.
+  Member value type, exposed as `wanwatch.member`. A Member is a WAN's
+  participation in one Group. It names the WAN rather than embedding
+  it, so Member stays a leaf type; the surrounding configuration must
+  declare a WAN with that name. A member value carries:
 
-  A Member is a labelled reference to a WAN inside a particular
-  Group. It carries per-Group attributes (weight, priority) but
-  not the WAN itself — Members are constructed standalone, and the
-  Group config layer resolves the `wan` field against the global
-  WAN registry. This keeps Member a leaf type with no upstream
-  dependency on `wan`.
-
-  Fields:
-
-    wan      — string; valid wanwatch identifier
-               (`[a-zA-Z][a-zA-Z0-9-]*`). Must match the `name` of
-               a WAN declared in the surrounding config.
-    weight   — positive int, default 100. Tiebreaker among members
-               with equal priority (Pass 3 strategies only consult
-               priority; weight matters once multi-active lands).
-    priority — positive int, default 1. Lower preferred; the
-               primary-backup strategy picks the lowest-priority
-               healthy Member.
-
-  ===== make =====
-
-  Input:  attrset of fields (any subset; missing fields take defaults)
-  Output: member value
-  Throws: aggregated error string if any field fails validation.
-
-  ===== tryMake =====
-
-  Same as `make` but returns the `tryResult` shape instead of
-  throwing. Errors are aggregated nftzones-style.
-
-  Error kinds:
-
-    memberInvalidWan       — wan ∉ valid-identifier
-    memberInvalidWeight    — weight is not a positive int
-    memberInvalidPriority  — priority is not a positive int
-
-  ===== Accessors =====
-
-  `wan`, `weight`, `priority`.
-
-  ===== Serialization =====
-
-  `toJSONValue` is the canonical attrset form embedded in
-  `group.toJSONValue` and through it in the daemon-config render.
+    wan      — wanwatch identifier of the referenced WAN
+    weight   — positive integer, default 100; unused until multi-active
+               strategies exist
+    priority — positive integer, default 1; primary-backup picks the
+               healthy Member with the lowest priority
 */
 {
   internal,
 }:
 let
   inherit (internal.primitives)
-    tryOk
-    tryErr
     check
-    isValidName
     isPositiveInt
+    isValidName
+    tryErr
+    tryOk
     ;
-  formatErrors = internal.primitives.formatErrors "member.make";
 
-  # ===== Defaults =====
+  formatErrors = internal.primitives.formatErrors "member.make";
 
   defaults = {
     weight = 100;
     priority = 1;
   };
-
-  # ===== Field-level validators =====
 
   validateWan =
     wan:
@@ -74,60 +35,76 @@ let
       "wan must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON wan}";
 
   validateWeight =
-    w:
-    check "memberInvalidWeight" (isPositiveInt w)
-      "weight must be a positive integer; got ${builtins.toJSON w}";
+    weight:
+    check "memberInvalidWeight" (isPositiveInt weight)
+      "weight must be a positive integer; got ${builtins.toJSON weight}";
 
   validatePriority =
-    p:
-    check "memberInvalidPriority" (isPositiveInt p)
-      "priority must be a positive integer; got ${builtins.toJSON p}";
+    priority:
+    check "memberInvalidPriority" (isPositiveInt priority)
+      "priority must be a positive integer; got ${builtins.toJSON priority}";
 
-  # ===== Aggregated validation + construction =====
-
-  mergeWithDefaults = user: {
-    wan = user.wan or null;
-    weight = user.weight or defaults.weight;
-    priority = user.priority or defaults.priority;
+  mergeWithDefaults = input: {
+    wan = input.wan or null;
+    weight = input.weight or defaults.weight;
+    priority = input.priority or defaults.priority;
   };
 
   collectErrors =
-    cfg: validateWan cfg.wan ++ validateWeight cfg.weight ++ validatePriority cfg.priority;
+    fields: validateWan fields.wan ++ validateWeight fields.weight ++ validatePriority fields.priority;
 
-  buildValue = cfg: {
-    inherit (cfg) wan weight priority;
-  };
+  /*
+    Validate Member input without throwing, reporting every violation
+    in one message.
 
+    `input`: an attrset with `wan` and optional `weight` and
+    `priority`; missing optional fields take `defaults`.
+
+    Returns a `tryResult` whose value is the member value. Error kinds:
+
+      memberInvalidWan      — wan is not a valid identifier
+      memberInvalidWeight   — weight is not a positive integer
+      memberInvalidPriority — priority is not a positive integer
+  */
   tryMake =
-    user:
+    input:
     let
-      cfg = mergeWithDefaults user;
-      errors = collectErrors cfg;
+      fields = mergeWithDefaults input;
+      errors = collectErrors fields;
     in
-    if errors == [ ] then tryOk (buildValue cfg) else tryErr (formatErrors errors);
+    if errors == [ ] then tryOk fields else tryErr (formatErrors errors);
 
+  /*
+    Construct a member value, failing evaluation on invalid input.
+
+    `input`: the attrset accepted by `tryMake`.
+
+    Returns the member value. Throws the aggregated `tryMake` error
+    message when validation fails.
+  */
   make =
-    user:
+    input:
     let
-      r = tryMake user;
+      result = tryMake input;
     in
-    if r.success then r.value else builtins.throw r.error;
+    if result.success then result.value else throw result.error;
 
-  # ===== Serialization =====
+  /*
+    Serialize a Member for the daemon-config JSON.
 
-  toJSONValue = m: {
-    inherit (m)
-      wan
-      weight
-      priority
-      ;
+    `member`: a member value.
+
+    Returns the JSON-shaped attrset embedded by `group.toJSONValue`.
+  */
+  toJSONValue = member: {
+    inherit (member) priority wan weight;
   };
 in
 {
   inherit
-    make
-    tryMake
-    toJSONValue
     defaults
+    make
+    toJSONValue
+    tryMake
     ;
 }

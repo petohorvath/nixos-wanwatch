@@ -1,20 +1,8 @@
 /*
-  recovery-v6 — IPv6 counterpart of recovery. Audit gap G1: PLAN
-  §9.4 promises "After primary recovers, switch back within
-  consecutiveUp cycles in both families," but `recovery.nix` is
-  carrier-driven + v4-only. Recovery on v6 currently appears only
-  as a side-effect of failover-probe-loss-v6 Phase B; this
-  scenario makes it a first-class focused test.
-
-  Same single-node dummy-interface topology as recovery — probes
-  are scheduled at intervalMs=600000 so they never fire within
-  the test window; failover and recovery flow purely through
-  carrier events. Adds explicit assertions on the v6 routing
-  table at every transition so a regression in the daemon's
-  per-family apply path (the v6 branch of WriteDefault, or the
-  v6 RIB cleanup on member-out) surfaces immediately rather than
-  hiding behind a state.json that says "active=X" without the
-  kernel actually following.
+  recovery-v6 — IPv6 counterpart of recovery (PLAN §9.4). Carrier
+  events alone drive failover and recovery on dummy interfaces. The
+  v6 default route in the Group's table is checked at every
+  transition, so the kernel must follow the Selection in State.
 */
 {
   pkgs,
@@ -137,20 +125,14 @@ pkgs.testers.runNixOSTest {
     observe.wait_active("home-uplink", "backup")
     observe.wait_default_route("v6", "wan1", group="home-uplink")
 
-    # The recovery arm: bring carrier back on. With cold-start
-    # carrier-only health, restoring carrier on the higher-priority
-    # member should flip the Selection back without waiting for
-    # any probe sample. The v6 default route in the per-group table
-    # must follow — a regression in apply.WriteDefault's v6 branch
-    # or in the daemon's per-member route cleanup would let
-    # state.json report active=primary while the kernel kept the
-    # wan1 route, silently breaking forwarding.
+    # Recovery arm: carrier-only health switches back to the primary
+    # without a probe Sample, and the v6 route must follow.
     carrier(router, "wan0", "on")
     observe.wait_active("home-uplink", "primary")
     observe.wait_default_route("v6", "wan0", group="home-uplink")
 
-    # State publication and the live counter can become visible separately.
-    # Both carrier-driven changes (down→backup, up→primary) must be counted.
+    # State and the live counter publish separately; wait for both
+    # carrier-driven Decisions (down to backup, up to primary).
     observe.wait_decisions("home-uplink", "carrier", minimum=2)
   '';
 }

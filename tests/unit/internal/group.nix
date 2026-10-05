@@ -1,25 +1,21 @@
 /*
-  Unit tests for `lib/internal/group.nix` (exposed as
-  `wanwatch.group`). Same `testFoo = { expr; expected; }` shape as
-  every other unit test; aggregated by `tests/unit/default.nix`.
-
-  Coverage discipline per PLAN.md §9.1: every public function
-  exercised on positive and negative inputs; every error kind
-  triggered in isolation; the duplicate-member cross-check exercised
-  with both single and multi-duplicate cases. `table` and `mark` are
-  required integers in [1000, 32767]; both the boundary cases and
-  the "missing" case have their own tests.
+  Unit tests for `lib/internal/group.nix`, exposed as `wanwatch.group`.
+  Per PLAN.md §9.1, each public function is exercised on positive and
+  negative inputs and each error kind is triggered alone. The
+  duplicate-member check covers single and multiple duplicates;
+  `table` and `mark` cover their [1000, 32767] bounds and absence.
 */
-{ pkgs, libnet, ... }:
+{
+  helpers,
+  pkgs,
+  wanwatch,
+  ...
+}:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (pkgs) lib;
+  inherit (helpers) errorMatches evalThrows;
   inherit (wanwatch) group;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalThrows errorMatches;
   tryError = helpers.tryError group;
 
   minimalInput = {
@@ -56,7 +52,7 @@ in
 {
   # ===== Happy path =====
 
-  testMakeMinimalReturnsValue = {
+  testGroupMakeMinimalReturnsValue = {
     expr = builtins.isAttrs (group.make minimalInput);
     expected = true;
   };
@@ -76,13 +72,13 @@ in
     };
   };
 
-  testMakeFullPreservesAllFields = {
+  testGroupMakeFullPreservesAllFields = {
     expr = {
       inherit (group.make fullInput)
+        mark
         name
         strategy
         table
-        mark
         ;
     };
     expected = {
@@ -108,7 +104,7 @@ in
 
   # ===== Error: groupInvalidName =====
 
-  testRejectsMissingName = {
+  testGroupRejectsMissingName = {
     expr = errorMatches "groupInvalidName" (tryError {
       members = [ { wan = "primary"; } ];
       mark = 1000;
@@ -117,7 +113,7 @@ in
     expected = true;
   };
 
-  testRejectsEmptyName = {
+  testGroupRejectsEmptyName = {
     expr = errorMatches "groupInvalidName" (tryError (minimalInput // { name = ""; }));
     expected = true;
   };
@@ -192,7 +188,7 @@ in
   testDetectsMultipleDuplicates = {
     expr =
       let
-        err = tryError (
+        error = tryError (
           minimalInput
           // {
             members = [
@@ -216,16 +212,16 @@ in
           }
         );
       in
-      errorMatches "groupDuplicateMember" err
-      && pkgs.lib.hasInfix "primary" err
-      && pkgs.lib.hasInfix "backup" err;
+      errorMatches "groupDuplicateMember" error
+      && lib.hasInfix "primary" error
+      && lib.hasInfix "backup" error;
     expected = true;
   };
 
   testDuplicateCheckSkippedWhenMemberInvalid = {
     expr =
       let
-        err = tryError (
+        error = tryError (
           minimalInput
           // {
             members = [
@@ -245,7 +241,7 @@ in
           }
         );
       in
-      errorMatches "groupInvalidMember" err && !(errorMatches "groupDuplicateMember" err);
+      errorMatches "groupInvalidMember" error && !(errorMatches "groupDuplicateMember" error);
     expected = true;
   };
 
@@ -266,8 +262,8 @@ in
   # ===== Error: groupInvalidTable =====
 
   testRejectsMissingTable = {
-    # No `table` at all → null → out of range → groupInvalidTable.
-    expr = errorMatches "groupInvalidTable" (tryError (builtins.removeAttrs minimalInput [ "table" ]));
+    # A missing table defaults to null, which fails the range check.
+    expr = errorMatches "groupInvalidTable" (tryError (removeAttrs minimalInput [ "table" ]));
     expected = true;
   };
 
@@ -282,8 +278,7 @@ in
   };
 
   testRejectsTooLowTable = {
-    # 999 is below the [1000, 32767] floor — buries small-integer
-    # scripts but still rejects 999.
+    # 999 sits just below the [1000, 32767] floor.
     expr = errorMatches "groupInvalidTable" (tryError (minimalInput // { table = 999; }));
     expected = true;
   };
@@ -294,8 +289,8 @@ in
   };
 
   testRejectsKernelReservedTable = {
-    # 254 = main. The 1000 floor catches this; pin it explicitly so
-    # a future range change doesn't silently re-admit it.
+    # 254 is the main table. The 1000 floor rejects it; pin it so a
+    # future range change cannot silently re-admit it.
     expr = errorMatches "groupInvalidTable" (tryError (minimalInput // { table = 254; }));
     expected = true;
   };
@@ -313,7 +308,7 @@ in
   # ===== Error: groupInvalidMark =====
 
   testRejectsMissingMark = {
-    expr = errorMatches "groupInvalidMark" (tryError (builtins.removeAttrs minimalInput [ "mark" ]));
+    expr = errorMatches "groupInvalidMark" (tryError (removeAttrs minimalInput [ "mark" ]));
     expected = true;
   };
 
@@ -344,10 +339,10 @@ in
 
   # ===== Multi-error aggregation =====
 
-  testMultipleErrorsAggregated = {
+  testGroupMultipleErrorsAggregated = {
     expr =
       let
-        err = tryError {
+        error = tryError {
           name = "1bad";
           members = [ { wan = "1also-bad"; } ];
           strategy = "huh";
@@ -362,33 +357,33 @@ in
           "groupInvalidMark"
         ];
       in
-      builtins.all (k: errorMatches k err) kinds;
+      builtins.all (kind: errorMatches kind error) kinds;
     expected = true;
   };
 
   # ===== make / tryMake contract =====
 
-  testMakeThrowsOnInvalid = {
+  testGroupMakeThrowsOnInvalid = {
     expr = evalThrows (group.make { name = ""; });
     expected = true;
   };
 
-  testTryMakeOkOnValid = {
+  testGroupTryMakeOkOnValid = {
     expr = (group.tryMake minimalInput).success;
     expected = true;
   };
 
-  testTryMakeErrOnInvalid = {
+  testGroupTryMakeErrOnInvalid = {
     expr = (group.tryMake { name = ""; }).success;
     expected = false;
   };
 
-  testTryMakeErrorNullOnSuccess = {
+  testGroupTryMakeErrorNullOnSuccess = {
     expr = (group.tryMake minimalInput).error;
     expected = null;
   };
 
-  testTryMakeValueNullOnFailure = {
+  testGroupTryMakeValueNullOnFailure = {
     expr = (group.tryMake { name = ""; }).value;
     expected = null;
   };
@@ -412,10 +407,8 @@ in
 
   # ===== Defaults exposed =====
 
-  testDefaultsExposed = {
-    # Only `strategy` has a default now — table and mark are
-    # user-required, so removing them from `defaults` enforces "no
-    # null sentinel" by construction.
+  testGroupDefaultsExposed = {
+    # Only `strategy` has a default; table and mark are required.
     expr = group.defaults;
     expected = {
       strategy = "primary-backup";
@@ -424,17 +417,16 @@ in
 
   # ===== Round-trip =====
 
-  testRoundTrip = {
+  testGroupRoundTrip = {
     # PLAN §9.1 (5): re-emitting the JSON shape after a second
-    # `make` must be byte-identical to the first. Nested members
-    # round-trip via member.toJSONValue / member.make, so this
-    # covers the group ∘ member composition.
+    # `make` must be byte-identical to the first, nested members
+    # included.
     expr =
       let
-        js1 = group.toJSONValue (group.make minimalInput);
-        js2 = group.toJSONValue (group.make js1);
+        firstJSON = group.toJSONValue (group.make minimalInput);
+        secondJSON = group.toJSONValue (group.make firstJSON);
       in
-      js1 == js2;
+      firstJSON == secondJSON;
     expected = true;
   };
 }

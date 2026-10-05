@@ -2,38 +2,26 @@
   description = "nixos-wanwatch — multi-WAN monitoring and failover for NixOS";
 
   inputs = {
-    # `nixpkgs` is pinned to the current stable channel — modern
-    # Nix convention is plain `nixpkgs` = stable, opt-into-unstable
-    # via a second input. `forAllSystems` uses this for `lib` and
-    # `legacyPackages`, so every default output (packages, lib,
-    # modules, the default `vm-*` checks) builds against stable.
-    # Sibling-flake inputs (libnet, nftzones, nftypes, treefmt-nix,
-    # git-hooks) follow this via `inputs.nixpkgs.follows = "nixpkgs"`
-    # so their lib outputs pin against stable too.
+    # The stable release branch. Every output except the `vm-unstable-*`
+    # checks and the audit shell builds against it, and the other inputs
+    # follow it so their `lib` outputs match.
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
-    # A second nixpkgs pinned to nixos-unstable. Consulted only by
-    # the `vm-unstable-*` flake checks (via `unstablePkgsFor`),
-    # which boot the VM scenarios against unstable to surface
-    # kernel / systemd-networkd / iproute2 issues that stable will
-    # pick up next.
+    # The nixos-unstable branch, for the `vm-unstable-*` checks that
+    # surface kernel, networkd, and iproute2 changes before stable gets
+    # them, and for the audit shell's scanners.
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    # nix-libnet provides IP/CIDR/interface validation primitives
-    # used throughout `lib/`. Pinned to the GitHub default so a
-    # fresh clone works without further configuration. For
-    # iterate-on-both-repos local development, override with
-    # `--override-input libnet path:/abs/path/to/nix-libnet` (or
-    # add to a per-tree `.envrc`); a relative `path:../nix-libnet`
-    # does not resolve cleanly under pure evaluation because the
-    # working copy is staged to `/nix/store/...` before `..` is
-    # resolved.
+    /*
+      IP, CIDR, and interface-name validation used throughout `lib/`.
+      To develop against a local checkout, pass
+      `--override-input libnet path:/absolute/path/to/nix-libnet`;
+      relative paths resolve inside the store copy of this flake.
+    */
     libnet.url = "github:petohorvath/nix-libnet";
     libnet.inputs.nixpkgs.follows = "nixpkgs";
 
-    # nix-nftzones is only used by the nftzones-integration VM
-    # scenario (tests/vm/nftzones-integration.nix). Same
-    # local-dev override pattern as libnet.
+    # Used only by the nftzones-integration VM scenario.
     nftzones = {
       url = "github:petohorvath/nix-nftzones";
       inputs = {
@@ -47,11 +35,8 @@
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
 
-    # git-hooks.nix (formerly cachix/pre-commit-hooks.nix) installs
-    # the pre-commit framework into .git/hooks on `nix develop` and
-    # runs the hooks declared in `preCommitCheckFor` below: fast
-    # checks at commit time, the heavy nix-flake-check / golangci-lint
-    # run at push time.
+    # Installs the Git hooks declared in `preCommitCheckFor` when
+    # `nix develop` starts.
     git-hooks.url = "github:cachix/git-hooks.nix";
     git-hooks.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -74,28 +59,17 @@
         "aarch64-darwin"
       ];
 
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      forAllSystems =
+        makeOutput: nixpkgs.lib.genAttrs systems (system: makeOutput nixpkgs.legacyPackages.${system});
 
       treefmtFor = pkgs: treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
 
-      # preCommitCheckFor builds the git-hooks.nix hook set for `pkgs`.
-      # Two stages, declared in one place so the lock-step between
-      # what runs locally and what CI gates stays visible.
-      #
-      #   pre-commit (fast, ~1–2 s on a warm cache):
-      #     - treefmt    — nixfmt + gofumpt + goimports
-      #     - statix     — Nix anti-pattern lint
-      #     - deadnix    — unused-binding lint
-      #     - go-vet     — daemon-side go vet ./...
-      #
-      #   pre-push (heavy, ~10–15 s on a warm cache):
-      #     - go-lint    — full golangci-lint suite
-      #     - nix-checks — `nix build` of unit + integration + race +
-      #                    coverage; same gates CI runs, so a regression
-      #                    is caught before it leaves the laptop.
-      #
-      # `nix-checks` is Linux-only — the race + coverage + daemon
-      # derivations are gated `optionalAttrs isLinux` in `checks`.
+      /*
+        Git hooks for `pkgs`. Pre-commit runs the fast checks (treefmt,
+        statix, deadnix, go vet); pre-push runs golangci-lint and, on
+        Linux, the unit, integration, race, and coverage checks that CI
+        also gates on.
+      */
       preCommitCheckFor =
         pkgs:
         let
@@ -108,9 +82,8 @@
               enable = true;
               package = (treefmtFor pkgs).config.build.wrapper;
             };
-            # statix and deadnix scan the whole repo on every commit
-            # instead of just the staged files — debt accumulates fast
-            # when an unstaged file's regression slips past the hook.
+            # statix and deadnix scan the whole repository, so findings
+            # in unstaged files cannot slip past the hook.
             statix = {
               enable = true;
               pass_filenames = false;
@@ -133,17 +106,16 @@
               enable = true;
               name = "golangci-lint (daemon)";
               description = "Full golangci-lint suite on the daemon module.";
-              # golangci-lint shells out to `go env`, `go list`, etc.,
-              # so the hook needs `go` (and gcc for the cgo-bound race
-              # path) on PATH — the user's invocation shell may not be
-              # `nix develop`.
+              # golangci-lint runs `go` (and gcc for cgo), and the hook may
+              # run outside `nix develop`.
               entry = ''
                 ${pkgs.runtimeShell} -c 'export PATH="${
                   pkgs.lib.makeBinPath [
                     pkgs.go
                     pkgs.gcc
                   ]
-                }:$PATH" && cd daemon && ${pkgs.golangci-lint}/bin/golangci-lint run ./...'
+                }:$PATH" && cd daemon &&
+                  ${pkgs.golangci-lint}/bin/golangci-lint run ./...'
               '';
               files = "^daemon/.*\\.go$";
               pass_filenames = false;
@@ -162,31 +134,21 @@
           };
         };
 
-      # Per-channel pkgs lookup. `nixpkgs` (stable) is what
-      # forAllSystems uses by default; `nixpkgs-unstable` is consulted
-      # only for the `vm-unstable-*` checks.
       unstablePkgsFor = system: nixpkgs-unstable.legacyPackages.${system};
 
-      # mkVmChecks returns the full set of VM scenarios built
-      # against `pkgs`. Used twice from `checks`: once with the
-      # unstable `pkgs` (the historical default) and once with the
-      # stable channel's pkgs.
-      #
-      # `scenario` lifts the repeated `import ./tests/vm/<name>.nix
-      # { inherit pkgs; nixosModule = self.nixosModules.default; }`
-      # boilerplate; extras are merged in for scenarios needing the
-      # telegraf or nftzones modules.
-      mkVmChecks =
+      # Every VM scenario built against `pkgs`. `extraArgs` supplies the
+      # additional modules and libraries some scenarios take.
+      makeVmChecks =
         pkgs:
         let
           scenario =
-            name: extras:
+            name: extraArgs:
             import (./tests/vm + "/${name}.nix") (
               {
                 inherit pkgs;
                 nixosModule = self.nixosModules.default;
               }
-              // extras
+              // extraArgs
             );
         in
         {
@@ -212,11 +174,51 @@
           };
         };
 
-      # Flatten {name = drv;} → {vm-${name} = drv;} for one
-      # channel's worth of VM scenarios.
-      vmChecksWithPrefix =
-        prefix: vmChecks:
-        nixpkgs.lib.mapAttrs' (name: drv: nixpkgs.lib.nameValuePair "${prefix}${name}" drv) vmChecks;
+      prefixNames =
+        prefix: attrs:
+        nixpkgs.lib.mapAttrs' (name: value: nixpkgs.lib.nameValuePair "${prefix}${name}" value) attrs;
+
+      /*
+        A sandboxed `go test` run over `./daemon`. The vendored modules
+        and disabled proxy make any network access fail. Go refuses a
+        go.mod directly in the build's temporary root, so the script
+        copies the source into a subdirectory first.
+
+        `pkgs`: the package set providing Go.
+        `name`: the derivation name.
+        `cgo`: whether to enable cgo and add gcc, as `-race` requires.
+        `script`: shell commands run in the source copy.
+
+        Returns a derivation that builds when `script` succeeds.
+      */
+      runGoTests =
+        pkgs:
+        {
+          name,
+          cgo ? false,
+          script,
+        }:
+        pkgs.runCommand name
+          {
+            src = ./daemon;
+            nativeBuildInputs = [ pkgs.go ] ++ nixpkgs.lib.optional cgo pkgs.gcc;
+            GOFLAGS = "-mod=vendor";
+            GOPROXY = "off";
+            GOSUMDB = "off";
+            # Only `-race` needs cgo; netns, the one cgo dependency, is
+            # unreachable from wanwatch.
+            CGO_ENABLED = if cgo then "1" else "0";
+          }
+          ''
+            export HOME=$TMPDIR
+            export GOCACHE=$TMPDIR/gocache
+            mkdir -p source
+            cp -r $src/* source/
+            chmod -R u+w source
+            cd source
+            ${script}
+            touch $out
+          '';
     in
     {
       lib = import ./lib {
@@ -234,15 +236,15 @@
 
       packages = forAllSystems (
         pkgs:
-        nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux rec {
-          # Thread the lib's version through so wanwatchd's
-          # ldflags-injected `main.version` (and meta.version)
-          # come from one source — lib/default.nix — rather than
-          # a duplicate default in wanwatchd.nix.
+        let
+          # The version comes from `lib/default.nix`, its single source.
           wanwatchd = pkgs.callPackage ./pkgs/wanwatchd.nix {
             inherit (self.lib) version;
             revision = "unknown";
           };
+        in
+        nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          inherit wanwatchd;
           default = wanwatchd;
         }
       );
@@ -255,7 +257,7 @@
             inherit pkgs;
             libnet = libnet.lib.withLib pkgs.lib;
           };
-          # Observation rules are testable without booting the VM scenarios.
+          # Tests the VM observation helpers without booting a VM.
           observation = pkgs.runCommand "wanwatch-observation-tests" { } ''
             ${pkgs.python3}/bin/python3 -B -m unittest discover \
               -s ${./tests/vm} -p test_observation.py -v
@@ -264,199 +266,113 @@
           pre-commit = preCommitCheckFor pkgs;
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          daemon =
-            pkgs.runCommand "wanwatch-daemon-tests"
-              {
-                src = ./daemon;
-                nativeBuildInputs = [ pkgs.go ];
-                # External deps are vendored under `daemon/vendor/` so the
-                # build stays hermetic — Go's proxy/sumdb fetches are
-                # disabled to make any accidental network access fail
-                # loudly instead of silently downloading.
-                GOFLAGS = "-mod=vendor";
-                GOPROXY = "off";
-                GOSUMDB = "off";
-                # vishvananda/netlink pulls in netns, which uses cgo at
-                # build time even though wanwatch never touches netns.
-                # Pure-Go is sufficient for everything we need.
-                CGO_ENABLED = "0";
+          daemon = runGoTests pkgs {
+            name = "wanwatch-daemon-tests";
+            script = "go test -v ./...";
+          };
+
+          /*
+            Per-package coverage floors (PLAN §9.2); `cmd/wanwatchd` is
+            exempt because the VM tier exercises it. Floors track measured
+            coverage: raise them as coverage improves, and lower one only
+            with a comment explaining the regression.
+          */
+          coverage = runGoTests pkgs {
+            name = "wanwatch-daemon-coverage";
+            script = ''
+              cat > coverage.thresholds <<'EOF'
+              internal/apply:90
+              internal/config:100
+              internal/decision:100
+              internal/metrics:88
+              internal/probe:86
+              internal/rtnl:91
+              internal/selector:100
+              internal/state:94
+              EOF
+
+              go test -cover ./internal/... > coverage.out 2>&1 || {
+                  cat coverage.out
+                  echo "coverage: go test failed" >&2
+                  exit 1
               }
-              ''
-                # Go 1.24+ refuses to honour go.mod that sits directly in a
-                # well-known system temp root (/build, /tmp). Stage the
-                # source under a sub-directory to side-step that mitigation.
-                export HOME=$TMPDIR
-                export GOCACHE=$TMPDIR/gocache
-                mkdir -p source
-                cp -r $src/* source/
-                chmod -R u+w source
-                cd source
-                go test -v ./...
-                touch $out
-              '';
+              cat coverage.out
 
-          # Per-package coverage gate per PLAN §9.2. Runs `go test
-          # -cover` on every internal package and asserts each is at
-          # or above its declared floor. `cmd/wanwatchd/` is exempt
-          # per PLAN — it's wiring exercised by the VM tier — so it
-          # has no floor entry.
-          #
-          # Floors are tuned to current measured coverage: a gate
-          # that fails on the first PR because the codebase doesn't
-          # meet aspirational targets has no signal value. Tighten
-          # numbers upward as coverage genuinely improves; loosen
-          # only with a doc-comment explaining what regressed and
-          # why it was acceptable.
-          coverage =
-            pkgs.runCommand "wanwatch-daemon-coverage"
-              {
-                src = ./daemon;
-                nativeBuildInputs = [ pkgs.go ];
-                GOFLAGS = "-mod=vendor";
-                GOPROXY = "off";
-                GOSUMDB = "off";
-                CGO_ENABLED = "0";
-              }
-              ''
-                export HOME=$TMPDIR
-                export GOCACHE=$TMPDIR/gocache
-                mkdir -p source
-                cp -r $src/* source/
-                chmod -R u+w source
-                cd source
+              fail=0
+              while IFS=: read -r pkg floor; do
+                  # Skip blank lines and heredoc indentation.
+                  pkg=$(echo "$pkg" | tr -d '[:space:]')
+                  floor=$(echo "$floor" | tr -d '[:space:]')
+                  [ -z "$pkg" ] && continue
 
-                # Floor table: "<pkg>:<percent-as-integer>". Format
-                # mirrors PLAN §9.2; keep this list as the single
-                # source of truth — CI just reads it back.
-                cat > coverage.thresholds <<'EOF'
-                internal/apply:90
-                internal/config:100
-                internal/decision:100
-                internal/metrics:88
-                internal/probe:86
-                internal/rtnl:91
-                internal/selector:100
-                internal/state:94
-                EOF
+                  # Matches lines such as
+                  #   ok  <module>/<pkg>  0.012s  coverage: 88.6% of ...
+                  line=$(grep "/$pkg[[:space:]]" coverage.out || true)
+                  if [ -z "$line" ]; then
+                      echo "coverage: $pkg — no test output found" >&2
+                      fail=1
+                      continue
+                  fi
+                  pct=$(echo "$line" |
+                      sed -n 's/.*coverage: \([0-9.]*\)%.*/\1/p')
+                  if [ -z "$pct" ]; then
+                      echo "coverage: $pkg — could not parse line: $line" >&2
+                      fail=1
+                      continue
+                  fi
+                  # awk compares the fractional percentages.
+                  if awk -v p="$pct" -v f="$floor" \
+                      'BEGIN{ exit !(p+0 < f+0) }'; then
+                      printf 'coverage: %-22s %5s%% < floor %s%% — FAIL\n' \
+                          "$pkg" "$pct" "$floor" >&2
+                      fail=1
+                  else
+                      printf 'coverage: %-22s %5s%% ≥ floor %s%% — ok\n' \
+                          "$pkg" "$pct" "$floor"
+                  fi
+              done < coverage.thresholds
 
-                go test -cover ./internal/... > coverage.out 2>&1 || {
-                    cat coverage.out
-                    echo "coverage: go test failed" >&2
-                    exit 1
-                }
-                cat coverage.out
+              if [ "$fail" -ne 0 ]; then
+                  echo "coverage: one or more packages regressed below" \
+                      "their floor" >&2
+                  exit 1
+              fi
+            '';
+          };
 
-                fail=0
-                while IFS=: read -r pkg floor; do
-                    # Skip blank lines / heredoc-induced whitespace.
-                    pkg=$(echo "$pkg" | tr -d '[:space:]')
-                    floor=$(echo "$floor" | tr -d '[:space:]')
-                    [ -z "$pkg" ] && continue
+          race = runGoTests pkgs {
+            name = "wanwatch-daemon-race";
+            cgo = true;
+            script = "go test -race -timeout 120s ./...";
+          };
 
-                    # `go test -cover` prints one line per package:
-                    #   ok  <module>/<pkg>  0.012s  coverage: 88.6% of statements
-                    line=$(grep "/$pkg[[:space:]]" coverage.out || true)
-                    if [ -z "$line" ]; then
-                        echo "coverage: $pkg — no test output found" >&2
-                        fail=1
-                        continue
-                    fi
-                    pct=$(echo "$line" | sed -n 's/.*coverage: \([0-9.]*\)%.*/\1/p')
-                    if [ -z "$pct" ]; then
-                        echo "coverage: $pkg — could not parse line: $line" >&2
-                        fail=1
-                        continue
-                    fi
-                    # Compare as integer percent (truncate fractions);
-                    # awk does the float→bool. `< floor` ⇒ fail.
-                    if awk -v p="$pct" -v f="$floor" 'BEGIN{ exit !(p+0 < f+0) }'; then
-                        printf 'coverage: %-22s %5s%% < floor %s%% — FAIL\n' "$pkg" "$pct" "$floor" >&2
-                        fail=1
-                    else
-                        printf 'coverage: %-22s %5s%% ≥ floor %s%% — ok\n' "$pkg" "$pct" "$floor"
-                    fi
-                done < coverage.thresholds
-
-                if [ "$fail" -ne 0 ]; then
-                    echo "coverage: one or more packages regressed below their floor" >&2
-                    exit 1
-                fi
-                touch $out
-              '';
-
-          # Race-detector pass. `go test -race` links the runtime
-          # against the race runtime — needs cgo and a C toolchain
-          # in PATH (hence `pkgs.gcc` here; the `daemon` and
-          # `coverage` checks run with CGO_ENABLED=0 to keep their
-          # closures slim).
-          race =
-            pkgs.runCommand "wanwatch-daemon-race"
-              {
-                src = ./daemon;
-                nativeBuildInputs = [
-                  pkgs.go
-                  pkgs.gcc
-                ];
-                GOFLAGS = "-mod=vendor";
-                GOPROXY = "off";
-                GOSUMDB = "off";
-                # CGO_ENABLED=1 is the whole point — without it,
-                # `-race` errors out with "race requires cgo".
-                CGO_ENABLED = "1";
-              }
-              ''
-                export HOME=$TMPDIR
-                export GOCACHE=$TMPDIR/gocache
-                mkdir -p source
-                cp -r $src/* source/
-                chmod -R u+w source
-                cd source
-                go test -race -timeout 120s ./...
-                touch $out
-              '';
-
-          # Build the daemon as part of `nix flake check` so a
-          # regression in `pkgs/wanwatchd.nix` (e.g. a missing source
-          # file under `fileset`, a vendored-dep drift) fails CI
-          # rather than waiting for an actual `nix build` invocation.
+          # Catches packaging regressions, such as a file missing from
+          # the fileset, in `nix flake check`.
           package = self.packages.${pkgs.stdenv.hostPlatform.system}.wanwatchd;
 
-          # Evaluate the NixOS module against a realistic
-          # declaration and assert the rendered config + module
-          # outputs are well-formed.
           integration = import ./tests/integration {
             inherit pkgs;
             nixosModule = self.nixosModules.default;
             telegrafModule = self.nixosModules.telegraf;
           };
-
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
-          # VM tier: boot a real NixOS VM, start the daemon, and
-          # assert end-to-end behavior the unit + integration
-          # tiers can't reach (capabilities, systemd hardening,
-          # netlink-bound apply, real socket modes). Linux+KVM
-          # only.
-          #
-          # Every scenario is materialized against both the
-          # current stable channel and unstable (`vm-*` vs
-          # `vm-unstable-*`). The default `vm-*` set catches what
-          # release users will see; `vm-unstable-*` surfaces the
-          # newer-kernel / newer-systemd issues stable will pick
-          # up next.
-          vmChecksWithPrefix "vm-" (mkVmChecks pkgs)
-          // vmChecksWithPrefix "vm-unstable-" (mkVmChecks (unstablePkgsFor pkgs.stdenv.hostPlatform.system))
+          /*
+            End-to-end scenarios in NixOS VMs, covering what evaluation
+            cannot: capabilities, hardening, netlink, and socket modes.
+            `vm-*` uses stable nixpkgs, as releases do; `vm-unstable-*`
+            previews the kernel and systemd that stable will get next.
+          */
+          prefixNames "vm-" (makeVmChecks pkgs)
+          // prefixNames "vm-unstable-" (makeVmChecks (unstablePkgsFor pkgs.stdenv.hostPlatform.system))
         )
       );
 
       devShells = forAllSystems (
         pkgs:
         let
-          # `go test -race` needs a C toolchain — the race runtime
-          # is compiled and linked via cgo. mkShell (not -NoCC)
-          # provides the stdenv with gcc on its PATH so `go test
-          # -race ./...` Just Works inside `nix develop`.
-          base = [
+          # mkShell rather than mkShellNoCC: `go test -race` needs gcc.
+          packages = [
             (treefmtFor pkgs).config.build.wrapper
             pkgs.nixfmt
             pkgs.go
@@ -464,27 +380,20 @@
             pkgs.gotools
             pkgs.golangci-lint
             pkgs.gofumpt
-            # Nix linters surfaced for both the pre-commit hook and
-            # for manual runs (`statix check`, `deadnix`).
             pkgs.statix
             pkgs.deadnix
           ];
-          preCommit = preCommitCheckFor pkgs;
           auditPkgs = unstablePkgsFor pkgs.stdenv.hostPlatform.system;
         in
         {
-          # The pre-commit shellHook installs .git/hooks/{pre-commit,
-          # pre-push} on every `nix develop` entry — declarative
-          # config means a fresh clone is fully wired by one
-          # `nix develop`.
+          # The shell hook installs the Git hooks on every entry.
           default = pkgs.mkShell {
-            packages = base;
-            inherit (preCommit) shellHook;
+            inherit packages;
+            inherit (preCommitCheckFor pkgs) shellHook;
           };
 
-          # Pinned tools used by the weekly/release vulnerability
-          # workflow. Keeping them in a separate shell avoids adding
-          # scanner dependencies to normal development environments.
+          # Scanners for the vulnerability audit workflow, kept out of
+          # the default shell.
           audit = pkgs.mkShellNoCC {
             packages = [
               auditPkgs.govulncheck
@@ -493,10 +402,12 @@
           };
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          # Minimal review tools, without the default shell's Git hook setup.
-          # mkShell supplies GCC for fresh Go race tests; the Go version and
-          # dependencies come from the lock file and daemon/vendor, not from
-          # the review sandbox's preinstalled SDK or module proxy.
+          /*
+            Review tools without the default shell's Git hooks. mkShell
+            supplies gcc for race tests; Go and its modules come from the
+            lock file and daemon/vendor, not from a preinstalled SDK or
+            the module proxy.
+          */
           review = pkgs.mkShell {
             packages = [ pkgs.go ];
             GOTOOLCHAIN = "local";

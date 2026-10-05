@@ -1,112 +1,107 @@
 /*
-  internal/primitives — generic helpers shared across the wanwatch
-  library. Exposed under `wanwatch.internal.primitives`.
-
-  Sections:
-    - tryResult     — `tryOk`, `tryErr`
-    - Validation    — `check`, `partitionTry`,
-                      `isValidName`, `isPositiveInt`, `formatErrors`
-
-  This module owns nothing type-specific.
-
-  Uses `nixpkgs.lib` freely (`lib.nameValuePair`,
-  `lib.concatMapStringsSep`, etc.).
-
-  ===== tryOk / tryErr =====
-
-  Constructors of the `tryResult` shape used by every `tryMake`:
-
-    tryOk  value : { success = true;  value;        error = null;  }
-    tryErr error : { success = false; value = null; inherit error; }
-
-  Same shape as libnet's `tryParse` result — interoperable.
-
-  ===== check =====
-
-  `check kind cond msg`: returns `[]` when `cond` is true,
-  otherwise a one-element list with a `{name = kind; value = msg;}`
-  error record. Designed for chaining with `++` so each validation
-  rule collapses to a single line and the full validator becomes
-  a `++` cascade.
-
-  Error records elsewhere — e.g. when forwarding errors from a
-  nested value type — are constructed directly with
-  `lib.nameValuePair "kind" "msg"`, which is the same shape.
-
-  ===== partitionTry =====
-
-  `partitionTry parser items`: applies a `tryResult`-returning
-  parser to every item, partitions, returns
-  `{ parsed = [<success values>]; errors = [<error strings>]; }`.
-  Used by `probe.parseTargets` and `group.parseMembers` —
-  callers that need both halves of the partition.
-
-  ===== isValidName =====
-
-  True iff the input is a non-empty string matching the wanwatch
-  identifier shape `[a-zA-Z][a-zA-Z0-9-]*` — used by `wan.name`,
-  `group.name`, and similar entity-key validators. Stricter than
-  libnet's interface-name check on purpose: identifiers must be
-  unquoted-attr-key-clean, and the regex matches nftzones'
-  `primitives.identifier`.
-
-  ===== isPositiveInt =====
-
-  True iff the input is an integer strictly greater than zero.
-  Used by every value-type's positive-int field validators
-  (`weight`, `priority`, `intervalMs`, `windowSize`, `table`,
-  `mark`, …).
-
-  ===== formatErrors =====
-
-  `formatErrors ctx errors`: renders a list of `{name; value;}`
-  error records into the canonical aggregated string
-    `<ctx>: [<kind>] <msg>; [<kind2>] <msg2>; …`
-  used by every `tryMake` failure path.
+  Generic helpers shared by the wanwatch value types: `tryResult`
+  constructors, error records, and identifier and integer predicates.
+  Exposed as `wanwatch.internal.primitives`; nothing here is
+  type-specific.
 */
 { lib }:
-let
+{
+  /*
+    Build a successful `tryResult`, the shape every `tryMake` returns.
+    It matches libnet's `tryParse` results, so the two interoperate.
+
+    `value`: the constructed value.
+
+    Returns `{ success = true; value; error = null; }`.
+  */
   tryOk = value: {
     success = true;
     inherit value;
     error = null;
   };
 
+  /*
+    Build a failed `tryResult`, the shape every `tryMake` returns.
+
+    `error`: the error message string.
+
+    Returns `{ success = false; value = null; error; }`.
+  */
   tryErr = error: {
     success = false;
     value = null;
     inherit error;
   };
 
+  /*
+    Render error records into the single message every `tryMake`
+    failure carries, so users see all violations at once.
+
+    `context`: the failing constructor, such as `"probe.make"`.
+    `errors`: a list of `{ name = kind; value = message; }` records.
+
+    Returns `"<context>: [<kind>] <message>; [<kind>] <message>; …"`.
+  */
   formatErrors =
-    ctx: errors: "${ctx}: " + lib.concatMapStringsSep "; " (e: "[${e.name}] ${e.value}") errors;
+    context: errors:
+    "${context}: " + lib.concatMapStringsSep "; " (error: "[${error.name}] ${error.value}") errors;
 
+  /*
+    Turn one validation rule into an error list, so a validator is a
+    `++` chain of `check` calls.
+
+    `kind`: the error kind, such as `"probeInvalidMethod"`.
+    `condition`: true when the rule holds.
+    `message`: the explanation reported when the rule fails.
+
+    Returns `[ ]` when `condition` holds; otherwise a one-element list
+    holding the `{ name = kind; value = message; }` error record.
+  */
   check =
-    kind: cond: msg:
-    if cond then [ ] else [ (lib.nameValuePair kind msg) ];
+    kind: condition: message:
+    if condition then [ ] else [ (lib.nameValuePair kind message) ];
 
+  /*
+    Apply a `tryResult`-returning parser to every item and keep both
+    outcomes, so validators can report errors while constructors use
+    the parsed values.
+
+    `parser`: a function returning a `tryResult`.
+    `items`: the inputs to parse.
+
+    Returns `{ parsed = [ <values> ]; errors = [ <error strings> ]; }`,
+    each in input order.
+  */
   partitionTry =
     parser: items:
     let
-      p = lib.partition (r: r.success) (builtins.map parser items);
+      results = lib.partition (result: result.success) (map parser items);
     in
     {
-      parsed = builtins.map (r: r.value) p.right;
-      errors = builtins.map (r: r.error) p.wrong;
+      parsed = map (result: result.value) results.right;
+      errors = map (result: result.error) results.wrong;
     };
 
-  isValidName = s: builtins.isString s && builtins.match "[a-zA-Z][a-zA-Z0-9-]*" s != null;
+  /*
+    Test the wanwatch identifier shape used for WAN, Group, and Member
+    references. It is stricter than libnet's interface-name check so
+    identifiers stay valid unquoted attribute names.
 
-  isPositiveInt = x: builtins.isInt x && x > 0;
-in
-{
-  inherit
-    tryOk
-    tryErr
-    formatErrors
-    check
-    partitionTry
-    isValidName
-    isPositiveInt
-    ;
+    `value`: any value.
+
+    Returns true when `value` is a string matching
+    `[a-zA-Z][a-zA-Z0-9-]*`.
+  */
+  isValidName =
+    value: builtins.isString value && builtins.match "[a-zA-Z][a-zA-Z0-9-]*" value != null;
+
+  /*
+    Test the positive-integer fields shared by the value types, such
+    as `weight`, `priority`, and `intervalMs`.
+
+    `value`: any value.
+
+    Returns true when `value` is an integer greater than zero.
+  */
+  isPositiveInt = value: builtins.isInt value && value > 0;
 }

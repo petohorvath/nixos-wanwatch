@@ -1,14 +1,8 @@
-# Unit tests for `lib/types/member.nix`.
-{ pkgs, libnet, ... }:
+# Unit tests for each option type exported by `lib/types/member.nix`.
+{ helpers, wanwatch, ... }:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
-  inherit (wanwatch) types;
-
-  helpers = import ../helpers.nix { inherit pkgs; };
   inherit (helpers) evalType evalTypeFails;
+  inherit (wanwatch) types;
 in
 {
   # ===== leaf types =====

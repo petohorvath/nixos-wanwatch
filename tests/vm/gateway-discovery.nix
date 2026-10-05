@@ -1,18 +1,8 @@
 /*
-  gateway-discovery — boot a two-node topology (isp + router),
-  configure the router's WAN interface with a kernel-installed
-  default route via systemd-networkd, and verify:
-
-    1. The daemon discovers the gateway from the kernel's main RIB
-       (RouteSubscriber → GatewayCache) without operator config.
-    2. state.json surfaces the discovered next-hop in
-       `wans.<name>.gateways.{v4,v6}`.
-    3. The daemon writes a `via <gw>` default route into the
-       group's routing table — the non-PtP apply path that this
-       commit series introduced.
-
-  This test pins both the discovery loop and the state.json
-  gateway field.
+  gateway-discovery — networkd installs a v4 default route via the
+  isp node. The daemon must discover that gateway from the main RIB,
+  publish it in State, and write a `via` default route into the
+  Group's table.
 */
 {
   pkgs,
@@ -22,8 +12,7 @@
 pkgs.testers.runNixOSTest {
   name = "wanwatch-gateway-discovery";
 
-  # nodes.isp:    192.168.1.1 — acts as the next-hop the router learns
-  # nodes.router: 192.168.1.2 — uses Gateway=192.168.1.1
+  # isp (192.168.1.1) is the next hop that router (192.168.1.2) learns.
   nodes.isp =
     { lib, ... }:
     {
@@ -38,16 +27,13 @@ pkgs.testers.runNixOSTest {
       virtualisation.vlans = [ 1 ];
       networking.firewall.enable = lib.mkForce false;
 
-      # Override the default networkd config the test framework
-      # supplies so we can declare a real Gateway= the kernel will
-      # install in the main RIB. The daemon's RouteSubscriber
-      # picks up the resulting RTM_NEWROUTE.
+      # Replace the driver's networkd config with a Gateway= that the
+      # kernel installs in the main RIB.
       networking.useNetworkd = true;
       systemd.network.networks."01-eth1" = lib.mkForce {
         matchConfig.Name = "eth1";
         networkConfig.Gateway = "192.168.1.1";
-        # Pin the address so the kernel-assigned LAN side and the
-        # nixos-test framework's assignment don't fight.
+        # Pin the address so it agrees with the test driver's.
         address = [ "192.168.1.2/24" ];
       };
 
@@ -60,8 +46,7 @@ pkgs.testers.runNixOSTest {
         enable = true;
         wans.uplink = {
           interface = "eth1";
-          # pointToPoint = false (default) → daemon discovers
-          # gateway via netlink. This is the path under test.
+          # The default pointToPoint = false discovers the gateway.
           probe = {
             targets.v4 = [ "192.168.1.1" ];
             intervalMs = 600000;
@@ -102,7 +87,7 @@ pkgs.testers.runNixOSTest {
     # State must publish the discovered next-hop under schema 1.
     observe.wait_gateway("uplink", "v4", "192.168.1.1")
 
-    # Independently verify the non-PtP Apply path in the Group's kernel table.
+    # Verify the gateway Apply path in the Group's kernel table.
     observe.wait_default_route(
         "v4", "eth1", group="home", gateway="192.168.1.1", timeout=15
     )

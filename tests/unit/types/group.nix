@@ -1,26 +1,16 @@
 /*
-  Unit tests for `lib/types/group.nix`. Cross-field invariants
-  (non-empty members, no duplicate WAN references) are tested in
-  `tests/unit/internal/group.nix` against `group.make` /
-  `group.tryMake`. Here we exercise only what the type system
-  itself enforces.
+  Unit tests for `lib/types/group.nix`: only what the type system
+  enforces. `tests/unit/internal/group.nix` covers cross-field
+  invariants such as non-empty members and duplicate WAN references.
 */
-{ pkgs, libnet, ... }:
+{ helpers, wanwatch, ... }:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (helpers) evalType evalTypeFails;
   inherit (wanwatch) types;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalType evalTypeFails;
-
-  # Minimal well-formed group input. `mark` and `table` are required
-  # since the auto-allocator was removed; both typed as
-  # `wanwatch.types.{fwmark,routingTableId}` (range [1000, 32767]).
-  # `name` is `readOnly` and defaults to the attribute key — `evalType`
-  # wraps under `options.value`, so the submodule sees `name = "value"`.
+  # `mark` and `table` are required. `name` is read-only and defaults
+  # to the attribute key; `evalType` declares the option as `value`,
+  # so the submodule sees "value".
   baseConfig = {
     members = [
       {
@@ -66,8 +56,7 @@ in
   };
 
   testGroupTableRejectsNull = {
-    # null no longer valid — was the "auto-allocate" sentinel, now
-    # removed; every group must declare an integer.
+    # Every group must declare an integer table.
     expr = evalTypeFails types.groupTable null;
     expected = true;
   };
@@ -112,17 +101,17 @@ in
   testGroupMinimalShape = {
     expr =
       let
-        g = evalType types.group baseConfig;
+        group = evalType types.group baseConfig;
       in
       {
-        inherit (g)
+        inherit (group)
+          mark
           name
           strategy
           table
-          mark
           ;
-        memberCount = builtins.length g.members;
-        firstMemberWan = (builtins.head g.members).wan;
+        memberCount = builtins.length group.members;
+        firstMemberWan = (builtins.head group.members).wan;
       };
     expected = {
       name = "value"; # derived from `options.value` in `evalType`
@@ -135,14 +124,13 @@ in
   };
 
   testGroupMembersFillMemberDefaults = {
-    # Each member entry should get member's defaults filled in.
     expr =
       let
-        g = evalType types.group baseConfig;
-        m = builtins.head g.members;
+        group = evalType types.group baseConfig;
+        firstMember = builtins.head group.members;
       in
       {
-        inherit (m) weight priority;
+        inherit (firstMember) priority weight;
       };
     expected = {
       weight = 100;
@@ -213,14 +201,13 @@ in
   };
 
   testGroupRejectsMissingTable = {
-    # baseConfig minus `table` → the option becomes required-but-missing,
-    # which the submodule rejects at eval time.
-    expr = evalTypeFails types.group (builtins.removeAttrs baseConfig [ "table" ]);
+    # `table` has no default, so leaving it out fails evaluation.
+    expr = evalTypeFails types.group (removeAttrs baseConfig [ "table" ]);
     expected = true;
   };
 
   testGroupRejectsMissingMark = {
-    expr = evalTypeFails types.group (builtins.removeAttrs baseConfig [ "mark" ]);
+    expr = evalTypeFails types.group (removeAttrs baseConfig [ "mark" ]);
     expected = true;
   };
 }

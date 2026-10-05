@@ -1,23 +1,22 @@
 /*
-  probe-family-mismatch — a Probe with a v6 literal placed in the
-  v4 target bucket (or vice versa) must be rejected at module-eval
-  time. Proves probe.tryMake's per-bucket family-predicate check
-  (probeTargetFamilyMismatch) is reached by the live module path.
+  probe-family-mismatch — module evaluation must reject a v6 literal
+  in the v4 target bucket, proving the module reaches the per-bucket
+  family check in `probe.tryMake` (probeTargetFamilyMismatch).
 */
 {
-  pkgs,
   nixosModule,
+  pkgs,
 }:
 
 let
-  broken = {
+  invalidConfig = {
     services.wanwatch = {
       enable = true;
       wans.broken = {
         interface = "eth0";
         probe.targets.v4 = [ "2606:4700:4700::1111" ];
       };
-      groups.x = {
+      groups.uplink = {
         members = [
           {
             wan = "broken";
@@ -37,7 +36,7 @@ let
     inherit (pkgs.stdenv.hostPlatform) system;
     modules = [
       nixosModule
-      broken
+      invalidConfig
     ];
   };
 

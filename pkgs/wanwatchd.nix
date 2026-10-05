@@ -1,24 +1,17 @@
 /*
-  wanwatchd — the wanwatch Go daemon. Drives one ICMP prober per
-  (WAN, family), listens on rtnetlink, mutates kernel routing, and
-  exposes Prometheus metrics over a Unix socket. PLAN §8.
-
-  Vendored deps live under `daemon/vendor/` so the build is hermetic
-  (`vendorHash = null`, no proxy/sumdb fetches). `CGO_ENABLED = 0`
-  because the only cgo-using transitive dep (netns) is unreachable
-  from wanwatch.
-
-  Version + revision are link-injected so `wanwatch_build_info`
-  identifies the package. The flake threads `version` from
-  `lib/default.nix` (the single source of truth) via callPackage;
-  release builds may override `revision`. The version default below
-  is a fallback for stand-alone callPackage use — keep it in sync
-  with `lib/default.nix` on tag bumps.
+  wanwatchd, the Go daemon that probes WANs, follows rtnetlink events,
+  applies routing state, and serves Prometheus metrics (PLAN §8).
 
     pkgs.callPackage ./wanwatchd.nix {
       version = "0.1.0";
       revision = "abcdef0";
     }
+
+  `version` and `revision` are linked into the binary for
+  `wanwatch_build_info`. The flake passes the version from
+  `lib/default.nix`; keep the fallback default in sync with it.
+  Dependencies are vendored in `daemon/vendor/`, so `vendorHash` is
+  null and the build fetches nothing.
 */
 {
   lib,
@@ -46,6 +39,7 @@ buildGoModule {
 
   vendorHash = null;
 
+  # Only netns needs cgo, and wanwatch never reaches it.
   env.CGO_ENABLED = "0";
 
   subPackages = [ "cmd/wanwatchd" ];
@@ -57,10 +51,8 @@ buildGoModule {
     "-X main.commit=${revision}"
   ];
 
-  # Daemon talks to the kernel via netlink — no useful test surface
-  # here that buildGoModule can run unprivileged. Real coverage is
-  # the `daemon` flake check (which runs `go test ./...` in the
-  # sandbox) plus the VM tier (PLAN §9.4).
+  # The tests run in the `daemon`, `coverage`, and `race` flake checks
+  # and the VM tier (PLAN §9.4), not in the package build.
   doCheck = false;
 
   meta = {

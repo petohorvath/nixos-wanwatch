@@ -1,13 +1,6 @@
 /*
-  treefmt-nix configuration. One `nix fmt` formats every file in the
-  repo regardless of language.
-
-  Programs:
-    - nixfmt   — RFC 166 canonical Nix formatter (*.nix)
-    - gofumpt  — stricter gofmt superset (*.go)
-    - goimports — manage import groups (*.go)
-
-  CI gate: `nix fmt -- --fail-on-change`.
+  treefmt-nix configuration: `nix fmt` formats Nix with nixfmt and Go
+  with gofumpt and goimports. CI runs it with `--fail-on-change`.
 */
 _: {
   projectRootFile = "flake.nix";
@@ -24,9 +17,8 @@ _: {
     "result"
     "result-*"
     ".direnv/**"
-    # Vendored Go deps are upstream-formatted; reformatting them
-    # creates noise on every `nix fmt` run and would block updates
-    # via `go mod vendor`.
+    # Vendored code keeps upstream formatting so `go mod vendor`
+    # updates stay clean.
     "daemon/vendor/**"
   ];
 }

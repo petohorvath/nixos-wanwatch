@@ -1,19 +1,16 @@
 /*
-  probe-no-targets — a WAN whose Probe declares neither v4 nor v6
-  targets must be rejected at module-eval time. This is the
-  integration-tier proof that the Nix-side validator
-  (probe.tryMake → probeNoTargets) is wired into the live module
-  path — unit tests call probe.make directly, but if the module
-  ever stopped routing user inputs through `make`, those tests
-  would pass and a silent-not-probed WAN would ship.
+  probe-no-targets — module evaluation must reject a WAN whose Probe
+  declares neither v4 nor v6 targets. Unit tests call `probe.make`
+  directly, so only this check proves the module still routes user
+  inputs through the validator (probeNoTargets).
 */
 {
-  pkgs,
   nixosModule,
+  pkgs,
 }:
 
 let
-  broken = {
+  invalidConfig = {
     services.wanwatch = {
       enable = true;
       wans.broken = {
@@ -23,7 +20,7 @@ let
           v6 = [ ];
         };
       };
-      groups.x = {
+      groups.uplink = {
         members = [
           {
             wan = "broken";
@@ -43,11 +40,11 @@ let
     inherit (pkgs.stdenv.hostPlatform) system;
     modules = [
       nixosModule
-      broken
+      invalidConfig
     ];
   };
 
-  # Force evaluation of the path that drives wan.make under the hood.
+  # Rendering the config forces `wan.make` on every declared WAN.
   attempt = builtins.tryEval evaluated.config.environment.etc."wanwatch/config.json".text;
 in
 if attempt.success then

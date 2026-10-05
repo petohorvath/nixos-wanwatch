@@ -1,17 +1,9 @@
 /*
-  nftzones-integration — verifies PLAN §6.1: wanwatch publishes
-  `services.wanwatch.marks.<group>`; an nftzones table references
-  that value in a sroute rule; the compiled nftables ruleset on
-  the live kernel contains the same mark; the daemon's fwmark
-  policy rule + table default route are in place, atomically
-  followed by route writes on failover (covered by failover-*).
-
-  Single-node — the LAN client + multi-ISP traffic-level
-  topology PLAN §9.4 describes is best left to a dedicated
-  end-to-end scenario once the topology pieces (DHCP, NAT, real
-  TCP responders) settle. This scenario focuses on the
-  rule-installation contract; failover-* already covers route
-  rewrites under switch.
+  nftzones-integration — the rule-installation contract of PLAN §6.1.
+  An nftzones sroute references `services.wanwatch.marks.<group>`;
+  the live nftables ruleset must contain that mark, and the daemon
+  must install the fwmark rules and the Group's default route.
+  Single node; failover-* covers route rewrites.
 */
 {
   pkgs,
@@ -73,8 +65,8 @@ pkgs.testers.runNixOSTest {
             lan.interfaces = [ "lan0" ];
             wan-home.interfaces = [ "wan0" ];
           };
-          # Stamp the wanwatch-allocated mark on LAN-sourced
-          # forwarded traffic. PLAN §6.2's canonical example.
+          # Mark LAN-sourced forwarded traffic for the Group (the
+          # PLAN §6.2 example).
           sroutes.lan-via-home = {
             from = [ "lan" ];
             rule = [ (mangle meta.mark config.services.wanwatch.marks.home-uplink) ];
@@ -120,6 +112,7 @@ pkgs.testers.runNixOSTest {
     observe = Observation(router, curl="${pkgs.curl}/bin/curl")
 
     import json
+    import re
 
 
     router.wait_for_unit("wanwatch.service")
@@ -128,44 +121,32 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set lan0 up")
 
-    # The mark + table values the module exposed as outputs.
-    cfg = json.loads(router.succeed("cat /etc/wanwatch/config.json"))
-    grp = cfg["groups"]["home-uplink"]
-    mark = grp["mark"]
-    table = grp["table"]
+    # The mark and table values rendered from the module.
+    rendered = json.loads(router.succeed("cat /etc/wanwatch/config.json"))
+    group_config = rendered["groups"]["home-uplink"]
+    mark = group_config["mark"]
+    table = group_config["table"]
     assert isinstance(mark, int) and mark > 0, f"mark = {mark!r}"
     assert isinstance(table, int) and table > 0, f"table = {table!r}"
 
-    # 1. The mark value reached the compiled nftables ruleset.
-    #    nft pretty-prints marks zero-padded to 8 hex digits
-    #    (e.g. 6320 → "0x000018b0"), so match on the int value
-    #    after stripping the prefix + leading zeros rather than
-    #    on a hand-rolled hex string.
+    # 1. The mark reached the compiled ruleset. nft zero-pads hex
+    #    marks, so compare parsed integers.
     ruleset = router.succeed("nft list ruleset")
-    import re
-
     found = any(
-        int(m.group(1), 16) == mark
-        for m in re.finditer(r"meta mark set 0x([0-9a-fA-F]+)", ruleset)
+        int(match.group(1), 16) == mark
+        for match in re.finditer(r"meta mark set 0x([0-9a-fA-F]+)", ruleset)
     ) or any(
-        int(m.group(1)) == mark
-        for m in re.finditer(r"meta mark set (\d+)\b", ruleset)
+        int(match.group(1)) == mark
+        for match in re.finditer(r"meta mark set (\d+)\b", ruleset)
     )
     assert found, (
         f"nftables ruleset missing mark {mark} ({hex(mark)}):\n{ruleset}"
     )
 
-    # 2. The daemon installed the fwmark policy-routing rule for
-    # both families (PLAN §6.1 step 2). `ip rule show fwmark X`
-    # filtering proved brittle across iproute2 versions (newer
-    # releases want `fwmark X/MASK`); list the full set and grep
-    # the printed mark instead.
-    #
-    # Poll defensively: bootstrap → EnsureRule → first state.json
-    # publish → sd_notify READY, so `wait_for_unit` SHOULD gate
-    # these — but a future bootstrap-order regression would silently
-    # re-introduce a race. Cheap on the happy path. Matches
-    # smoke.nix.
+    # 2. The daemon installed the fwmark rule for both families
+    #    (PLAN §6.1). `ip rule show fwmark X` filtering varies across
+    #    iproute2 releases, so grep the full listing. Poll as smoke.nix
+    #    does in case bootstrap ordering regresses.
     def wait_for_fwmark_rule(family_flag, mark, timeout=10):
         pattern = f"fwmark 0x{mark:x}|fwmark 0x{mark:08x}"
         router.wait_until_succeeds(
@@ -177,8 +158,8 @@ pkgs.testers.runNixOSTest {
     wait_for_fwmark_rule("-4", mark)
     wait_for_fwmark_rule("-6", mark)
 
-    # Verify the Group's direct default route in the kernel after the
-    # carrier-up Decision commits, allowing an initially absent FIB table.
+    # The carrier-up Decision installs the Group's default route; the
+    # FIB table may be absent until then.
     observe.wait_default_route("v4", "wan0", group="home-uplink", timeout=15)
   '';
 }

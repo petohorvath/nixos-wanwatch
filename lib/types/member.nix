@@ -1,17 +1,11 @@
 /*
-  types/member — NixOS option types for the Member value.
+  Option types for Group Members, exported through `wanwatch.types`:
 
-  Exports (flattened into `wanwatch.types.<name>` by
-  `lib/types/default.nix`):
-
-    memberWan       — wanwatch identifier (must match the `name`
-                      of a WAN declared in the surrounding config —
-                      cross-check happens at config-eval time, not
-                      at the type level)
-    memberWeight    — positive int (default 100)
-    memberPriority  — positive int (default 1; lower = preferred
-                      by the primary-backup strategy)
-    member          — top-level submodule
+    memberWan      — wanwatch identifier of a declared WAN; the daemon
+                     checks the reference when it loads its config
+    memberWeight   — positive integer, default 100
+    memberPriority — positive integer, default 1; lower is preferred
+    member         — the complete Member submodule
 */
 {
   lib,
@@ -19,8 +13,8 @@
   internal,
 }:
 let
-  inherit (lib) types mkOption;
   inherit (internal.member) defaults;
+  inherit (lib) mkOption types;
 
   memberWan = primitives.identifier;
   memberWeight = primitives.positiveInt;
@@ -32,26 +26,25 @@ let
         type = memberWan;
         example = "primary";
         description = ''
-          Name of the WAN this Member references. Must match the
-          `name` of a WAN declared in the same `services.wanwatch`
-          config; the cross-check happens at config-eval time.
+          Name of the WAN this Member references. It must name a WAN
+          declared in the same `services.wanwatch` configuration.
         '';
       };
       weight = mkOption {
         type = memberWeight;
         default = defaults.weight;
         description = ''
-          Tiebreaker among Members with equal priority. v1's
-          primary-backup strategy ignores weight; it matters once
-          multi-active (load-balance) lands in v2.
+          Tiebreaker among Members with equal priority. The
+          primary-backup strategy ignores it; it matters once
+          multi-active strategies exist.
         '';
       };
       priority = mkOption {
         type = memberPriority;
         default = defaults.priority;
         description = ''
-          Lower = preferred by the primary-backup strategy. Ties
-          broken lexicographically by `wan` for determinism.
+          Preference order for the primary-backup strategy; lower is
+          preferred. Ties go to the lexicographically smaller `wan`.
         '';
       };
     };
@@ -59,9 +52,9 @@ let
 in
 {
   inherit
+    member
+    memberPriority
     memberWan
     memberWeight
-    memberPriority
-    member
     ;
 }

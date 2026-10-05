@@ -1,19 +1,13 @@
 /*
-  base — happy-path module-eval scenario. Declares a minimal
-  "primary + backup, one home group" config, evaluates the wanwatch
-  module against the full nixpkgs module corpus, and asserts:
-
-    - the rendered daemon config carries the expected schema + shape
-    - user-declared mark / table flow into the rendered config
-    - `services.wanwatch.marks` / `.tables` echo the user-supplied values
-    - the systemd unit is wired with the required capabilities
-
-  Module-eval only — no VM, no kernel. Catches option type / assertion
-  / defaultText drift before the VM tier pays the cost of a real boot.
+  base — happy-path module evaluation for a primary + backup WAN pair
+  in one Group. Asserts the rendered daemon config shape, that the
+  user-declared mark and table reach both the config and the
+  `services.wanwatch.marks` / `.tables` outputs, and the systemd
+  unit's capabilities. Module evaluation only; no VM or kernel.
 */
 {
-  pkgs,
   nixosModule,
+  pkgs,
 }:
 
 let
@@ -63,14 +57,14 @@ let
     ];
   };
 
-  rendered = builtins.fromJSON (
-    builtins.readFile (
-      pkgs.writeText "config.json" evaluated.config.environment.etc."wanwatch/config.json".text
-    )
-  );
+  rendered = lib.pipe evaluated.config.environment.etc."wanwatch/config.json".text [
+    (pkgs.writeText "config.json")
+    builtins.readFile
+    builtins.fromJSON
+  ];
 
-  serviceCfg = evaluated.config.systemd.services.wanwatch.serviceConfig;
-  ambientCaps = lib.concatStringsSep " " serviceCfg.AmbientCapabilities;
+  serviceConfig = evaluated.config.systemd.services.wanwatch.serviceConfig;
+  ambientCapabilities = lib.concatStringsSep " " serviceConfig.AmbientCapabilities;
 in
 pkgs.runCommand "wanwatch-integration-base"
   {
@@ -80,28 +74,32 @@ pkgs.runCommand "wanwatch-integration-base"
   ''
     set -eu
 
-    # 1. Rendered config has the expected schema version + top-level shape.
-    test "$(${pkgs.jq}/bin/jq -r '.schema' < "$renderedJSONPath")" = "1"
+    jqRendered() {
+      ${pkgs.jq}/bin/jq "$@" < "$renderedJSONPath"
+    }
+
+    # 1. Rendered config has the expected schema version.
+    test "$(jqRendered -r '.schema')" = "1"
 
     # 2. Both WANs are present.
-    ${pkgs.jq}/bin/jq -e '.wans.primary.interface == "eth0"' < "$renderedJSONPath"
-    ${pkgs.jq}/bin/jq -e '.wans.backup.interface == "wwan0"' < "$renderedJSONPath"
+    jqRendered -e '.wans.primary.interface == "eth0"'
+    jqRendered -e '.wans.backup.interface == "wwan0"'
 
-    # 3. The group is present and members are in priority order.
-    ${pkgs.jq}/bin/jq -e '.groups."home-uplink".members | length == 2' < "$renderedJSONPath"
+    # 3. The group is present with both members.
+    jqRendered -e '.groups."home-uplink".members | length == 2'
 
-    # 4. mark + table got allocated (non-null ints).
-    ${pkgs.jq}/bin/jq -e '.groups."home-uplink".mark | type == "number"' < "$renderedJSONPath"
-    ${pkgs.jq}/bin/jq -e '.groups."home-uplink".table | type == "number"' < "$renderedJSONPath"
+    # 4. The user-declared mark and table are rendered as numbers.
+    jqRendered -e '.groups."home-uplink".mark | type == "number"'
+    jqRendered -e '.groups."home-uplink".table | type == "number"'
 
     # 5. Cross-module outputs match the rendered values.
     mark='${toString evaluated.config.services.wanwatch.marks.home-uplink}'
     table='${toString evaluated.config.services.wanwatch.tables.home-uplink}'
-    test "$(${pkgs.jq}/bin/jq -r '.groups."home-uplink".mark' < "$renderedJSONPath")" = "$mark"
-    test "$(${pkgs.jq}/bin/jq -r '.groups."home-uplink".table' < "$renderedJSONPath")" = "$table"
+    test "$(jqRendered -r '.groups."home-uplink".mark')" = "$mark"
+    test "$(jqRendered -r '.groups."home-uplink".table')" = "$table"
 
     # 6. systemd unit is wired with the right capabilities.
-    test "${ambientCaps}" = "CAP_NET_ADMIN CAP_NET_RAW"
+    test "${ambientCapabilities}" = "CAP_NET_ADMIN CAP_NET_RAW"
 
     touch $out
   ''

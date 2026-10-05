@@ -1,62 +1,25 @@
 /*
-  failover-probe-loss-v6 — IPv6 counterpart of failover-probe-loss,
-  extended into a multi-phase probe-pipeline workout. Probes ride
-  ICMPv6 over manually-assigned ULA addresses (the test driver only
-  auto-IPs v4); netem at the egress qdisc drives the loss scenarios.
-
-  Exists because the other v6 scenarios (failover-v6, recovery,
-  failover-dual-stack) all use dummy interfaces with
-  intervalMs=600000 — they are carrier-driven, so they never
-  exercise the v6 probe + threshold + hysteresis chain on a real
-  packet path. Without this scenario, a regression in the
-  golang.org/x/net/icmp v6 socket bind, the v6 RTT statistics, the
-  v6 branch of combineFamilies, or the per-target → per-family
-  aggregator would slip through.
-
-  Topology:
+  failover-probe-loss-v6 — exercise the v6 probe, threshold,
+  hysteresis, and per-target aggregation chain on a real packet path.
+  The other v6 scenarios are carrier-driven on dummy interfaces.
 
     isp1 ─── VLAN 1 ─── eth1 ┐
                               ├── router
     isp2 ─── VLAN 2 ─── eth2 ┘
 
-  v6 plan (added imperatively after boot — two addresses per ISP so
-  the per-target aggregation phase has somewhere to break a target
-  without losing the whole WAN):
+  The test driver assigns only v4 addresses, so the script adds ULA
+  addresses: two per ISP (fd00:1::1-2 and fd00:2::1-2) so one target
+  can fail without losing the WAN, and fd00:1::3 / fd00:2::3 on the
+  router. Every phase shares one tuning (200 ms interval, 10-Sample
+  Window, consecutive{Up,Down} = 3) and leaves a known state for the
+  next:
 
-    isp1   eth1   fd00:1::1/64 + fd00:1::2/64
-    isp2   eth1   fd00:2::1/64 + fd00:2::2/64
-    router eth1   fd00:1::3/64
-    router eth2   fd00:2::3/64
-
-  Tunings — single windowSize/hysteresis set across all phases so
-  the daemon's behaviour is comparable phase-to-phase:
-
-    intervalMs  200        ⇒ 5 cycles/sec
-    timeoutMs   100
-    windowSize  10         ⇒ window cooks in ~2s
-    consecDown  3          ⇒ failover after ~600ms of stable verdict
-    consecUp    3          ⇒ recovery after ~600ms of stable verdict
-    lossPctDown 25
-    lossPctUp    5
-    rttMsDown   5000       (loose — RTT not exercised)
-    rttMsUp     4000
-
-  Phases (linear, each lands in a known healthy state for the next):
-
-    A  Cold-start cook + 100% netem ⇒ failover to backup
-    B  Clear netem ⇒ primary recovery
-    C  100% netem for ~2 cycles ⇒ window damping holds the verdict;
-       no Decision recorded (blip suppression)
-    D  Band-pass:
-         D1  50% netem ⇒ above lossPctDown ⇒ failover
-         D3  0% netem ⇒ below lossPctUp ⇒ recovery
-    E  Per-target aggregation: delete fd00:1::2 from isp1 ⇒
-       primary's per-(WAN,family) loss averages to 50% across the
-       two targets ⇒ failover; restore ⇒ recovery
-    F  Daemon restart: systemctl restart wanwatch.service ⇒
-       state.json is republished from bootstrap; the cold-start
-       carrier path keeps primary active without a probe-driven
-       Decision.
+    A  100% netem loss fails over to the backup.
+    B  Clearing netem restores the primary.
+    D  50% loss fails over; clearing it recovers.
+    E  Removing one primary target averages loss to ~50% and fails
+       over; restoring it recovers.
+    F  A daemon restart keeps the primary active on carrier.
 */
 {
   pkgs,
@@ -170,11 +133,8 @@ pkgs.testers.runNixOSTest {
     isp2.wait_for_unit("multi-user.target")
     router.wait_for_unit("wanwatch.service")
 
-    # The test driver only auto-IPs v4; add ULA addresses on each
-    # VLAN endpoint so v6 ICMP probes have a real path. Disable DAD
-    # for instant availability — a stock duplicate-address-detection
-    # delay (1s) would race the wait_until_succeeds below on slow
-    # runners.
+    # Add ULA addresses for the v6 probes. Disabling DAD avoids its
+    # one-second delay racing the reachability waits on slow runners.
     isp1.succeed("sysctl -w net.ipv6.conf.eth1.accept_dad=0")
     isp2.succeed("sysctl -w net.ipv6.conf.eth1.accept_dad=0")
     router.succeed("sysctl -w net.ipv6.conf.eth1.accept_dad=0")
@@ -190,9 +150,8 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip link set eth1 up")
     router.succeed("ip link set eth2 up")
 
-    # Pin L3 reachability for every target before any probe
-    # assertion (see failover-probe-loss.nix for the long-form race
-    # rationale — same applies here on v6).
+    # Wait for every target before any probe assertion; see
+    # failover-probe-loss.nix for the networkd race.
     for target in ("fd00:1::1", "fd00:1::2", "fd00:2::1", "fd00:2::2"):
         router.wait_until_succeeds(f"ping -6 -c 1 -W 1 {target}", timeout=30)
 
@@ -206,15 +165,17 @@ pkgs.testers.runNixOSTest {
     router.succeed("tc qdisc add dev eth1 root netem loss 100%")
     observe.wait_active("home-uplink", "backup", timeout=10)
     observe.wait_decisions("home-uplink", "health", minimum=before_a + 1)
-    # state.json is transition-driven, not a live probe-stat stream.
-    # The Decision snapshot must show the unhealthy verdict and the
-    # configured 25% down threshold, but it can freeze below 50% when
-    # hysteresis flips before the 100%-loss window fully converges.
+    # state.json changes only on transitions, so the Decision snapshot
+    # can freeze below 50% loss when hysteresis flips before the
+    # Window converges; assert only the 25% down threshold.
     state_a = observe.state()
     family_a = state_a["wans"]["primary"]["families"]["v6"]
-    assert family_a["healthy"] is False, f"phase A family state = {family_a}"
+    assert family_a["healthy"] is False, (
+        f"phase A family state = {family_a}"
+    )
     assert family_a["lossRatio"] >= 0.25, (
-        f"phase A transition lossRatio = {family_a['lossRatio']}, want ≥ 0.25"
+        f"phase A transition lossRatio = {family_a['lossRatio']}, "
+        "want ≥ 0.25"
     )
     # Per-sample stats continue updating only on the Prometheus surface.
     observe.wait_probe_loss("primary", "v6", 0.5)
@@ -226,35 +187,23 @@ pkgs.testers.runNixOSTest {
     # Poll live probe stats; state.json changes only on transitions.
     observe.wait_probe_loss("primary", "v6", 0.0, 0.10)
 
-    # ==== Phase C — blip suppression (REMOVED) ====
+    # ==== Phase C — blip suppression (removed) ====
     #
-    # Originally tested that a 2-cycle (400ms) netem blip leaves the
-    # window at 2/10 = 20% loss ratio, below lossPctDown=25, so no
-    # Decision fires. In practice the test was too timing-fragile to
-    # be reliable in the VM tier:
+    # Tested that a two-cycle (400 ms) netem blip leaves the Window at
+    # 20% loss, below lossPctDown=25, so no Decision fires. It was too
+    # timing-fragile for the VM tier:
     #
-    #   - `tc qdisc add ...` is not instantaneous on a loaded runner.
-    #     A 200-400ms apply latency before netem actually starts
-    #     dropping is plausible, pushing real blip duration past the
-    #     intended 2 cycles.
-    #   - `router.execute("sleep 0.4")` measures wall-clock, not the
-    #     daemon's cycle phase. If the cycle ticks just before AND
-    #     just after the sleep boundary, both samples per target are
-    #     Lost — and on a slow runner you can pick up a 3rd cycle
-    #     entirely inside the sleep too.
-    #   - With 3 Lost per target → 30% aggregate, the verdict flips
-    #     unhealthy after consecDown=3 cycles and a Decision lands.
+    #   - `tc qdisc add` can take 200-400 ms to apply on a loaded
+    #     runner, stretching the blip past two cycles.
+    #   - `sleep 0.4` measures wall-clock time, not the daemon's cycle
+    #     phase, so a slow runner can fit a third cycle in the blip.
+    #   - Three Lost Samples per target make 30% loss, and after
+    #     consecutiveDown=3 cycles a Decision lands.
     #
-    # Fixing this would need either sub-cycle timing control (the
-    # NixOS test driver doesn't give us that), a much larger
-    # windowSize that lets 4+ Lost samples still stay below
-    # threshold (which would inflate every other phase's runtime),
-    # or a precision-blip helper baked into the daemon for testing
-    # (overkill). The combined window-damping + hysteresis
-    # suppression property is real, but the v6 VM-tier test isn't
-    # the right place to enforce it — leave it to the Go-side unit
-    # tests in `internal/probe/` and `internal/selector/`, which
-    # already exercise the relevant logic deterministically.
+    # Fixing it needs sub-cycle timing the driver lacks, a larger
+    # windowSize that slows every phase, or a daemon test hook. Go unit
+    # tests in internal/probe/ and internal/selector/ cover Window
+    # damping and hysteresis deterministically.
 
     # ==== Phase D — band-pass threshold ====
     #
@@ -264,40 +213,29 @@ pkgs.testers.runNixOSTest {
     # D1 — fail
     router.succeed("tc qdisc add dev eth1 root netem loss 50%")
     observe.wait_active("home-uplink", "backup", timeout=15)
-    # Soft window: 50% configured loss can give anywhere from 30%
-    # to 70% over a 10-sample window — assert "above the 25%
-    # threshold," not an exact value. Read the live metric because
-    # state.json intentionally freezes probe stats between transitions.
+    # 50% netem loss varies widely over 10 Samples, so assert only
+    # that live loss exceeds the 25% threshold.
     observe.wait_probe_loss("primary", "v6", 0.25)
 
-    # ==== Phase D2 — band-pass hold (REMOVED) ====
+    # ==== Phase D2 — band-pass hold (removed) ====
     #
-    # Originally tested that 15% netem (between lossPctUp=5 and
-    # lossPctDown=25) leaves the held-unhealthy verdict alone —
-    # active stays "backup," no Decision counter advance over a
-    # 3-second window. In practice the test was sample-variance-
-    # bound and flaked on the unstable channel:
+    # Tested that 15% netem loss, between lossPctUp=5 and
+    # lossPctDown=25, holds the unhealthy verdict: active stays
+    # "backup" with no Decision for 3 seconds. Sample variance made it
+    # flaky against unstable nixpkgs:
     #
-    #   - Window aggregates over 10 samples per target across 2
-    #     targets. With 15% per-packet loss, P(0/10 losses on a
-    #     single target) = 0.85^10 ≈ 0.197; P(both targets 0/10
-    #     simultaneously) ≈ 0.039. A single such cycle returns
-    #     `raw=true` from the band-pass evaluator (ratio below
-    #     lossPctUp=5 ⇒ healthy).
-    #   - consecutiveUp=3 needs three consecutive 0-loss windows
-    #     — but sliding windows are correlated (only the newest
-    #     sample changes), so the conditional probability of three
-    #     in a row given the first is ≈ 0.85^4 ≈ 0.522. Per-cycle
-    #     start probability ≈ 0.020; over a 13-cycle (3s) window:
-    #     ~23% flake rate. CI captured this on
-    #     https://github.com/petohorvath/nixos-wanwatch/actions/runs/25958981356.
+    #   - With 10 Samples per target, P(no loss on one target) =
+    #     0.85^10 ≈ 0.197, and on both targets ≈ 0.039. Such a Window
+    #     falls below lossPctUp and reads healthy.
+    #   - consecutiveUp=3 needs three such Windows in a row. Sliding
+    #     Windows share all but the newest Sample, so given the first,
+    #     three in a row has P ≈ 0.85^4 ≈ 0.522. Per cycle that is
+    #     ≈ 0.020, or ~23% over the 13 cycles in 3 seconds:
+    #     https://github.com/petohorvath/nixos-wanwatch/actions/runs/25958981356
     #
-    # Fixing it would need windowSize≈25 or a per-test selector
-    # tuning — both inflate every other phase's runtime
-    # proportionally. The band-pass HOLD property is real and is
-    # exercised deterministically by Go-side unit tests in
-    # internal/selector/hysteresis_test.go (cf. Phase C's removal
-    # for the same reasoning).
+    # Fixing it needs windowSize ≈ 25 or per-test tuning, both slowing
+    # every phase. internal/selector/hysteresis_test.go covers the hold
+    # deterministically.
 
     # D3 — clear ⇒ recovery
     router.succeed("tc qdisc del dev eth1 root")
@@ -306,18 +244,12 @@ pkgs.testers.runNixOSTest {
 
     # ==== Phase E — per-target aggregation ====
     #
-    # Delete fd00:1::2 from isp1: primary's probes split — fd00:1::1
-    # responds, fd00:1::2 doesn't. With Aggregate's unweighted mean
-    # across two targets, per-(WAN, family) loss averages to ~50%
-    # ⇒ above lossPctDown ⇒ failover. A regression in the
-    # aggregator (e.g. min instead of mean) would let the WAN stay
-    # healthy and this would never trigger.
+    # Removing fd00:1::2 leaves one of two targets answering; the
+    # unweighted per-family mean (~50%) must exceed lossPctDown.
 
     isp1.succeed("ip -6 addr del fd00:1::2/64 dev eth1")
     observe.wait_active("home-uplink", "backup", timeout=15)
-    # Aggregate should be in [0.3, 0.7] (one target ~0%, one ~100%
-    # averaged). Poll the live metric so window convergence after the
-    # Decision remains observable without forcing state.json writes.
+    # One target at ~0% and one at ~100% average into [0.3, 0.7].
     observe.wait_probe_loss("primary", "v6", 0.3, 0.7)
 
     isp1.succeed("ip -6 addr add fd00:1::2/64 dev eth1")
@@ -326,22 +258,16 @@ pkgs.testers.runNixOSTest {
 
     # ==== Phase F — daemon restart ====
     #
-    # systemctl restart wanwatch.service ⇒ the daemon starts fresh.
-    # Cold-start carrier path keeps primary active (carrier is up,
-    # health unknown), so the active member shouldn't change. After
-    # probes converge, primary becomes probe-healthy again. The
-    # health-decisions counter SHOULD reset to 0 (per-process
-    # metric) and only increment if a probe-driven Decision fires —
-    # which it shouldn't on a clean restart.
+    # After a restart, cold-start carrier health keeps primary active
+    # until the probes converge healthy again.
 
     router.succeed("systemctl restart wanwatch.service")
     router.wait_for_unit("wanwatch.service")
-    # The service's READY notification gates the new bootstrap publication;
-    # now wait for its cold-start Selection to become primary.
+    # READY gates the new bootstrap State; wait for its Selection.
     observe.wait_active("home-uplink", "primary", timeout=15)
 
-    # Probes converge again — the WAN flips back to probe-healthy
-    # within the window-cook time (~2s) + consecUp (600ms).
+    # Probe Health returns within the Window cook time (~2 s) plus
+    # consecutiveUp cycles.
     observe.wait_healthy("primary", timeout=15)
     observe.wait_healthy("backup", timeout=15)
   '';

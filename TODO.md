@@ -182,7 +182,7 @@ Root cause analysis is incomplete. Three plausible mechanisms:
    netlink library's `Subscribe` should be synchronous w.r.t. its
    bind, but a v6-only race here would explain the symptom.
 2. **netlink decoder.** The library decodes the v6 default
-   route's `Gw` as `nil` on the unstable channel's newer kernel,
+   route's `Gw` as `nil` with unstable nixpkgs' newer kernel,
    so `gatewayCache.string(...)` returns `""` and the test
    predicate (`== "fd00:1::1"`) never matches. Newer kernels'
    RTA_VIA / RTA_MULTIPATH encoding for v6 defaults is a plausible

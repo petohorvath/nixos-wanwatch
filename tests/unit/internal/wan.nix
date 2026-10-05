@@ -1,30 +1,18 @@
 /*
-  Unit tests for `lib/internal/wan.nix` (exposed as `wanwatch.wan`).
-
-  Coverage discipline per PLAN.md §9.1: every public function exercised
-  on positive and negative inputs; every error kind triggered in
-  isolation; at least one multi-violation case for aggregated reporting;
-  the §5.1 API skeleton (`make` / `tryMake` / `toJSONValue`) exercised.
-
-  Family derivation: `wan.families` now reflects the embedded probe's
-  families (derived from `probe.targets`). There is no separate family
-  declaration on the WAN — see lib/internal/wan.nix header.
+  Unit tests for `lib/internal/wan.nix`, exposed as `wanwatch.wan`.
+  Per PLAN.md §9.1, each public function is exercised on positive and
+  negative inputs, each error kind is triggered alone and in an
+  aggregated case, and the §5.1 API skeleton is covered. A WAN's
+  families derive from its probe targets.
 */
-{ pkgs, libnet, ... }:
+{ helpers, wanwatch, ... }:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (helpers) errorMatches evalThrows;
   inherit (wanwatch) wan;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalThrows errorMatches;
   tryError = helpers.tryError wan;
 
-  # Valid baselines. Topology is now determined entirely by
-  # probe.targets — no separate gateway declaration.
-
+  # Valid baselines; probe.targets alone determines the families.
   dualStackInput = {
     name = "primary";
     interface = "eth0";
@@ -127,20 +115,20 @@ in
   testTargetsForwardedFromProbe = {
     expr =
       let
-        t = (wan.make dualStackInput).probe.targets;
+        inherit ((wan.make dualStackInput).probe) targets;
       in
-      builtins.length t.v4 + builtins.length t.v6;
+      builtins.length targets.v4 + builtins.length targets.v6;
     expected = 2;
   };
 
   # ===== Error: wanInvalidName =====
 
-  testRejectsMissingName = {
+  testWanRejectsMissingName = {
     expr = errorMatches "wanInvalidName" (tryError (removeAttrs dualStackInput [ "name" ]));
     expected = true;
   };
 
-  testRejectsEmptyName = {
+  testWanRejectsEmptyName = {
     expr = errorMatches "wanInvalidName" (tryError (dualStackInput // { name = ""; }));
     expected = true;
   };
@@ -210,11 +198,11 @@ in
 
   # ===== Aggregated multi-error =====
 
-  testMultipleErrorsAggregated = {
-    # Submit a config with multiple violations across categories.
+  testWanMultipleErrorsAggregated = {
+    # Violations across several fields are all reported.
     expr =
       let
-        err = tryError {
+        error = tryError {
           name = "1bad"; # wanInvalidName
           interface = "eth 0"; # wanInvalidInterface
           pointToPoint = "yes"; # wanInvalidPointToPoint
@@ -226,7 +214,7 @@ in
           "wanInvalidPointToPoint"
         ];
       in
-      builtins.all (k: errorMatches k err) kinds;
+      builtins.all (kind: errorMatches kind error) kinds;
     expected = true;
   };
 
@@ -258,54 +246,53 @@ in
   };
 
   testToJSONValueOmitsGatewaysField = {
-    # API break: gateway info no longer lives in config — it's
-    # discovered by the daemon at runtime via netlink.
+    # The daemon discovers gateways at runtime via netlink, so the
+    # rendered config carries none.
     expr = (wan.toJSONValue (wan.make dualStackInput)) ? gateways;
     expected = false;
   };
 
   # ===== tryMake contract =====
 
-  testTryMakeOkOnValid = {
+  testWanTryMakeOkOnValid = {
     expr = (wan.tryMake dualStackInput).success;
     expected = true;
   };
 
-  testTryMakeErrOnInvalid = {
+  testWanTryMakeErrOnInvalid = {
     expr = (wan.tryMake { name = "bad"; }).success;
     expected = false;
   };
 
-  testTryMakeErrorNullOnSuccess = {
+  testWanTryMakeErrorNullOnSuccess = {
     expr = (wan.tryMake dualStackInput).error;
     expected = null;
   };
 
-  testTryMakeValueNullOnFailure = {
+  testWanTryMakeValueNullOnFailure = {
     expr = (wan.tryMake { name = "bad"; }).value;
     expected = null;
   };
 
   # ===== make throws =====
 
-  testMakeThrowsOnInvalid = {
+  testWanMakeThrowsOnInvalid = {
     expr = evalThrows (wan.make { name = "bad"; });
     expected = true;
   };
 
   # ===== Round-trip =====
 
-  testRoundTrip = {
+  testWanRoundTrip = {
     # PLAN §9.1 (5): re-emitting the JSON shape after a second
-    # `make` must be byte-identical to the first. The nested
-    # probe must round-trip too — this covers the wan ∘ probe
-    # composition in one shot.
+    # `make` must be byte-identical to the first, nested probe
+    # included.
     expr =
       let
-        js1 = wan.toJSONValue (wan.make dualStackInput);
-        js2 = wan.toJSONValue (wan.make js1);
+        firstJSON = wan.toJSONValue (wan.make dualStackInput);
+        secondJSON = wan.toJSONValue (wan.make firstJSON);
       in
-      js1 == js2;
+      firstJSON == secondJSON;
     expected = true;
   };
 }

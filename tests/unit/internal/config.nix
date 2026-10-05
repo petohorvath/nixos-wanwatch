@@ -1,35 +1,27 @@
 /*
-  Unit tests for `lib/internal/config.nix` — the daemon-config
-  JSON renderer.
-
-  Exercises:
-    - defaultGlobal exposed values
-    - global merging (defaults + user overrides)
-    - resolveAllocations: returns input groups unchanged on success;
-      throws on duplicate mark or table across groups
-    - render shape: schema, global, wans, groups
-    - toJSON returns a string with the expected structure
+  Unit tests for `lib/internal/config.nix`, the daemon-config JSON
+  renderer: global defaults and overrides, cross-group duplicate
+  mark/table detection in `assertUniqueMarksAndTables`, the rendered shape,
+  and the `toJSON` string form.
 */
-{ pkgs, libnet, ... }:
+{
+  helpers,
+  pkgs,
+  wanwatch,
+  ...
+}:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (pkgs) lib;
+  inherit (helpers) evalThrows;
   inherit (wanwatch)
     config
-    wan
     group
+    wan
     ;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalThrows;
-
-  # Build a group with the given name + explicit mark/table. The
-  # auto-allocator was removed in this release — every group must
-  # declare both, validated against [1000, 32767] upstream.
-  mkGroup =
-    name: extras:
+  # A one-member group; `overrides` sets its mark and table.
+  makeGroup =
+    name: overrides:
     group.make (
       {
         inherit name;
@@ -42,10 +34,9 @@ let
         mark = 1000;
         table = 1000;
       }
-      // extras
+      // overrides
     );
 
-  # Sample inputs reused across tests.
   primaryWan = wan.make {
     name = "primary";
     interface = "eth0";
@@ -108,18 +99,16 @@ in
     expected = 1;
   };
 
-  # ===== resolveAllocations — pass-through =====
+  # ===== assertUniqueMarksAndTables — pass-through =====
 
-  testResolveAllocationsEmptyInput = {
-    # No groups → nothing to validate → trivial pass.
-    expr = config.resolveAllocations { };
+  testUniqueMarksAndTablesEmptyInput = {
+    expr = config.assertUniqueMarksAndTables { };
     expected = { };
   };
 
-  testResolveAllocationsReturnsGroupsUnchanged = {
-    # Distinct marks and tables → no duplicates → input echoed back
-    # untouched. Confirms the post-allocator-removal behaviour:
-    # resolveAllocations is now a validator, not a transformer.
+  testUniqueMarksAndTablesReturnsGroupsUnchanged = {
+    # The check validates without transforming: distinct
+    # marks and tables echo the input back untouched.
     expr =
       let
         input = {
@@ -127,14 +116,14 @@ in
           work = workGroup;
         };
       in
-      config.resolveAllocations input == input;
+      config.assertUniqueMarksAndTables input == input;
     expected = true;
   };
 
-  testResolveAllocationsPreservesExplicitValues = {
+  testUniqueMarksAndTablesPreservesExplicitValues = {
     expr =
       let
-        resolved = config.resolveAllocations {
+        resolved = config.assertUniqueMarksAndTables {
           home = homeGroup;
           work = workGroup;
         };
@@ -153,32 +142,31 @@ in
     };
   };
 
-  testResolveAllocationsAllowsMarkEqualToTable = {
-    # mark and table are independent integer spaces — a group with
-    # `mark = 1000; table = 1000;` is fine. The duplicate check is
-    # within-field, not across-field.
+  testUniqueMarksAndTablesAllowsMarkEqualToTable = {
+    # Marks and tables are independent number spaces, so duplicates
+    # are checked within each field, not across them.
     expr =
       let
-        g = mkGroup "g" {
+        sameNumbers = makeGroup "sameNumbers" {
           mark = 1500;
           table = 1500;
         };
       in
-      (config.resolveAllocations { inherit g; }).g.mark == 1500;
+      (config.assertUniqueMarksAndTables { inherit sameNumbers; }).sameNumbers.mark == 1500;
     expected = true;
   };
 
-  # ===== resolveAllocations — duplicate detection =====
+  # ===== assertUniqueMarksAndTables — duplicate detection =====
 
-  testResolveAllocationsThrowsOnDuplicateMark = {
+  testUniqueMarksAndTablesThrowsOnDuplicateMark = {
     expr =
       evalThrows
-        (config.resolveAllocations {
-          a = mkGroup "a" {
+        (config.assertUniqueMarksAndTables {
+          a = makeGroup "a" {
             mark = 1500;
             table = 1500;
           };
-          b = mkGroup "b" {
+          b = makeGroup "b" {
             mark = 1500; # collides with a
             table = 1600;
           };
@@ -186,15 +174,15 @@ in
     expected = true;
   };
 
-  testResolveAllocationsThrowsOnDuplicateTable = {
+  testUniqueMarksAndTablesThrowsOnDuplicateTable = {
     expr =
       evalThrows
-        (config.resolveAllocations {
-          a = mkGroup "a" {
+        (config.assertUniqueMarksAndTables {
+          a = makeGroup "a" {
             mark = 1500;
             table = 1500;
           };
-          b = mkGroup "b" {
+          b = makeGroup "b" {
             mark = 1600;
             table = 1500; # collides with a
           };
@@ -202,22 +190,51 @@ in
     expected = true;
   };
 
-  testResolveAllocationsThreeWayDuplicateMark = {
-    # Three groups all sharing the same mark — still throws.
+  testUniqueMarksAndTablesThreeWayDuplicateMark = {
     expr =
       evalThrows
-        (config.resolveAllocations {
-          a = mkGroup "a" {
+        (config.assertUniqueMarksAndTables {
+          a = makeGroup "a" {
             mark = 1500;
             table = 1500;
           };
-          b = mkGroup "b" {
+          b = makeGroup "b" {
             mark = 1500;
             table = 1600;
           };
-          c = mkGroup "c" {
+          c = makeGroup "c" {
             mark = 1500;
             table = 1700;
+          };
+        }).a.mark;
+    expected = true;
+  };
+
+  # ===== resolveAllocations — deprecated alias =====
+
+  testResolveAllocationsAliasReturnsGroupsUnchanged = {
+    expr =
+      let
+        input = {
+          home = homeGroup;
+          work = workGroup;
+        };
+      in
+      config.resolveAllocations input == input;
+    expected = true;
+  };
+
+  testResolveAllocationsAliasThrowsOnDuplicateMark = {
+    expr =
+      evalThrows
+        (config.resolveAllocations {
+          a = makeGroup "a" {
+            mark = 1500;
+            table = 1500;
+          };
+          b = makeGroup "b" {
+            mark = 1500;
+            table = 1600;
           };
         }).a.mark;
     expected = true;
@@ -284,7 +301,6 @@ in
   };
 
   testRenderGroupsCarryUserMarkAndTable = {
-    # Confirms the user's mark/table flow through render unchanged.
     expr =
       let
         rendered = config.render {
@@ -320,12 +336,12 @@ in
   };
 
   testToJSONIncludesSchema = {
-    expr = pkgs.lib.hasInfix "\"schema\":1" (config.toJSON { });
+    expr = lib.hasInfix "\"schema\":1" (config.toJSON { });
     expected = true;
   };
 
   testToJSONIncludesGlobal = {
-    expr = pkgs.lib.hasInfix "\"global\":{" (config.toJSON { });
+    expr = lib.hasInfix "\"global\":{" (config.toJSON { });
     expected = true;
   };
 

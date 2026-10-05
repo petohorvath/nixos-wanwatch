@@ -1,22 +1,11 @@
 /*
-  Unit tests for `lib/default.nix` and `lib/with-lib.nix`. Verifies
-  the composition contract: core attrs reachable from the top level,
-  the `withLib` entry point produces a `types` namespace, and core
-  is preserved when `withLib` is invoked.
-
-  Adds-to-coverage when new top-level modules land — e.g. when Pass 2
-  introduces `lib/wan.nix`, a test here asserts `wanwatch.wan` is
-  reachable.
+  Unit tests for `lib/default.nix`: the top-level composition exposes
+  the version, the `internal` and `types` namespaces, and the
+  value-type aliases.
 */
-{ pkgs, libnet, ... }:
-let
-  wanwatch = import ../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
-in
+{ wanwatch, ... }:
 {
-  # ===== lib/default.nix — top-level composition =====
+  # ===== Top-level composition =====
 
   testVersionExposed = {
     expr = wanwatch.version;
@@ -24,9 +13,8 @@ in
   };
 
   testInternalNamespacesReachable = {
-    # Smoke-test that every operational module is wired through;
-    # each one has its own thorough test file.
-    expr = builtins.all (k: wanwatch.internal ? ${k}) [
+    # Each module has its own suite; this only checks the wiring.
+    expr = builtins.all (name: wanwatch.internal ? ${name}) [
       "primitives"
       "probe"
       "wan"
@@ -42,11 +30,9 @@ in
   };
 
   testTypesNamespaceHasMembers = {
-    # `types` is the flattened merge of per-concept type files.
-    # This test asserts that the primitives slot is populated and
-    # reachable — per-type tests in `tests/unit/types/*.nix` cover
-    # the contents.
-    expr = builtins.all (k: wanwatch.types ? ${k}) [
+    # `types` merges the per-concept type files; `tests/unit/types/`
+    # covers their contents.
+    expr = builtins.all (name: wanwatch.types ? ${name}) [
       "identifier"
       "positiveInt"
       "pctInt"
@@ -55,7 +41,7 @@ in
   };
 
   testProbeAndWanReachable = {
-    expr = builtins.all (k: wanwatch ? ${k}) [
+    expr = builtins.all (name: wanwatch ? ${name}) [
       "probe"
       "wan"
     ];

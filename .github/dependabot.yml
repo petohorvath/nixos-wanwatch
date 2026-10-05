@@ -16,7 +16,7 @@ updates:
 
     # Dependabot recognizes versioned Nix branches and can otherwise move
     # from nixos-26.05 to a future stable branch. Permit commit refreshes on
-    # 26.05 while requiring channel upgrades to remain explicit changes.
+    # 26.05 while requiring branch upgrades to remain explicit changes.
     ignore:
       - dependency-name: "nixpkgs"
         versions:

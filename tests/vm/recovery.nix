@@ -1,8 +1,7 @@
 /*
-  recovery — primary's carrier goes down then comes back. The
-  daemon must switch out of primary on carrier-loss AND switch
-  back when carrier returns. Without the second arm, a "blip" on
-  the better link would leave traffic permanently on backup.
+  recovery — the primary's carrier drops and returns. The daemon must
+  fail over to the backup and switch back, so a blip on the better
+  link does not leave traffic on the backup.
 */
 {
   pkgs,
@@ -122,15 +121,13 @@ pkgs.testers.runNixOSTest {
     carrier(router, "wan0", "off")
     observe.wait_active("home-uplink", "backup")
 
-    # The recovery arm: bring carrier back on. With cold-start
-    # carrier-only health, restoring carrier on the higher-priority
-    # member should flip the Selection back without waiting for
-    # any probe sample.
+    # Carrier-only cold-start health switches back to the primary
+    # without waiting for a probe Sample.
     carrier(router, "wan0", "on")
     observe.wait_active("home-uplink", "primary")
 
-    # State publication and the live counter can become visible separately.
-    # Both carrier-driven changes (down→backup, up→primary) must be counted.
+    # State and the live counter publish separately; wait for both
+    # carrier-driven Decisions (down to backup, up to primary).
     observe.wait_decisions("home-uplink", "carrier", minimum=2)
   '';
 }

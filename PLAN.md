@@ -226,7 +226,7 @@ that resolve to the operational modules.
 | `lib/internal/wan.nix` | `wan` value type — `make`, `tryMake`, `toJSONValue`, `families` accessor; `pointToPoint` toggles scope-link vs gateway-discovery apply path |
 | `lib/internal/group.nix` *(Pass 3)* | `group` + `member` value types |
 | `lib/internal/selector.nix` *(Pass 4)* | pure `compute` + closed-set strategy registry (v1: `primary-backup`) |
-| `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string`; `resolveAllocations` (duplicate-mark/table assertions) |
+| `lib/internal/config.nix` *(Pass 4)* | `toDaemonJson : evaluatedConfig → string`; `assertUniqueMarksAndTables` (duplicate-mark/table assertions) |
 | `lib/types/default.nix` | aggregates per-type option-type files via `lib.mergeAttrsList` |
 | `lib/types/primitives.nix` | shared option-type primitives (Pass 5) |
 | `lib/types/probe.nix` | probe-related NixOS option types (Pass 5) |
@@ -1136,7 +1136,7 @@ a specific commit and explained in the body.
 | Lint clean | every commit | `golangci-lint run` + `nixfmt --check` |
 | Test coverage | every commit | `go test -cover` per package + new-file-needs-test check |
 | Vulnerability scan | weekly + on release | GitHub Actions cron workflow (`.github/workflows/audit.yml`): runs pinned `govulncheck` against the built daemon and pinned `vulnix` against its runtime derivations; retries only recognized transient NVD network failures and fails on findings or persistent infrastructure errors |
-| Primary nixpkgs refresh | monthly | GitHub-native Dependabot Nix updates (`.github/dependabot.yml`): permits only the primary `nixpkgs` input, holds the channel at `nixos-26.05`, and opens a review-only PR that runs normal CI; merge only after reviewing the lock delta and all checks pass |
+| Primary nixpkgs refresh | monthly | GitHub-native Dependabot Nix updates (`.github/dependabot.yml`): permits only the primary `nixpkgs` input, holds the branch at `nixos-26.05`, and opens a review-only PR that runs normal CI; merge only after reviewing the lock delta and all checks pass |
 | Dependency-update review | monthly | manual: review `go.mod` and all non-primary-nixpkgs `flake.lock` deltas |
 | Public-API surface review | each minor version | manual: read `lib/default.nix` + daemon exports |
 | Glossary drift | each minor version | grep usage vs `docs/glossary.md` |

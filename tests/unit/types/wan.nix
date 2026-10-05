@@ -1,27 +1,15 @@
 /*
-  Unit tests for `lib/types/wan.nix`.
-
-  Cross-field validation (probe forwarding, error aggregation) is
-  tested in `tests/unit/internal/wan.nix` against `wan.make` /
-  `wan.tryMake`. Here we only test what the type system itself
-  enforces — per-field validation and the submodule's structural
-  defaults.
+  Unit tests for `lib/types/wan.nix`: per-field validation and the
+  submodule's defaults. `tests/unit/internal/wan.nix` covers
+  cross-field validation in `wan.make` / `wan.tryMake`.
 */
-{ pkgs, libnet, ... }:
+{ helpers, wanwatch, ... }:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (helpers) evalType evalTypeFails;
   inherit (wanwatch) types;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalType evalTypeFails;
-
-  # A minimal valid wan input. `name` is intentionally NOT supplied
-  # — it's a `readOnly` field with `default = name` (from the attr
-  # key). `evalType` wraps the value under `options.value`, so the
-  # submodule sees `name = "value"`.
+  # `name` is read-only and defaults to the attribute key; `evalType`
+  # declares the option as `value`, so the submodule sees "value".
   baseConfig = {
     interface = "eth0";
     probe.targets.v4 = [ "1.1.1.1" ];
@@ -58,17 +46,16 @@ in
   # ===== wan — top-level submodule =====
 
   testWanMinimalShape = {
-    # The `probe` submodule fills in its own defaults; we check the
-    # outer fields and that probe was at least filled in (its
-    # exhaustive defaults are tested in types/probe.nix).
+    # types/probe.nix covers the probe defaults exhaustively; this
+    # checks the outer fields and that the probe was filled in.
     expr =
       let
-        w = evalType types.wan baseConfig;
+        wan = evalType types.wan baseConfig;
       in
       {
-        inherit (w) name interface pointToPoint;
-        probeMethod = w.probe.method;
-        probeTargets = w.probe.targets;
+        inherit (wan) interface name pointToPoint;
+        probeMethod = wan.probe.method;
+        probeTargets = wan.probe.targets;
       };
     expected = {
       name = "value"; # derived from `options.value` in `evalType`

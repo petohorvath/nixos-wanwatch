@@ -128,8 +128,8 @@ pkgs.testers.runNixOSTest {
 
     observe.wait_active("home-uplink", "primary")
 
-    # Verify the direct default route in the kernel, allowing networkd
-    # reconfiguration to settle after the link comes up.
+    # Verify the direct default route in the kernel, allowing
+    # networkd reconfiguration to settle after the link comes up.
     observe.wait_default_route("v4", "wan0", group="home-uplink")
     observe.wait_default_route("v6", "wan0", group="home-uplink")
 

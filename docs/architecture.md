@@ -65,7 +65,7 @@ lib/internal/
 
 ### `modules/`
 
-`wanwatch.nix` declares `services.wanwatch.*`, rounds user input through `wanwatch.<type>.make` to get tagged values, runs `config.resolveAllocations` to assert no two groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json`.
+`wanwatch.nix` declares `services.wanwatch.*`, rounds user input through `wanwatch.<type>.make` to get tagged values, runs `config.assertUniqueMarksAndTables` to assert no two groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json`.
 
 Cross-module outputs:
 
