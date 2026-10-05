@@ -1,76 +1,32 @@
 /*
-  internal/config — daemon-config JSON renderer.
-
-  Composes wans + groups + global settings into the single JSON
-  artifact the daemon reads at startup. Schema described in PLAN §5.5
-  / `docs/specs/daemon-config.md` (Pass 6).
-
-  Renders:
+  Daemon-config renderer, exposed as `wanwatch.config`. Combines WAN
+  and Group values with global settings into the JSON document the
+  daemon reads at startup (`docs/specs/daemon-config.md`):
 
     {
       "schema": 1,
-      "global": { statePath, hooksDir, metricsSocket, logLevel, hookTimeoutMs },
+      "global": { statePath, hooksDir, metricsSocket, logLevel,
+                  hookTimeoutMs },
       "wans":   { "<name>": <wan.toJSONValue>, ... },
       "groups": { "<name>": <group.toJSONValue>, ... }
     }
 
-  Marks + tables: each group's `mark` and `table` are user-required
-  integers (validated by `internal.group.tryMake` and
-  `wanwatch.types.{fwmark,routingTableId}`). This module's job is
-  the cross-group duplicate check — two groups can't share a mark
-  or a table, otherwise their traffic would mis-route. The check
-  fires at module-eval time.
-
-  ===== render =====
-
-  `render { global ? {}; wans ? {}; groups ? {}; } → attrset`
-
-  `wans` / `groups` are attrsets of already-constructed value-type
-  values (i.e. `wan.make` / `group.make` outputs); the renderer
-  serializes them via the module's own `toJSONValue` accessors
-  rather than re-parsing user inputs.
-
-  Returns the JSON-shape attrset. Caller passes through
-  `builtins.toJSON` for the string form. Both convenience wrappers
-  are exposed below.
-
-  ===== toJSONValue =====
-
-  Alias for `render` — kept for symmetry with the value-type
-  modules' `toJSONValue` exports.
-
-  ===== toJSON =====
-
-  `toJSON config → string`. Convenience: `builtins.toJSON (render config)`.
-
-  ===== defaultGlobal =====
-
-  Exposed for tests and module-option defaults.
-
-  ===== resolveAllocations =====
-
-  Internal helper, exposed so unit tests can exercise it without
-  reaching for the full `render`. After the auto-allocator removal
-  this is a pure validator — it returns the input groups unchanged
-  when the mark + table sets contain no duplicates, and throws
-  otherwise. The name is kept for backwards compatibility with the
-  module's call site.
-
-  ===== schemaVersion =====
-
-  Current schema version (int). Bumped on any backwards-incompatible
-  change to the daemon-config shape. The daemon validates the
-  version at startup.
+  Rendering also rejects Groups that share a mark or a table, because
+  their traffic would be routed through the wrong table.
 */
 {
   lib,
   internal,
 }:
 let
-  inherit (internal) wan group;
+  inherit (internal) group wan;
 
+  # Bumped on every incompatible change to the daemon-config shape; the
+  # daemon rejects configs with another version.
   schemaVersion = 1;
 
+  # Also the module's option defaults; `render` merges caller settings
+  # over them.
   defaultGlobal = {
     statePath = "/run/wanwatch/state.json";
     hooksDir = "/etc/wanwatch/hooks";
@@ -79,76 +35,81 @@ let
     hookTimeoutMs = 5000;
   };
 
-  # findDuplicates : { <group-name> = <int>; } → [ { value, names } ]
-  # Returns one entry per duplicated integer with the group names
-  # that share it. Empty list when the mapping is collision-free.
-  findDuplicates =
-    groupValues:
-    let
-      names = builtins.attrNames groupValues;
-      byValue = lib.foldl' (
-        acc: n:
-        let
-          v = toString groupValues.${n};
-        in
-        acc
-        // {
-          ${v} = (acc.${v} or [ ]) ++ [ n ];
-        }
-      ) { } names;
-      dups = lib.filterAttrs (_: ns: builtins.length ns > 1) byValue;
-    in
-    lib.mapAttrsToList (value: ns: {
-      inherit value;
-      names = ns;
-    }) dups;
+  # Returns one message per `field` value that several groups share.
+  describeSharedValues =
+    field: groups:
+    lib.pipe groups [
+      builtins.attrNames
+      (lib.groupBy (name: toString groups.${name}.${field}))
+      (lib.filterAttrs (_: names: builtins.length names > 1))
+      (lib.mapAttrsToList (
+        value: names:
+        "${field} ${value} is shared by groups [${lib.concatMapStringsSep ", " (name: "'${name}'") names}]"
+      ))
+    ];
 
-  formatDup =
-    field: dup:
-    "${field} ${dup.value} is shared by groups [${
-      lib.concatMapStringsSep ", " (n: "'${n}'") dup.names
-    }]";
+  /*
+    Check that no two Groups share a mark or a table. The name predates
+    the removal of automatic allocation and is kept for compatibility;
+    the function only validates.
 
+    `groups`: an attrset of group values keyed by name.
+
+    Returns `groups` unchanged. Throws a message listing every shared
+    mark and table.
+  */
   resolveAllocations =
     groups:
     let
-      markValues = builtins.mapAttrs (_: g: g.mark) groups;
-      tableValues = builtins.mapAttrs (_: g: g.table) groups;
-      markDups = findDuplicates markValues;
-      tableDups = findDuplicates tableValues;
-      messages = builtins.map (formatDup "mark") markDups ++ builtins.map (formatDup "table") tableDups;
+      messages = describeSharedValues "mark" groups ++ describeSharedValues "table" groups;
     in
     if messages == [ ] then
       groups
     else
-      builtins.throw "wanwatch: duplicate mark or table across groups: ${lib.concatStringsSep "; " messages}";
+      throw "wanwatch: duplicate mark or table across groups: ${lib.concatStringsSep "; " messages}";
 
+  /*
+    Render the daemon configuration.
+
+    `global`: settings merged over `defaultGlobal`; default `{ }`.
+    `wans`: an attrset of WAN values from `wan.make`; default `{ }`.
+    `groups`: an attrset of group values from `group.make`; default
+    `{ }`.
+
+    Returns the JSON-shaped attrset. Throws when Groups share a mark or
+    a table.
+  */
   render =
     {
       global ? { },
       wans ? { },
       groups ? { },
     }:
-    let
-      validatedGroups = resolveAllocations groups;
-    in
     {
       schema = schemaVersion;
       global = defaultGlobal // global;
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
-      groups = builtins.mapAttrs (_: group.toJSONValue) validatedGroups;
+      groups = builtins.mapAttrs (_: group.toJSONValue) (resolveAllocations groups);
     };
 
-  toJSONValue = render;
+  /*
+    Render the daemon configuration as a JSON string.
+
+    `config`: the attrset accepted by `render`.
+
+    Returns `builtins.toJSON (render config)`.
+  */
   toJSON = config: builtins.toJSON (render config);
 in
 {
   inherit
-    render
-    toJSONValue
-    toJSON
     defaultGlobal
-    schemaVersion
+    render
     resolveAllocations
+    schemaVersion
+    toJSON
     ;
+
+  # Alias of `render`, matching the value types' `toJSONValue`.
+  toJSONValue = render;
 }

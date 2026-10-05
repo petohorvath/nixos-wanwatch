@@ -1,73 +1,34 @@
 /*
-  wanwatch.wan — WAN value type.
+  WAN value type, exposed as `wanwatch.wan`. A WAN is an egress
+  interface plus the Probe that tests it; Groups reference WANs as
+  Members, but a WAN does not depend on any Group. A WAN value
+  carries:
 
-  A WAN is an egress interface plus a Probe describing how to test
-  it. The atomic monitored unit — Groups compose WANs as Members,
-  but the WAN itself is independent of any Group.
+    name         — wanwatch identifier, usually the `wans.<name>` key
+    interface    — Linux interface name, checked against the kernel's
+                   `dev_valid_name` rules by libnet
+    pointToPoint — when true, the daemon installs scope-link default
+                   routes (PPP, WireGuard, GRE, tun); when false, it
+                   discovers the gateway from the main routing table
+    probe        — the probe value built from the `probe` input
 
-  Fields (required unless marked optional):
-
-    name          — identifier, `[a-zA-Z][a-zA-Z0-9-]*`. Typically
-                    derived from the NixOS module's `wans.<name>`
-                    attribute key.
-    interface     — Linux interface name; validated via libnet's
-                    kernel-`dev_valid_name` parity check.
-    pointToPoint  — optional bool, default false. When true the
-                    daemon installs scope-link default routes
-                    (PPP / WireGuard / GRE / tun); when false the
-                    daemon discovers the gateway via netlink from
-                    the main routing table at runtime.
-    probe         — attrset passed to `probe.make` (this module
-                    owns the construction; users don't pre-build).
-
-  The families the WAN handles are derived from `probe.targets`:
-  `targets.v4` non-empty means the WAN serves v4, `targets.v6`
-  non-empty means it serves v6. There is no separate family
-  declaration.
-
-  ===== make =====
-
-  Input:  attrset of fields (see above)
-  Output: wan value with a constructed probe value embedded.
-  Throws: aggregated error string if validation fails.
-
-  ===== tryMake =====
-
-  Same as `make` but returns the `tryResult` shape instead of
-  throwing.
-
-  Error kinds:
-
-    wanInvalidName            — name missing / not a valid identifier
-    wanInvalidInterface       — interface name fails kernel parity check
-    wanInvalidPointToPoint    — pointToPoint set but not a bool
-    wanInvalidProbe           — embedded probe.make rejected the config
-
-  ===== Accessors =====
-
-  `families` (derived from `probe.targets` — same as
-  `probe.families` of the embedded probe).
-
-  ===== Serialization =====
-
-  `toJSONValue` is the canonical attrset form embedded in the
-  daemon-config JSON.
+  The WAN serves the families its probe targets cover; there is no
+  separate family declaration.
 */
 {
   libnet,
   internal,
 }:
 let
+  inherit (internal) probe;
   inherit (internal.primitives)
-    tryOk
-    tryErr
     check
     isValidName
+    tryErr
+    tryOk
     ;
-  formatErrors = internal.primitives.formatErrors "wan.make";
-  inherit (internal) probe;
 
-  # ===== Field-level validators =====
+  formatErrors = internal.primitives.formatErrors "wan.make";
 
   validateName =
     name:
@@ -77,7 +38,7 @@ let
   validateInterface =
     interface:
     let
-      r =
+      result =
         if builtins.isString interface then
           libnet.interfaceName.tryParse interface
         else
@@ -86,72 +47,102 @@ let
             error = "interface must be a string; got ${builtins.typeOf interface}";
           };
     in
-    check "wanInvalidInterface" r.success (if r.success then "" else r.error);
+    check "wanInvalidInterface" result.success (if result.success then "" else result.error);
 
   validatePointToPoint =
-    ptp:
-    check "wanInvalidPointToPoint" (builtins.isBool ptp)
-      "pointToPoint must be a bool; got ${builtins.typeOf ptp}";
+    pointToPoint:
+    check "wanInvalidPointToPoint" (builtins.isBool pointToPoint)
+      "pointToPoint must be a bool; got ${builtins.typeOf pointToPoint}";
 
   validateProbeResult =
     probeResult:
     check "wanInvalidProbe" probeResult.success (if probeResult.success then "" else probeResult.error);
 
-  # ===== Aggregated validation + construction =====
-
-  prepareInput = user: {
-    name = user.name or null;
-    interface = user.interface or null;
-    pointToPoint = user.pointToPoint or false;
-    probeInput = user.probe or { };
+  prepareInput = input: {
+    name = input.name or null;
+    interface = input.interface or null;
+    pointToPoint = input.pointToPoint or false;
+    probeInput = input.probe or { };
   };
 
   collectErrors =
-    cfg: probeResult:
-    validateName cfg.name
-    ++ validateInterface cfg.interface
-    ++ validatePointToPoint cfg.pointToPoint
+    fields: probeResult:
+    validateName fields.name
+    ++ validateInterface fields.interface
+    ++ validatePointToPoint fields.pointToPoint
     ++ validateProbeResult probeResult;
 
-  buildValue = cfg: probeResult: {
-    inherit (cfg) name interface pointToPoint;
-    probe = probeResult.value;
-  };
+  /*
+    Validate WAN input without throwing, reporting every violation,
+    including the embedded probe's, in one message.
 
+    `input`: an attrset with `name`, `interface`, `probe` (the input
+    for `probe.tryMake`), and optional `pointToPoint` (default false).
+
+    Returns a `tryResult` whose value is the WAN value. Error kinds:
+
+      wanInvalidName         — name missing or not a valid identifier
+      wanInvalidInterface    — interface fails the kernel name check
+      wanInvalidPointToPoint — pointToPoint is not a bool
+      wanInvalidProbe        — `probe.tryMake` rejected the probe input
+  */
   tryMake =
-    user:
+    input:
     let
-      cfg = prepareInput user;
-      probeResult = probe.tryMake cfg.probeInput;
-      errors = collectErrors cfg probeResult;
+      fields = prepareInput input;
+      probeResult = probe.tryMake fields.probeInput;
+      errors = collectErrors fields probeResult;
     in
-    if errors == [ ] then tryOk (buildValue cfg probeResult) else tryErr (formatErrors errors);
+    if errors == [ ] then
+      tryOk {
+        inherit (fields) interface name pointToPoint;
+        probe = probeResult.value;
+      }
+    else
+      tryErr (formatErrors errors);
 
+  /*
+    Construct a WAN value, failing evaluation on invalid input.
+
+    `input`: the attrset accepted by `tryMake`.
+
+    Returns the WAN value with its probe value embedded. Throws the
+    aggregated `tryMake` error message when validation fails.
+  */
   make =
-    user:
+    input:
     let
-      r = tryMake user;
+      result = tryMake input;
     in
-    if r.success then r.value else builtins.throw r.error;
+    if result.success then result.value else throw result.error;
 
-  # ===== Derived accessors =====
-  #
-  # `families` is `probe.families` of the embedded probe — the
-  # WAN serves whatever families its probe targets cover.
-  families = w: probe.families w.probe;
+  /*
+    Report which address families a WAN serves; these are the families
+    its probe targets cover.
 
-  # ===== Serialization =====
+    `wan`: a WAN value.
 
-  toJSONValue = w: {
-    inherit (w) name interface pointToPoint;
-    probe = probe.toJSONValue w.probe;
+    Returns `{ v4 = <bool>; v6 = <bool>; }`.
+  */
+  families = wan: probe.families wan.probe;
+
+  /*
+    Serialize a WAN for the daemon-config JSON.
+
+    `wan`: a WAN value.
+
+    Returns the JSON-shaped attrset embedded by `config.render`.
+  */
+  toJSONValue = wan: {
+    inherit (wan) interface name pointToPoint;
+    probe = probe.toJSONValue wan.probe;
   };
 in
 {
   inherit
-    make
-    tryMake
-    toJSONValue
     families
+    make
+    toJSONValue
+    tryMake
     ;
 }

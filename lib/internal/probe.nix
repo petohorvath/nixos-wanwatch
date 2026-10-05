@@ -1,74 +1,20 @@
 /*
-  wanwatch.probe — Probe configuration value type.
+  Probe value type, exposed as `wanwatch.probe`. A Probe is the
+  configuration that describes how a WAN is tested; Samples and
+  Windows live in the daemon. A probe value carries:
 
-  A Probe describes *how* a WAN is tested. It is the configuration,
-  not the result — Samples and Windows live in the daemon. A Probe
-  value carries:
-
-    method             — probing protocol; v1 supports "icmp" only
-    targets            — { v4, v6 }: per-family lists of libnet.ip
-                         values; at least one family non-empty
+    method             — probing protocol; only "icmp"
+    targets            — { v4; v6; } lists of libnet IP values; at least
+                         one family is non-empty
     intervalMs         — milliseconds between probe cycles
-    timeoutMs          — per-probe timeout
-    windowSize         — number of samples in the sliding window
-    thresholds         — loss / RTT thresholds in both directions
+    timeoutMs          — per-probe timeout in milliseconds
+    windowSize         — number of Samples in the sliding window
+    thresholds         — loss and RTT thresholds in both directions
     hysteresis         — consecutive-cycle counters in both directions
-    familyHealthPolicy — "all" | "any" — how per-family Health
-                         combines into per-WAN Health (PLAN §5.4)
+    familyHealthPolicy — "all" or "any": how per-family Health combines
+                         into WAN Health (PLAN §5.4)
 
-  Required field: `targets` with at least one of `v4`/`v6`
-  populated. Everything else has a default; see `defaults` below.
-
-  ===== make =====
-
-  Input:  attrset of fields (any subset; missing fields take defaults)
-  Output: probe value with each target parsed into a libnet.ip value
-  Throws: aggregated error string if any field fails validation.
-
-  ===== tryMake =====
-
-  Same as `make` but returns the `tryResult` shape instead of
-  throwing. Errors are aggregated nftzones-style — every violation
-  in a single input attrset is reported in one error message rather
-  than fail-on-first — so users see the whole problem set at once.
-
-  Validation rules and error kinds:
-
-    probeNoTargets               — both `targets.v4` and
-                                   `targets.v6` empty
-    probeInvalidTarget           — malformed targets container/bucket,
-                                   or target string not a valid IP
-    probeTargetFamilyMismatch    — v4 literal in `targets.v6`, or
-                                   v6 literal in `targets.v4`
-    probeInvalidThresholds       — `thresholds` is not an attrset
-    probeInvalidHysteresis       — `hysteresis` is not an attrset
-    probeInvalidMethod           — method ∉ {"icmp"}
-    probeNonPositiveInterval     — intervalMs ≤ 0
-    probeNonPositiveTimeout      — timeoutMs ≤ 0
-    probeNonPositiveWindow       — windowSize ≤ 0
-    probeLossPctOutOfRange       — lossPct{Up,Down} ∉ [0, 100]
-    probeLossThresholdsInverted  — lossPctUp ≥ lossPctDown
-    probeNonPositiveRTT          — rttMs{Up,Down} ≤ 0
-    probeRTTThresholdsInverted   — rttMsUp ≥ rttMsDown
-    probeNonPositiveHysteresis   — hysteresis counter ≤ 0
-    probeInvalidFamilyPolicy     — familyHealthPolicy ∉ {"all", "any"}
-
-  Rationale for inverted-threshold rules: the recovery threshold
-  must be strictly below the failure threshold; otherwise a
-  marginal probe oscillates between "healthy" and "unhealthy" on
-  every sample. Pre-emptive rejection beats runtime flapping.
-
-  ===== Accessors =====
-
-  `method`, `targets`, `intervalMs`, `timeoutMs`, `windowSize`,
-  `thresholds`, `hysteresis`, `familyHealthPolicy`, `families`
-  (derived: `{ v4 = targets.v4 != []; v6 = targets.v6 != []; }`).
-
-  ===== Serialization =====
-
-  `toJSONValue` returns the canonical attrset form embedded in
-  `lib/internal/config.nix`'s daemon-config render. Targets are
-  stringified back to their canonical text form.
+  Only `targets` is required; `defaults` supplies the other fields.
 */
 {
   lib,
@@ -77,15 +23,14 @@
 }:
 let
   inherit (internal.primitives)
-    tryOk
-    tryErr
     check
-    partitionTry
     isPositiveInt
+    partitionTry
+    tryErr
+    tryOk
     ;
-  formatErrors = internal.primitives.formatErrors "probe.make";
 
-  # ===== Defaults =====
+  formatErrors = internal.primitives.formatErrors "probe.make";
 
   defaults = {
     method = "icmp";
@@ -105,55 +50,42 @@ let
     familyHealthPolicy = "all";
   };
 
-  # ===== Validation helpers =====
-
-  isPct = x: builtins.isInt x && x >= 0 && x <= 100;
-
-  # Closed-set enums. Exposed in the module return so `types/probe.nix`
-  # can derive its enum types from the same lists — single source of
-  # truth on the Nix side. Drift between internal and types would
-  # otherwise let the type system accept a value the validator
-  # rejects, or vice versa.
+  # `types/probe.nix` derives its enum option types from these lists,
+  # so the option types and the validators accept the same values.
   validMethods = [ "icmp" ];
   validFamilyHealthPolicies = [
     "all"
     "any"
   ];
 
-  # libnet.ip.tryParse speaks the standard tryResult shape; the
-  # generic partitionTry handles the partition.
-  parseTargets = partitionTry libnet.ip.tryParse;
+  isPct = value: builtins.isInt value && value >= 0 && value <= 100;
 
-  # ===== Field-level validators =====
+  parseTargets = partitionTry libnet.ip.tryParse;
 
   validateMethod =
     method:
     check "probeInvalidMethod" (builtins.elem method validMethods)
       "method must be one of ${builtins.toJSON validMethods}; got ${builtins.toJSON method}";
 
-  # validateTargetBucket parses one per-family target list and
-  # checks both parseability and family-match. An empty bucket is
-  # fine here — the cross-bucket "at least one non-empty" check
-  # lives in validateTargets.
-  validateTargetBucket =
-    fam: familyPredicate: xs:
-    if !(builtins.isList xs) then
-      check "probeInvalidTarget" false "targets.${fam} must be a list"
+  # Checks one family's target list for parseability and family match.
+  # An empty list passes; `validateTargets` requires a non-empty family.
+  validateTargetFamily =
+    family: isFamily: targets:
+    if !(builtins.isList targets) then
+      check "probeInvalidTarget" false "targets.${family} must be a list"
     else
       let
-        parsed = parseTargets xs;
-        parseErrors = builtins.map (lib.nameValuePair "probeInvalidTarget") parsed.errors;
-        mismatches = builtins.concatMap (
-          ip:
-          if familyPredicate ip then
-            [ ]
-          else
-            [
-              (lib.nameValuePair "probeTargetFamilyMismatch" "${libnet.ip.toString ip} in targets.${fam} is not a ${fam} address")
-            ]
-        ) parsed.parsed;
+        parsedTargets = parseTargets targets;
+        parseErrors = map (lib.nameValuePair "probeInvalidTarget") parsedTargets.errors;
+        familyMismatches = lib.pipe parsedTargets.parsed [
+          (builtins.filter (ip: !(isFamily ip)))
+          (map (
+            ip:
+            lib.nameValuePair "probeTargetFamilyMismatch" "${libnet.ip.toString ip} in targets.${family} is not a ${family} address"
+          ))
+        ];
       in
-      parseErrors ++ mismatches;
+      parseErrors ++ familyMismatches;
 
   validateTargets =
     targets:
@@ -163,15 +95,11 @@ let
       let
         v4 = targets.v4 or [ ];
         v6 = targets.v6 or [ ];
-        nonEmpty =
-          if builtins.isList v4 && builtins.isList v6 && v4 == [ ] && v6 == [ ] then
-            check "probeNoTargets" false "at least one of targets.v4 or targets.v6 must be non-empty"
-          else
-            [ ];
+        hasNoTargets = builtins.isList v4 && builtins.isList v6 && v4 == [ ] && v6 == [ ];
       in
-      nonEmpty
-      ++ validateTargetBucket "v4" libnet.ip.isIpv4 v4
-      ++ validateTargetBucket "v6" libnet.ip.isIpv6 v6;
+      check "probeNoTargets" (!hasNoTargets) "at least one of targets.v4 or targets.v6 must be non-empty"
+      ++ validateTargetFamily "v4" libnet.ip.isIpv4 v4
+      ++ validateTargetFamily "v6" libnet.ip.isIpv6 v6;
 
   validateInterval =
     interval:
@@ -184,42 +112,42 @@ let
       "timeoutMs must be a positive integer; got ${builtins.toJSON timeout}";
 
   validateWindowSize =
-    n:
-    check "probeNonPositiveWindow" (isPositiveInt n)
-      "windowSize must be a positive integer; got ${builtins.toJSON n}";
+    windowSize:
+    check "probeNonPositiveWindow" (isPositiveInt windowSize)
+      "windowSize must be a positive integer; got ${builtins.toJSON windowSize}";
 
   validateLossThresholds =
-    t:
+    thresholds:
     let
-      down = t.lossPctDown or null;
-      up = t.lossPctUp or null;
-      downValid = isPct down;
-      upValid = isPct up;
+      down = thresholds.lossPctDown or null;
+      up = thresholds.lossPctUp or null;
+      isDownValid = isPct down;
+      isUpValid = isPct up;
     in
-    check "probeLossPctOutOfRange" downValid
+    check "probeLossPctOutOfRange" isDownValid
       "thresholds.lossPctDown must be an int in [0,100]; got ${builtins.toJSON down}"
     ++
-      check "probeLossPctOutOfRange" upValid
+      check "probeLossPctOutOfRange" isUpValid
         "thresholds.lossPctUp must be an int in [0,100]; got ${builtins.toJSON up}"
     ++
-      check "probeLossThresholdsInverted" (!(downValid && upValid && up >= down))
+      check "probeLossThresholdsInverted" (!(isDownValid && isUpValid && up >= down))
         "thresholds.lossPctUp (${builtins.toJSON up}) must be strictly less than thresholds.lossPctDown (${builtins.toJSON down}); recovery threshold must sit below failure threshold to avoid flapping";
 
   validateRttThresholds =
-    t:
+    thresholds:
     let
-      down = t.rttMsDown or null;
-      up = t.rttMsUp or null;
-      downValid = isPositiveInt down;
-      upValid = isPositiveInt up;
+      down = thresholds.rttMsDown or null;
+      up = thresholds.rttMsUp or null;
+      isDownValid = isPositiveInt down;
+      isUpValid = isPositiveInt up;
     in
-    check "probeNonPositiveRTT" downValid
+    check "probeNonPositiveRTT" isDownValid
       "thresholds.rttMsDown must be a positive integer; got ${builtins.toJSON down}"
     ++
-      check "probeNonPositiveRTT" upValid
+      check "probeNonPositiveRTT" isUpValid
         "thresholds.rttMsUp must be a positive integer; got ${builtins.toJSON up}"
     ++
-      check "probeRTTThresholdsInverted" (!(downValid && upValid && up >= down))
+      check "probeRTTThresholdsInverted" (!(isDownValid && isUpValid && up >= down))
         "thresholds.rttMsUp (${builtins.toJSON up}) must be strictly less than thresholds.rttMsDown (${builtins.toJSON down}); recovery threshold must sit below failure threshold to avoid flapping";
 
   validateThresholds =
@@ -230,36 +158,36 @@ let
       validateLossThresholds thresholds ++ validateRttThresholds thresholds;
 
   validateHysteresis =
-    h:
-    if !(builtins.isAttrs h) then
+    hysteresis:
+    let
+      down = hysteresis.consecutiveDown or null;
+      up = hysteresis.consecutiveUp or null;
+    in
+    if !(builtins.isAttrs hysteresis) then
       check "probeInvalidHysteresis" false "hysteresis must be an attrset"
     else
-      check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveDown or null))
-        "hysteresis.consecutiveDown must be a positive integer; got ${
-          builtins.toJSON (h.consecutiveDown or null)
-        }"
+      check "probeNonPositiveHysteresis" (isPositiveInt down)
+        "hysteresis.consecutiveDown must be a positive integer; got ${builtins.toJSON down}"
       ++
-        check "probeNonPositiveHysteresis" (isPositiveInt (h.consecutiveUp or null))
-          "hysteresis.consecutiveUp must be a positive integer; got ${
-            builtins.toJSON (h.consecutiveUp or null)
-          }";
+        check "probeNonPositiveHysteresis" (isPositiveInt up)
+          "hysteresis.consecutiveUp must be a positive integer; got ${builtins.toJSON up}";
 
   validateFamilyHealthPolicy =
     policy:
     check "probeInvalidFamilyPolicy" (builtins.elem policy validFamilyHealthPolicies)
       "familyHealthPolicy must be one of ${builtins.toJSON validFamilyHealthPolicies}; got ${builtins.toJSON policy}";
 
-  # ===== Aggregated validation + construction =====
-
+  # Non-attrset `targets`, `thresholds`, and `hysteresis` pass through
+  # unchanged so their validators can report them.
   mergeWithDefaults =
-    user:
+    input:
     let
-      targets = user.targets or { };
-      thresholds = user.thresholds or { };
-      hysteresis = user.hysteresis or { };
+      targets = input.targets or { };
+      thresholds = input.thresholds or { };
+      hysteresis = input.hysteresis or { };
     in
     {
-      method = user.method or defaults.method;
+      method = input.method or defaults.method;
       targets =
         if builtins.isAttrs targets then
           {
@@ -268,103 +196,139 @@ let
           }
         else
           targets;
-      intervalMs = user.intervalMs or defaults.intervalMs;
-      timeoutMs = user.timeoutMs or defaults.timeoutMs;
-      windowSize = user.windowSize or defaults.windowSize;
+      intervalMs = input.intervalMs or defaults.intervalMs;
+      timeoutMs = input.timeoutMs or defaults.timeoutMs;
+      windowSize = input.windowSize or defaults.windowSize;
       thresholds = if builtins.isAttrs thresholds then defaults.thresholds // thresholds else thresholds;
       hysteresis = if builtins.isAttrs hysteresis then defaults.hysteresis // hysteresis else hysteresis;
-      familyHealthPolicy = user.familyHealthPolicy or defaults.familyHealthPolicy;
+      familyHealthPolicy = input.familyHealthPolicy or defaults.familyHealthPolicy;
     };
 
   collectErrors =
-    cfg:
-    validateMethod cfg.method
-    ++ validateTargets cfg.targets
-    ++ validateInterval cfg.intervalMs
-    ++ validateTimeout cfg.timeoutMs
-    ++ validateWindowSize cfg.windowSize
-    ++ validateThresholds cfg.thresholds
-    ++ validateHysteresis cfg.hysteresis
-    ++ validateFamilyHealthPolicy cfg.familyHealthPolicy;
+    fields:
+    validateMethod fields.method
+    ++ validateTargets fields.targets
+    ++ validateInterval fields.intervalMs
+    ++ validateTimeout fields.timeoutMs
+    ++ validateWindowSize fields.windowSize
+    ++ validateThresholds fields.thresholds
+    ++ validateHysteresis fields.hysteresis
+    ++ validateFamilyHealthPolicy fields.familyHealthPolicy;
 
-  buildValue = cfg: parsedTargets: {
-    inherit (cfg)
-      method
-      intervalMs
-      timeoutMs
-      windowSize
-      thresholds
-      hysteresis
-      familyHealthPolicy
-      ;
-    targets = parsedTargets;
-  };
+  /*
+    Validate probe input without throwing, so callers such as
+    `wan.tryMake` can fold probe errors into their own report. Every
+    violation is reported in one message rather than only the first.
 
+    `input`: an attrset with any subset of the probe fields; missing
+    fields take `defaults`.
+
+    Returns a `tryResult` whose value is the probe value, with each
+    target parsed into a libnet IP value. Error kinds:
+
+      probeNoTargets              — `targets.v4` and `targets.v6` empty
+      probeInvalidTarget          — malformed targets attrset or list,
+                                    or a target that is not an IP
+      probeTargetFamilyMismatch   — v4 literal in `targets.v6`, or v6
+                                    literal in `targets.v4`
+      probeInvalidThresholds      — `thresholds` is not an attrset
+      probeInvalidHysteresis      — `hysteresis` is not an attrset
+      probeInvalidMethod          — method not in `validMethods`
+      probeNonPositiveInterval    — intervalMs ≤ 0
+      probeNonPositiveTimeout     — timeoutMs ≤ 0
+      probeNonPositiveWindow      — windowSize ≤ 0
+      probeLossPctOutOfRange      — lossPct{Up,Down} outside [0, 100]
+      probeLossThresholdsInverted — lossPctUp ≥ lossPctDown
+      probeNonPositiveRTT         — rttMs{Up,Down} ≤ 0
+      probeRTTThresholdsInverted  — rttMsUp ≥ rttMsDown
+      probeNonPositiveHysteresis  — a hysteresis counter ≤ 0
+      probeInvalidFamilyPolicy    — familyHealthPolicy not in
+                                    `validFamilyHealthPolicies`
+
+    Each recovery threshold must sit strictly below its failure
+    threshold; otherwise a marginal WAN flaps on every Sample.
+  */
   tryMake =
-    user:
+    input:
     let
-      cfg = mergeWithDefaults user;
-      errors = collectErrors cfg;
+      fields = mergeWithDefaults input;
+      errors = collectErrors fields;
     in
     if errors == [ ] then
       tryOk (
-        buildValue cfg {
-          v4 = (parseTargets cfg.targets.v4).parsed;
-          v6 = (parseTargets cfg.targets.v6).parsed;
+        fields
+        // {
+          targets = {
+            v4 = (parseTargets fields.targets.v4).parsed;
+            v6 = (parseTargets fields.targets.v6).parsed;
+          };
         }
       )
     else
       tryErr (formatErrors errors);
 
+  /*
+    Construct a probe value, failing evaluation on invalid input.
+
+    `input`: an attrset with any subset of the probe fields; missing
+    fields take `defaults`.
+
+    Returns the probe value. Throws the aggregated `tryMake` error
+    message when validation fails.
+  */
   make =
-    user:
+    input:
     let
-      r = tryMake user;
+      result = tryMake input;
     in
-    if r.success then r.value else builtins.throw r.error;
+    if result.success then result.value else throw result.error;
 
-  # ===== Derived accessors =====
+  /*
+    Report which address families a probe covers, so `wan.make` can
+    derive the families a WAN serves (PLAN §5.4).
 
-  # `families` returns an attrset {v4 = bool; v6 = bool;} reflecting
-  # whether the probe's targets cover each family. Used by `wan.make`
-  # to enforce the family-coupling invariant (PLAN §5.4).
-  families = p: {
-    v4 = p.targets.v4 != [ ];
-    v6 = p.targets.v6 != [ ];
+    `probe`: a probe value.
+
+    Returns `{ v4 = <bool>; v6 = <bool>; }`, true for each family with
+    at least one target.
+  */
+  families = probe: {
+    v4 = probe.targets.v4 != [ ];
+    v6 = probe.targets.v6 != [ ];
   };
 
-  # ===== Serialization =====
+  /*
+    Serialize a probe for the daemon-config JSON. Targets use libnet's
+    canonical text form, so the rendered config is byte-stable.
 
-  # The JSON-shape attrset embedded by `wan.toJSONValue` and by
-  # `config.render`. Strings are libnet's canonical form so the
-  # rendered config is byte-stable across builds.
-  toJSONValue = p: {
-    inherit (p)
-      method
+    `probe`: a probe value.
+
+    Returns the JSON-shaped attrset embedded by `wan.toJSONValue`.
+  */
+  toJSONValue = probe: {
+    inherit (probe)
+      familyHealthPolicy
+      hysteresis
       intervalMs
+      method
+      thresholds
       timeoutMs
       windowSize
-      thresholds
-      hysteresis
-      familyHealthPolicy
       ;
     targets = {
-      v4 = builtins.map libnet.ip.toString p.targets.v4;
-      v6 = builtins.map libnet.ip.toString p.targets.v6;
+      v4 = map libnet.ip.toString probe.targets.v4;
+      v6 = map libnet.ip.toString probe.targets.v6;
     };
   };
 in
 {
   inherit
-    make
-    tryMake
-    toJSONValue
+    defaults
     families
+    make
+    toJSONValue
+    tryMake
+    validFamilyHealthPolicies
+    validMethods
     ;
-  # Exposed for tests / introspection / module-option defaults.
-  inherit defaults;
-  # Single-source enums: `types/probe.nix` derives `probeMethod` and
-  # `probeFamilyHealthPolicy` from these so the option type and the
-  # validator agree by construction.
-  inherit validMethods validFamilyHealthPolicies;
 }

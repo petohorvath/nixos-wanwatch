@@ -1,25 +1,12 @@
 /*
-  types/wan — NixOS option types for the WAN value.
+  Option types for WANs, exported through `wanwatch.types`:
 
-  Exports (flattened into `wanwatch.types.<name>` by
-  `lib/types/default.nix`):
-
-    wanName       — wanwatch identifier; in `wans.<name>` attrsets,
-                    derived read-only from the attribute key.
-    wanInterface  — `libnet.types.interfaceName` (kernel-`dev_valid_name`
-                    parity)
-    wan           — top-level submodule composing probe
-
-  The WAN serves whichever families its `probe.targets` cover —
-  there is no separate gateway / family declaration. The daemon
-  discovers the gateway at runtime from the kernel's main routing
-  table (`pointToPoint = false`), or installs a scope-link default
-  route (`pointToPoint = true`) for PPP / WireGuard / tun-style
-  interfaces with no broadcast next-hop.
-
-  Takes `probeTypes` (the result of `import ./probe.nix { … }`) so
-  the wan submodule can embed `probeTypes.probe` for the nested
-  `probe` field.
+    wanName      — wanwatch identifier; in `wans.<name>` it is the
+                   read-only attribute key
+    wanInterface — Linux interface name, checked against the kernel's
+                   `dev_valid_name` rules
+    wan          — the complete WAN submodule, embedding
+                   `probeTypes.probe`
 */
 {
   lib,
@@ -28,7 +15,7 @@
   probeTypes,
 }:
 let
-  inherit (lib) types mkOption;
+  inherit (lib) mkOption types;
 
   wanName = primitives.identifier;
   wanInterface = libnet.types.interfaceName;
@@ -42,7 +29,7 @@ let
           readOnly = true;
           default = name;
           description = ''
-            WAN identifier. Defaults to the attribute key — e.g.
+            WAN identifier, taken from the attribute key:
             `services.wanwatch.wans.primary.name` is `"primary"`.
           '';
         };
@@ -50,9 +37,9 @@ let
           type = wanInterface;
           example = "eth0";
           description = ''
-            Linux interface name. Validated against the kernel's
-            `dev_valid_name` rules (length < 16, no `/`, `:`, or
-            whitespace).
+            Linux interface name, checked against the kernel's
+            `dev_valid_name` rules (shorter than 16 characters, with no
+            `/`, `:`, or whitespace).
           '';
         };
         pointToPoint = mkOption {
@@ -60,21 +47,18 @@ let
           default = false;
           example = true;
           description = ''
-            When true the daemon installs scope-link default routes
-            for this WAN — appropriate for PPP, WireGuard, GRE,
-            tun, and any other link with no broadcast next-hop.
-            When false (default) the daemon discovers the
-            interface's current default-route gateway via netlink
-            from the kernel's main routing table.
+            Whether the daemon installs scope-link default routes for
+            this WAN, as needed by PPP, WireGuard, GRE, tun, and other
+            links without a broadcast next hop. When false, the daemon
+            uses the interface's default-route gateway from the main
+            routing table, discovered through netlink.
           '';
         };
         probe = mkOption {
           type = probeTypes.probe;
           description = ''
-            Probe configuration for this WAN. The families the
-            WAN handles are derived from `probe.targets`: a
-            non-empty `targets.v4` means v4 is served; a non-empty
-            `targets.v6` means v6 is served.
+            Probe configuration for this WAN. The WAN serves the address
+            families with non-empty `probe.targets`.
           '';
         };
       };
@@ -83,8 +67,8 @@ let
 in
 {
   inherit
-    wanName
-    wanInterface
     wan
+    wanInterface
+    wanName
     ;
 }

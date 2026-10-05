@@ -1,126 +1,64 @@
 /*
-  wanwatch.group — Group value type.
-
-  A Group is an ordered collection of Members under a Strategy,
-  plus the fwmark + routing-table id used to dispatch its
-  traffic. The Strategy decides which Member carries the group's
-  traffic at any given moment.
-
-  Fields (all required):
+  Group value type, exposed as `wanwatch.group`. A Group is an ordered
+  list of Members under a Strategy, plus the fwmark and routing table
+  that dispatch its traffic; the Strategy picks which Member carries
+  the traffic. A group value carries:
 
     name     — wanwatch identifier
-    members  — non-empty list of Members. Each Member input is an
-               attrset passed to `member.make`; the group module
-               owns the construction.
-    strategy — enum, v1: "primary-backup" only. v2 will add
-               "load-balance" once multi-active lands.
-    table    — required integer in [1000, 32767]. Routing-table id
-               shared across v4 and v6 RIBs.
-    mark     — required integer in [1000, 32767]. fwmark used to
-               dispatch traffic to `table`.
-
-  ===== make =====
-
-  Input:  attrset of fields (any subset of optionals; required
-          fields must be present)
-  Output: group value with each member parsed into a member value
-  Throws: aggregated error string if validation fails.
-
-  ===== tryMake =====
-
-  Same as `make` but returns the `tryResult` shape. Aggregates
-  errors across name, members (and each member's own validation),
-  strategy, table, mark, and the duplicate-member cross-check.
-
-  Error kinds:
-
-    groupInvalidName       — name ∉ valid identifier
-    groupNoMembers         — empty members list
-    groupInvalidMember     — embedded member.make rejected (forwarded)
-    groupDuplicateMember   — same WAN referenced by multiple members
-    groupInvalidStrategy   — strategy ∉ {"primary-backup"}
-    groupInvalidTable      — table missing or not an int in [1000, 32767]
-    groupInvalidMark       — mark missing or not an int in [1000, 32767]
-
-  ===== Accessors =====
-
-  `name`, `members` (list of member values), `strategy`, `table`,
-  `mark`, `wans` (derived: list of WAN-name strings referenced by
-  the group's members).
-
-  ===== Serialization =====
-
-  `toJSONValue` is the canonical attrset form embedded by
-  `config.render`. Members are nested via `member.toJSONValue`
-  rather than as nested JSON strings.
+    members  — non-empty list of member values, built from the
+               `members` inputs
+    strategy — "primary-backup", the only Strategy
+    table    — routing-table ID in [1000, 32767], shared by the IPv4
+               and IPv6 routing tables
+    mark     — fwmark in [1000, 32767] that selects `table`
 */
 {
   lib,
   internal,
 }:
 let
-  inherit (internal.primitives)
-    tryOk
-    tryErr
-    check
-    partitionTry
-    isValidName
-    ;
-  formatErrors = internal.primitives.formatErrors "group.make";
   inherit (internal) member;
+  inherit (internal.primitives)
+    check
+    isValidName
+    partitionTry
+    tryErr
+    tryOk
+    ;
 
-  # ===== Defaults =====
-  #
-  # `table` and `mark` have no defaults — both are required per
-  # group, validated against [1000, 32767] (matches the option
-  # types `wanwatch.types.{routingTableId,fwmark}`). The auto-
-  # allocator that filled them was removed; the integer is the
-  # user's choice now.
+  formatErrors = internal.primitives.formatErrors "group.make";
 
+  # `table` and `mark` are required, so they have no defaults.
   defaults = {
     strategy = "primary-backup";
   };
 
-  # ===== Range constants =====
-  #
-  # Kept in sync with `lib/types/primitives.nix` definitions for
-  # `fwmark` and `routingTableId`. A grep-tier coupling rather than
-  # a code-tier one because the types module exports option types,
-  # not raw bounds; pulling the bounds out of a type's functor is
-  # noisy in Nix.
-
+  # Matches `fwmark` and `routingTableId` in `lib/types/primitives.nix`;
+  # option types do not expose their bounds for reuse.
   markTableMin = 1000;
   markTableMax = 32767;
 
-  isMarkTableInt = n: builtins.isInt n && n >= markTableMin && n <= markTableMax;
+  isMarkTableInt = value: builtins.isInt value && value >= markTableMin && value <= markTableMax;
 
+  # `types/group.nix` derives its enum option type from this list.
   validStrategies = [ "primary-backup" ];
 
-  # ===== Validation helpers =====
-
-  # member.tryMake speaks the standard tryResult shape; the
-  # generic partitionTry handles the partition.
   parseMembers = partitionTry member.tryMake;
-
-  # ===== Field-level validators =====
 
   validateName =
     name:
     check "groupInvalidName" (isValidName name)
       "name must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON name}";
 
-  # Takes the already-parsed members result from `tryMake`'s top-level
-  # let so the partition isn't redone here. Without this threading,
-  # `parseMembers` ran twice on every happy-path `tryMake` invocation —
-  # once at the top, once inside this validator.
+  # Takes `tryMake`'s parsed members so each member is parsed once.
   validateMembers =
-    members: membersResult:
+    members: parsedMembers:
     if !(builtins.isList members) then
       check "groupInvalidMember" false "members must be a list"
     else if members == [ ] then
       check "groupNoMembers" false "members must be non-empty"
     else
-      builtins.map (lib.nameValuePair "groupInvalidMember") membersResult.errors;
+      map (lib.nameValuePair "groupInvalidMember") parsedMembers.errors;
 
   validateStrategy =
     strategy:
@@ -137,102 +75,123 @@ let
     check "groupInvalidMark" (isMarkTableInt mark)
       "mark is required and must be an integer in [${toString markTableMin}, ${toString markTableMax}]; got ${builtins.toJSON mark}";
 
-  # Cross-check across already-parsed members. Run only when every
-  # member parsed cleanly — otherwise the wan list contains nulls.
-  detectDuplicateMembers =
-    parsedMembers:
-    let
-      wans = builtins.map (m: m.wan) parsedMembers;
-      counts = lib.foldl' (acc: w: acc // { ${w} = (acc.${w} or 0) + 1; }) { } wans;
-      dups = lib.filterAttrs (_: c: c > 1) counts;
-    in
-    lib.mapAttrsToList (
-      name: _:
-      lib.nameValuePair "groupDuplicateMember" "wan '${name}' is referenced by more than one member"
-    ) dups;
+  # Requires cleanly parsed members; otherwise WAN names may be null.
+  findDuplicateMembers =
+    members:
+    lib.pipe members [
+      (lib.catAttrs "wan")
+      (lib.groupBy lib.id)
+      (lib.filterAttrs (_: references: builtins.length references > 1))
+      (lib.mapAttrsToList (
+        wan: _:
+        lib.nameValuePair "groupDuplicateMember" "wan '${wan}' is referenced by more than one member"
+      ))
+    ];
 
-  # ===== Aggregated validation + construction =====
-
-  mergeWithDefaults = user: {
-    name = user.name or null;
-    members = user.members or [ ];
-    strategy = user.strategy or defaults.strategy;
-    table = user.table or null;
-    mark = user.mark or null;
+  # Missing `table` and `mark` become null, so their validators report
+  # them instead of `make` failing on a missing attribute.
+  mergeWithDefaults = input: {
+    name = input.name or null;
+    members = input.members or [ ];
+    strategy = input.strategy or defaults.strategy;
+    table = input.table or null;
+    mark = input.mark or null;
   };
-  # `table` / `mark` keep `or null` so missing-field cases produce
-  # a `groupInvalidTable` / `groupInvalidMark` error from the
-  # validators (null is rejected by isMarkTableInt) rather than
-  # an opaque "attribute not found" thrown deep in `buildValue`.
 
   collectErrors =
-    cfg: membersResult:
+    fields: parsedMembers:
     let
-      membersList = builtins.isList cfg.members;
-      membersClean = membersList && cfg.members != [ ] && membersResult.errors == [ ];
-
-      structuralErrs =
-        validateName cfg.name
-        ++ validateMembers cfg.members membersResult
-        ++ validateStrategy cfg.strategy
-        ++ validateTable cfg.table
-        ++ validateMark cfg.mark;
-
-      duplicateErrs = if membersClean then detectDuplicateMembers membersResult.parsed else [ ];
+      hasCleanMembers =
+        builtins.isList fields.members && fields.members != [ ] && parsedMembers.errors == [ ];
     in
-    structuralErrs ++ duplicateErrs;
+    validateName fields.name
+    ++ validateMembers fields.members parsedMembers
+    ++ validateStrategy fields.strategy
+    ++ validateTable fields.table
+    ++ validateMark fields.mark
+    ++ lib.optionals hasCleanMembers (findDuplicateMembers parsedMembers.parsed);
 
-  buildValue = cfg: parsedMembers: {
-    inherit (cfg)
-      name
-      strategy
-      table
-      mark
-      ;
-    members = parsedMembers;
-  };
+  /*
+    Validate Group input without throwing, reporting every violation,
+    including each member's, in one message.
 
+    `input`: an attrset with `name`, `members` (inputs for
+    `member.tryMake`), `table`, `mark`, and optional `strategy`
+    (default "primary-backup").
+
+    Returns a `tryResult` whose value is the group value. Error kinds:
+
+      groupInvalidName     — name is not a valid identifier
+      groupNoMembers       — members is empty
+      groupInvalidMember   — members is not a list, or
+                             `member.tryMake` rejected a member
+      groupDuplicateMember — several members reference the same WAN
+      groupInvalidStrategy — strategy not in `validStrategies`
+      groupInvalidTable    — table missing or outside [1000, 32767]
+      groupInvalidMark     — mark missing or outside [1000, 32767]
+  */
   tryMake =
-    user:
+    input:
     let
-      cfg = mergeWithDefaults user;
-      membersResult = parseMembers (if builtins.isList cfg.members then cfg.members else [ ]);
-      errors = collectErrors cfg membersResult;
+      fields = mergeWithDefaults input;
+      parsedMembers = parseMembers (if builtins.isList fields.members then fields.members else [ ]);
+      errors = collectErrors fields parsedMembers;
     in
-    if errors == [ ] then tryOk (buildValue cfg membersResult.parsed) else tryErr (formatErrors errors);
+    if errors == [ ] then
+      tryOk (fields // { members = parsedMembers.parsed; })
+    else
+      tryErr (formatErrors errors);
 
+  /*
+    Construct a group value, failing evaluation on invalid input.
+
+    `input`: the attrset accepted by `tryMake`.
+
+    Returns the group value with each member parsed into a member
+    value. Throws the aggregated `tryMake` error message when
+    validation fails.
+  */
   make =
-    user:
+    input:
     let
-      r = tryMake user;
+      result = tryMake input;
     in
-    if r.success then r.value else builtins.throw r.error;
+    if result.success then result.value else throw result.error;
 
-  # ===== Derived accessors =====
+  /*
+    List the WANs a Group references, in member order.
 
-  wans = g: builtins.map (m: m.wan) g.members;
+    `group`: a group value.
 
-  # ===== Serialization =====
+    Returns a list of WAN names.
+  */
+  wans = group: lib.catAttrs "wan" group.members;
 
-  toJSONValue = g: {
-    inherit (g)
+  /*
+    Serialize a Group for the daemon-config JSON.
+
+    `group`: a group value.
+
+    Returns the JSON-shaped attrset embedded by `config.render`, with
+    members nested as attrsets.
+  */
+  toJSONValue = group: {
+    inherit (group)
+      mark
       name
       strategy
       table
-      mark
       ;
-    members = builtins.map member.toJSONValue g.members;
+    members = map member.toJSONValue group.members;
   };
 in
 {
   inherit
-    make
-    tryMake
-    toJSONValue
-    wans
     defaults
+    make
+    toJSONValue
+    tryMake
+    validStrategies
+    wans
     ;
-  # Exposed so `types/group.nix` can derive its `groupStrategy`
-  # enum from the same list — single source of truth on the Nix side.
-  inherit validStrategies;
 }

@@ -1,27 +1,18 @@
 /*
-  types/probe — NixOS option types for the Probe value.
+  Option types for Probe configuration, exported through
+  `wanwatch.types`:
 
-  Exports (flattened into `wanwatch.types.<name>` by
-  `lib/types/default.nix`):
+    probeMethod             — enum of `internal.probe.validMethods`
+    probeTarget             — IPv4 or IPv6 address string
+    probeFamilyHealthPolicy — enum of
+                              `internal.probe.validFamilyHealthPolicies`
+    probeThresholds         — submodule of loss and RTT thresholds
+    probeHysteresis         — submodule of consecutive-cycle counters
+    probe                   — the complete Probe submodule
 
-    probeMethod              — enum [ "icmp" ]
-    probeTarget              — libnet.types.ip (v4 or v6 IP string)
-    probeFamilyHealthPolicy  — enum [ "all" "any" ]
-    probeThresholds          — submodule { lossPctDown; lossPctUp;
-                                            rttMsDown; rttMsUp; }
-    probeHysteresis          — submodule { consecutiveDown;
-                                            consecutiveUp; }
-    probe                    — top-level submodule
-
-  Defaults mirror `internal.probe.defaults` exactly so a config
-  consisting of only `targets = { v4 = [ … ]; }` evaluates to the
-  same shape the value-type's `make` would produce.
-
-  Probe targets are stored as strings (libnet convention — option
-  values stay as strings after merge; downstream code calls
-  `libnet.ip.parse` when it needs structural access). The
-  `internal.probe.make` validator parses these strings into libnet
-  ip values at construction time.
+  Enums and defaults come from `internal.probe`, so a config with only
+  `targets` evaluates to what `probe.make` would build. Targets stay
+  strings here; `probe.make` parses them into libnet IP values.
 */
 {
   lib,
@@ -30,17 +21,11 @@
   internal,
 }:
 let
-  inherit (lib) types mkOption;
+  inherit (internal.probe) defaults;
+  inherit (lib) mkOption types;
 
-  # Single source of truth: enums and scalar defaults come from
-  # `internal.probe`'s registries / defaults attrset, so the option
-  # type and the validator agree by construction. Adding a method,
-  # family-health policy, or changing a default no longer requires
-  # touching two files in lockstep.
   probeMethod = types.enum internal.probe.validMethods;
   probeFamilyHealthPolicy = types.enum internal.probe.validFamilyHealthPolicies;
-  inherit (internal.probe) defaults;
-
   probeTarget = libnet.types.ip;
 
   probeThresholds = types.submodule {
@@ -49,36 +34,32 @@ let
         type = primitives.pctInt;
         default = defaults.thresholds.lossPctDown;
         description = ''
-          Loss-percentage threshold above which a WAN flips to
-          unhealthy. Compared against the rolling sliding-window
-          loss ratio.
+          Loss percentage above which a WAN becomes unhealthy, compared
+          with the loss ratio over the sliding window.
         '';
       };
       lossPctUp = mkOption {
         type = primitives.pctInt;
         default = defaults.thresholds.lossPctUp;
         description = ''
-          Loss-percentage at or below which a WAN flips back to
-          healthy. Must be strictly below `lossPctDown` — the
-          value-type validator (`internal.probe.tryMake`) rejects
-          equal or inverted thresholds because they oscillate at
-          the boundary.
+          Loss percentage at or below which a WAN becomes healthy
+          again. Must be strictly below `lossPctDown`; equal or
+          inverted thresholds would flap at the boundary.
         '';
       };
       rttMsDown = mkOption {
         type = primitives.positiveInt;
         default = defaults.thresholds.rttMsDown;
         description = ''
-          Mean RTT (milliseconds) above which a WAN flips to
-          unhealthy.
+          Mean RTT in milliseconds above which a WAN becomes unhealthy.
         '';
       };
       rttMsUp = mkOption {
         type = primitives.positiveInt;
         default = defaults.thresholds.rttMsUp;
         description = ''
-          Mean RTT (milliseconds) at or below which a WAN flips
-          back to healthy. Must be strictly below `rttMsDown`.
+          Mean RTT in milliseconds at or below which a WAN becomes
+          healthy again. Must be strictly below `rttMsDown`.
         '';
       };
     };
@@ -97,44 +78,36 @@ let
         type = primitives.positiveInt;
         default = defaults.hysteresis.consecutiveUp;
         description = ''
-          Consecutive good cycles required to mark a WAN healthy
-          again.
+          Consecutive good cycles required to mark a WAN healthy again.
         '';
       };
     };
   };
+
+  mkTargetFamilyOption =
+    family: otherFamily:
+    mkOption {
+      type = types.listOf probeTarget;
+      default = [ ];
+      description = ''
+        ${family} probe targets. Each must be an ${family} address;
+        an ${otherFamily} address fails with
+        `probeTargetFamilyMismatch`.
+      '';
+    };
 
   probe = types.submodule {
     options = {
       method = mkOption {
         type = probeMethod;
         default = defaults.method;
-        description = ''
-          Probing protocol. v1 supports `"icmp"` only; v2 will add
-          TCP / HTTP / DNS once the daemon's probe layer grows.
-        '';
+        description = "Probing protocol. Only `\"icmp\"` is supported.";
       };
       targets = mkOption {
         type = types.submodule {
           options = {
-            v4 = mkOption {
-              type = types.listOf probeTarget;
-              default = [ ];
-              description = ''
-                IPv4 probe targets. Each item must be a v4 IP literal —
-                a v6 literal here is rejected by `internal.probe.make`
-                with `probeTargetFamilyMismatch`.
-              '';
-            };
-            v6 = mkOption {
-              type = types.listOf probeTarget;
-              default = [ ];
-              description = ''
-                IPv6 probe targets. Each item must be a v6 IP literal —
-                a v4 literal here is rejected by `internal.probe.make`
-                with `probeTargetFamilyMismatch`.
-              '';
-            };
+            v4 = mkTargetFamilyOption "IPv4" "IPv6";
+            v6 = mkTargetFamilyOption "IPv6" "IPv4";
           };
         };
         default = { };
@@ -143,19 +116,17 @@ let
           v6 = [ "2606:4700:4700::1111" ];
         };
         description = ''
-          IP targets to probe, partitioned by family. At least one of
-          `v4` / `v6` must be non-empty. Each family the surrounding
-          WAN has a gateway for must have at least one matching
-          target — see PLAN §5.4.
+          Addresses to probe, by family. At least one of `v4` and `v6`
+          must be non-empty; the WAN serves the families listed here
+          (PLAN §5.4).
         '';
       };
       intervalMs = mkOption {
         type = primitives.positiveInt;
         default = defaults.intervalMs;
         description = ''
-          Milliseconds between probe cycles. Multiple probes may be
-          in flight simultaneously (dpinger-style) — `timeoutMs` is
-          independent of `intervalMs`.
+          Milliseconds between probe cycles. Probes may overlap, so
+          `timeoutMs` is independent of `intervalMs`.
         '';
       };
       timeoutMs = mkOption {
@@ -169,8 +140,8 @@ let
         type = primitives.positiveInt;
         default = defaults.windowSize;
         description = ''
-          Number of samples in the sliding window used to compute
-          loss / mean RTT / jitter.
+          Number of Samples in the sliding window used to compute loss,
+          mean RTT, and jitter.
         '';
       };
       thresholds = mkOption {
@@ -187,10 +158,9 @@ let
         type = probeFamilyHealthPolicy;
         default = defaults.familyHealthPolicy;
         description = ''
-          How per-family Health combines into per-WAN Health.
-          `"all"` (default) — WAN healthy iff every configured
-          family is healthy. `"any"` — WAN healthy if any
-          configured family is healthy. See PLAN §5.4.
+          How per-family Health combines into WAN Health. With `"all"`
+          (the default), the WAN is healthy when every configured family
+          is healthy; with `"any"`, when at least one is (PLAN §5.4).
         '';
       };
     };
@@ -198,11 +168,11 @@ let
 in
 {
   inherit
+    probe
+    probeFamilyHealthPolicy
+    probeHysteresis
     probeMethod
     probeTarget
-    probeFamilyHealthPolicy
     probeThresholds
-    probeHysteresis
-    probe
     ;
 }
