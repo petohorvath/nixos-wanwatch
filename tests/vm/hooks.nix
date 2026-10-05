@@ -1,12 +1,7 @@
 /*
-  hooks — wire a captured-env-vars hook into /etc/wanwatch/hooks/
-  switch.d/, trigger a carrier-driven Decision, and verify the
-  hook saw the PLAN §5.5 env vars (WANWATCH_EVENT, _GROUP,
-  _WAN_OLD/_NEW, _IFACE_OLD/_NEW, _GATEWAY_V4_OLD/_NEW,
-  _GATEWAY_V6_OLD/_NEW, _FAMILIES, _TABLE, _MARK, _TS).
-
-  GATEWAY_V4/V6 env vars are emitted blank for now — they get
-  populated once the daemon's gateway-discovery cache lands.
+  hooks — trigger a carrier-driven switch Decision and verify that a
+  capturing Hook receives the PLAN §5.5 WANWATCH_* environment. Both
+  WANs are pointToPoint, so the gateway variables are empty.
 */
 {
   pkgs,
@@ -14,10 +9,8 @@
 }:
 
 let
-  # The hook writes every WANWATCH_* env var to a known file.
-  # Hooks run as the wanwatch user — keep the capture path under
-  # the daemon's hooksDir so the daemon's writable view of /etc is
-  # not needed.
+  # Hooks run as the wanwatch user, which can write only under
+  # /run/wanwatch.
   captureHook = pkgs.writeShellScript "capture-env.sh" ''
     set -eu
     env | grep '^WANWATCH_' | sort > /run/wanwatch/last-hook.env
@@ -74,9 +67,7 @@ pkgs.testers.runNixOSTest {
         pkgs.iproute2
       ];
 
-      # Install the capture hook into every event directory so the
-      # test can read /run/wanwatch/last-hook.env regardless of
-      # whether the trigger is up/down/switch.
+      # Capture every event type in one file.
       environment.etc = {
         "wanwatch/hooks/up.d/capture".source = captureHook;
         "wanwatch/hooks/down.d/capture".source = captureHook;
@@ -146,9 +137,8 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip link set wan1 up")
     observe.wait_active("home-uplink", "primary")
 
-    # The initial up Decision should have fired the up.d hook —
-    # remove the captured file so the next assertion only sees
-    # the switch event.
+    # Discard the capture from the initial up Decision so the next
+    # read sees only the switch.
     router.succeed("rm -f /run/wanwatch/last-hook.env")
 
     if router.execute("ip link set wan0 carrier off")[0] != 0:
@@ -159,11 +149,11 @@ pkgs.testers.runNixOSTest {
     captured = router.succeed("cat /run/wanwatch/last-hook.env")
     print("captured hook env:\n" + captured)
 
-    env_dict = {}
+    hook_env = {}
     for line in captured.splitlines():
         if "=" in line:
-            k, _, v = line.partition("=")
-            env_dict[k] = v
+            key, _, value = line.partition("=")
+            hook_env[key] = value
 
     expectations = {
         "WANWATCH_EVENT": "switch",
@@ -174,14 +164,12 @@ pkgs.testers.runNixOSTest {
         "WANWATCH_IFACE_NEW": "wan1",
     }
     for key, want in expectations.items():
-        assert env_dict.get(key) == want, (
-            f"{key} = {env_dict.get(key)!r}, want {want!r}\n"
+        assert hook_env.get(key) == want, (
+            f"{key} = {hook_env.get(key)!r}, want {want!r}\n"
             f"full env:\n{captured}"
         )
 
-    # GATEWAY_V4/V6 env vars are emitted, but are blank under
-    # pointToPoint (no gateway) and remain blank for non-PtP WANs
-    # until the discovery cache wires them up.
+    # Gateway variables are emitted but empty for pointToPoint WANs.
     gateway_keys = [
         "WANWATCH_GATEWAY_V4_OLD",
         "WANWATCH_GATEWAY_V4_NEW",
@@ -189,22 +177,23 @@ pkgs.testers.runNixOSTest {
         "WANWATCH_GATEWAY_V6_NEW",
     ]
     for key in gateway_keys:
-        assert key in env_dict, f"{key} not emitted; full env:\n{captured}"
-        assert env_dict[key] == "", (
-            f"{key} = {env_dict[key]!r}, want empty (gateway discovery pending)"
+        assert key in hook_env, f"{key} not emitted; full env:\n{captured}"
+        assert hook_env[key] == "", (
+            f"{key} = {hook_env[key]!r}, want empty (pointToPoint)"
         )
 
-    # WANWATCH_FAMILIES is set-valued (comma-joined), not pinned
-    # to a particular order — assert membership instead.
-    fams = set(env_dict.get("WANWATCH_FAMILIES", "").split(","))
-    assert fams == {"v4", "v6"}, f"WANWATCH_FAMILIES = {fams}, want {{'v4','v6'}}"
+    # WANWATCH_FAMILIES is comma-joined in no particular order.
+    families = set(hook_env.get("WANWATCH_FAMILIES", "").split(","))
+    assert families == {"v4", "v6"}, (
+        f"WANWATCH_FAMILIES = {families}, want {{'v4','v6'}}"
+    )
 
-    # _TABLE and _MARK must be non-empty integers; _TS must parse
-    # as RFC3339Nano (Go time.Format(time.RFC3339Nano)).
-    assert env_dict["WANWATCH_TABLE"].isdigit(), f"WANWATCH_TABLE = {env_dict['WANWATCH_TABLE']!r}"
-    assert env_dict["WANWATCH_MARK"].isdigit(), f"WANWATCH_MARK = {env_dict['WANWATCH_MARK']!r}"
-    assert "T" in env_dict["WANWATCH_TS"] and "Z" in env_dict["WANWATCH_TS"], (
-        f"WANWATCH_TS = {env_dict['WANWATCH_TS']!r} doesn't look like RFC3339"
+    # _TABLE and _MARK are integers; _TS is Go's RFC3339Nano.
+    for key in ("WANWATCH_TABLE", "WANWATCH_MARK"):
+        assert hook_env[key].isdigit(), f"{key} = {hook_env[key]!r}"
+    timestamp = hook_env["WANWATCH_TS"]
+    assert "T" in timestamp and "Z" in timestamp, (
+        f"WANWATCH_TS = {timestamp!r} doesn't look like RFC3339"
     )
   '';
 }

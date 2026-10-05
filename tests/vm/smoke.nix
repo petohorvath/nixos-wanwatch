@@ -1,13 +1,8 @@
 /*
-  smoke — boot a single-node VM with services.wanwatch.enable = true
-  and verify the daemon comes up, the systemd unit reaches active,
-  state.json + metrics socket appear under /run/wanwatch/, and the
-  fwmark policy-routing rules land in both family RIBs.
-
-  The test deliberately stays in "no probe target reachable" mode
-  — the assertions focus on lifecycle + apply, not on actual
-  failover (covered by failover-v4.nix / failover-v6.nix when those
-  scenarios land).
+  smoke — boot a single-node router and verify the daemon lifecycle:
+  the unit reaches active, State and the metrics socket appear under
+  /run/wanwatch/, and the fwmark rules land in both family RIBs. No
+  probe target is reachable; the failover-* scenarios cover failover.
 */
 {
   pkgs,
@@ -22,9 +17,8 @@ pkgs.testers.runNixOSTest {
     {
       imports = [ nixosModule ];
 
-      # The kernel boots without any real WAN — dummy interfaces
-      # stand in so the daemon can bind probe sockets via
-      # SO_BINDTODEVICE and rtnetlink reports a real Name.
+      # Dummy interfaces stand in for real WANs so probe sockets can
+      # bind via SO_BINDTODEVICE and rtnetlink reports a real Name.
       boot.kernelModules = [ "dummy" ];
       systemd.network.netdevs = {
         "10-wan0" = {
@@ -57,9 +51,7 @@ pkgs.testers.runNixOSTest {
       networking = {
         useNetworkd = true;
         useDHCP = false;
-        # Disable the default firewall — the test asserts that the
-        # daemon's fwmark rules land in the kernel, and a stateful
-        # firewall would muddy the route lookup.
+        # A stateful firewall would muddy the fwmark route lookup.
         firewall.enable = lib.mkForce false;
       };
 
@@ -94,7 +86,6 @@ pkgs.testers.runNixOSTest {
           table = 1000;
         };
       };
-
     };
 
   testScript = (builtins.readFile ./observation.py) + ''
@@ -105,8 +96,7 @@ pkgs.testers.runNixOSTest {
     # 1. Daemon is alive and the unit reached active.
     router.succeed("systemctl is-active wanwatch.service")
 
-    # 2. Initial state.json is published from bootstrap — exists
-    #    even before any probe sample.
+    # 2. Bootstrap publishes state.json before any probe Sample.
     observe.state()
 
     # 3. Metrics socket present and group-readable.
@@ -114,23 +104,15 @@ pkgs.testers.runNixOSTest {
     mode = router.succeed("stat -c %a /run/wanwatch/metrics.sock").strip()
     assert mode == "660", f"metrics socket mode = {mode!r}, want '660'"
 
-    # 4. Scrape /metrics over the unix socket and assert
-    #    wanwatch_build_info is present (set during bootstrap with
-    #    a constant value of 1).
+    # 4. Bootstrap sets wanwatch_build_info on the metrics endpoint.
     body = observe.scrape()
     assert "wanwatch_build_info" in body, (
         f"scrape body missing wanwatch_build_info:\n{body}"
     )
 
-    # 5. The daemon's bootstrap step installed fwmark policy rules
-    #    for the configured group, in BOTH families. PLAN §6.1.
-    #    bootstrap → EnsureRule (per (group, family)) → first state.json
-    #    publish → sd_notify READY. wait_for_unit gates on READY so
-    #    the rules SHOULD be there, but a future bootstrap refactor
-    #    that reorders the writes would silently re-introduce the
-    #    race — poll so the failure mode stays "fast-fail with a
-    #    useful timeout" rather than "single-shot probe at the wrong
-    #    moment". Cheap on the happy path (one tick).
+    # 5. Bootstrap installs the Group's fwmark rules in both families
+    #    (PLAN §6.1) before sd_notify READY. Poll anyway, so a future
+    #    reordering of bootstrap writes fails with a clear timeout.
     mark = router.succeed(
         "jq -r '.groups.\"home-uplink\".mark' /etc/wanwatch/config.json"
     ).strip()

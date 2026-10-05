@@ -1,17 +1,8 @@
-/*
-  Unit tests for `lib/types/probe.nix`. Exercises each exported
-  option type via `lib.evalModules`.
-*/
-{ pkgs, libnet, ... }:
+# Unit tests for each option type exported by `lib/types/probe.nix`.
+{ helpers, wanwatch, ... }:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
-  inherit (wanwatch) types;
-
-  helpers = import ../helpers.nix { inherit pkgs; };
   inherit (helpers) evalType evalTypeFails;
+  inherit (wanwatch) types;
 
   # Minimum valid probe input — only `targets` is required.
   minimalProbe = {
@@ -177,8 +168,8 @@ in
   };
 
   testProbeRejectsLegacyListTargets = {
-    # The pre-per-family shape (targets as a flat list) must fail
-    # type-check now — buckets are mandatory.
+    # The former flat-list shape fails; per-family buckets are
+    # mandatory.
     expr = evalTypeFails types.probe { targets = [ "1.1.1.1" ]; };
     expected = true;
   };

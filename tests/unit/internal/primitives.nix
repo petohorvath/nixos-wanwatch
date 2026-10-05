@@ -1,16 +1,12 @@
 /*
-  Unit tests for `lib/internal/primitives.nix` (exposed as
-  `wanwatch.internal.primitives`). Same `testFoo = { expr;
-  expected; }` shape as every other unit test; aggregated by
-  `tests/unit/default.nix`.
-
-  Coverage discipline per PLAN.md §9.1: every public function
-  exercised on both positive and negative inputs, including each
-  `throws` branch via `builtins.tryEval` (`.success == false`).
+  Unit tests for `lib/internal/primitives.nix`, exposed as
+  `wanwatch.internal.primitives`. Per PLAN.md §9.1, each public
+  function is exercised on positive and negative inputs.
 */
-{ pkgs, ... }:
+{ pkgs, wanwatch, ... }:
 let
-  primitives = import ../../../lib/internal/primitives.nix { inherit (pkgs) lib; };
+  inherit (pkgs) lib;
+  inherit (wanwatch.internal) primitives;
 in
 {
   # ===== tryOk =====
@@ -54,21 +50,18 @@ in
   };
 
   # ===== formatErrors =====
-  #
-  # Uses `lib.nameValuePair` to build error records — same shape as
-  # nixpkgs convention.
 
   testFormatErrorsSingleEntry = {
     expr = primitives.formatErrors "probe.make" [
-      (pkgs.lib.nameValuePair "probeNoTargets" "no targets")
+      (lib.nameValuePair "probeNoTargets" "no targets")
     ];
     expected = "probe.make: [probeNoTargets] no targets";
   };
 
   testFormatErrorsMultipleEntries = {
     expr = primitives.formatErrors "wan.make" [
-      (pkgs.lib.nameValuePair "wanInvalidName" "name is empty")
-      (pkgs.lib.nameValuePair "wanNoGateways" "no gateway set")
+      (lib.nameValuePair "wanInvalidName" "name is empty")
+      (lib.nameValuePair "wanNoGateways" "no gateway set")
     ];
     expected = "wan.make: [wanInvalidName] name is empty; [wanNoGateways] no gateway set";
   };
@@ -114,7 +107,7 @@ in
   };
 
   testPartitionTryAllErr = {
-    expr = primitives.partitionTry (s: primitives.tryErr "bad:${s}") [
+    expr = primitives.partitionTry (item: primitives.tryErr "bad:${item}") [
       "a"
       "b"
     ];
@@ -130,7 +123,7 @@ in
   testPartitionTryMixed = {
     expr =
       let
-        parser = x: if x > 0 then primitives.tryOk x else primitives.tryErr "non-positive";
+        parser = number: if number > 0 then primitives.tryOk number else primitives.tryErr "non-positive";
       in
       primitives.partitionTry parser [
         1
@@ -161,8 +154,8 @@ in
   };
 
   testCheckChainable = {
-    # The typical usage: ++ a series of `check` calls into a flat
-    # list of errors, with passing checks contributing nothing.
+    # Validators join `check` calls with `++`; passing checks
+    # contribute nothing to the flat error list.
     expr =
       primitives.check "k1" true "m1"
       ++ primitives.check "k2" false "m2"
@@ -216,5 +209,4 @@ in
     expr = primitives.isValidName 42;
     expected = false;
   };
-
 }

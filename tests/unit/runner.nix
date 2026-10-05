@@ -1,40 +1,39 @@
 /*
   Unit-test runner. Wraps `lib.runTests` in a derivation so failures
-  show up as a failed `nix flake check`.
-
-  Tests are `lib.runTests`-shaped — each is named `testFoo` and shaped
-  as `{ expr; expected; }`. The runner produces an empty `$out` on
-  pass; on fail it cats the diff and exits 1, propagating to the
-  flake check.
-
-  Matches `nix-nftzones/tests/unit/runner.nix` in structure — the
-  pattern is portable across projects and the formatting is
-  deliberately identical so contributors fluent in one can read the
-  other without re-orienting.
+  surface as a failed `nix flake check`.
 */
 { pkgs }:
 let
   inherit (pkgs) lib;
 
-  pretty = lib.generators.toPretty { multiline = true; };
+  formatValue = lib.generators.toPretty { multiline = true; };
 
   formatFailure = failure: ''
     ✗ ${failure.name}
-        expected: ${pretty failure.expected}
-        actual:   ${pretty failure.result}
+        expected: ${formatValue failure.expected}
+        actual:   ${formatValue failure.result}
   '';
 in
 {
   /*
-    Run a `lib.runTests`-shaped attrset of tests. Each test is named
-    `testFoo` and shaped as `{ expr; expected; }`. Returns a derivation
-    that builds iff every test passes.
+    Run a `lib.runTests`-shaped attrset of tests inside a derivation.
+
+    `tests`: attrset of `testFoo = { expr; expected; }` entries; names
+    without the `test` prefix are ignored, as in `lib.runTests`.
+
+    Returns a derivation that builds an empty `$out` when every test
+    passes, and otherwise prints each failure and exits 1. The
+    `failures` and `total` passthru attributes expose the raw results.
   */
   runTests =
     tests:
     let
       failures = lib.runTests tests;
-      total = builtins.length (builtins.filter (lib.hasPrefix "test") (builtins.attrNames tests));
+      total = lib.pipe tests [
+        builtins.attrNames
+        (builtins.filter (lib.hasPrefix "test"))
+        builtins.length
+      ];
       failed = builtins.length failures;
       report = lib.concatMapStringsSep "\n" formatFailure failures;
     in

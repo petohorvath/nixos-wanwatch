@@ -1,24 +1,23 @@
 /*
-  Unit tests for `lib/internal/probe.nix` (exposed as `wanwatch.probe`).
-
-  Coverage discipline per PLAN.md §9.1: every public function
-  exercised on positive and negative inputs; every error kind
-  triggered in isolation and at least one aggregated multi-error
-  case; the §5.1 API skeleton (`make` / `tryMake` / `toJSONValue`)
-  exercised.
+  Unit tests for `lib/internal/probe.nix`, exposed as `wanwatch.probe`.
+  Per PLAN.md §9.1, each public function is exercised on positive and
+  negative inputs, each error kind is triggered alone and in an
+  aggregated case, and the §5.1 API skeleton is covered.
 */
-{ pkgs, libnet, ... }:
+{
+  helpers,
+  libnet,
+  wanwatch,
+  ...
+}:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (helpers) errorMatches evalThrows;
   inherit (wanwatch) probe;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalThrows errorMatches;
   tryError = helpers.tryError probe;
 
+  # Forces the whole result, so a malformed field must surface as an
+  # error kind rather than an evaluation failure.
   tryMakeRejectsWithoutThrowing =
     kind: input:
     let
@@ -142,16 +141,14 @@ in
   # ===== Target parsing =====
 
   testTargetsParsedToLibnetValues = {
-    # Each target is parsed into a libnet ip value of its bucket's
-    # family — the libnet `isIpv4` / `isIpv6` predicates recognise
-    # them and the buckets stay disjoint.
+    # Each target becomes a libnet IP value of its bucket's family.
     expr =
       let
-        t = (probe.make fullInput).targets;
+        inherit (probe.make fullInput) targets;
       in
       {
-        v4 = builtins.all libnet.ip.isIpv4 t.v4;
-        v6 = builtins.all libnet.ip.isIpv6 t.v6;
+        v4 = builtins.all libnet.ip.isIpv4 targets.v4;
+        v6 = builtins.all libnet.ip.isIpv6 targets.v6;
       };
     expected = {
       v4 = true;
@@ -207,7 +204,8 @@ in
   # ===== Partial thresholds overlay =====
 
   testPartialThresholdsMergeWithDefaults = {
-    # Specifying only lossPctDown should leave the other three at their defaults.
+    # Setting only lossPctDown leaves the other three at their
+    # defaults.
     expr =
       (probe.make {
         targets.v4 = [ "1.1.1.1" ];
@@ -240,8 +238,7 @@ in
   # ===== toJSONValue =====
 
   testToJSONValueStringifiesTargets = {
-    # Targets render as per-family lists of strings, not nested
-    # libnet structures.
+    # Targets render as per-family string lists, not libnet values.
     expr = (probe.toJSONValue (probe.make { targets.v4 = [ "1.1.1.1" ]; })).targets;
     expected = {
       v4 = [ "1.1.1.1" ];
@@ -378,10 +375,10 @@ in
     expected = true;
   };
 
-  # ===== Timeout / interval are independent (multiple probes in flight allowed) =====
+  # ===== Timeout and interval are independent =====
 
   testAcceptsTimeoutExceedingInterval = {
-    # dpinger-style: probes can overlap. send every 500ms but wait up
+    # Probes can overlap, dpinger-style: send every 500ms but wait up
     # to 1000ms before declaring a probe lost.
     expr =
       (probe.tryMake (
@@ -565,11 +562,10 @@ in
   # ===== Aggregated error reporting =====
 
   testMultipleErrorsAggregated = {
-    # Submit a config with several distinct violations; every one
-    # should appear in the error message. nftzones-style aggregation.
+    # Every violation in one input appears in the error message.
     expr =
       let
-        err = tryError {
+        error = tryError {
           targets = { };
           method = "tcp";
           intervalMs = 0;
@@ -580,7 +576,7 @@ in
           "probeNonPositiveInterval"
         ];
       in
-      builtins.all (k: errorMatches k err) kinds;
+      builtins.all (kind: errorMatches kind error) kinds;
     expected = true;
   };
 
@@ -614,7 +610,7 @@ in
   # ===== Defaults exposed =====
 
   testDefaultsExposed = {
-    # Tests / module-types may reference probe.defaults directly.
+    # The option types read their defaults from probe.defaults.
     expr = probe.defaults.intervalMs;
     expected = 500;
   };
@@ -622,17 +618,15 @@ in
   # ===== Round-trip =====
 
   testRoundTrip = {
-    # PLAN §9.1 (5): re-emitting the JSON shape after a second
-    # `make` must be byte-identical to the first. Pins the
-    # contract that `toJSONValue`'s output is itself a valid
-    # `make` input — consumers re-loading the rendered config
-    # don't need bespoke massaging to drive it back through the lib.
+    # PLAN §9.1 (5): `toJSONValue` output is itself a valid `make`
+    # input, and re-emitting it after a second `make` is
+    # byte-identical to the first.
     expr =
       let
-        js1 = probe.toJSONValue (probe.make fullInput);
-        js2 = probe.toJSONValue (probe.make js1);
+        firstJSON = probe.toJSONValue (probe.make fullInput);
+        secondJSON = probe.toJSONValue (probe.make firstJSON);
       in
-      js1 == js2;
+      firstJSON == secondJSON;
     expected = true;
   };
 }

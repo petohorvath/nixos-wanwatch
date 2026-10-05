@@ -1,32 +1,13 @@
 /*
-  cold-start — the cold→warm handoff: a healthy WAN whose first
-  probe Window lands healthy must not flap.
+  cold-start — a WAN whose first probe Window lands healthy must not
+  flap during the cold-to-warm handoff.
 
-  failover-v4 covers cold-start *carrier-only* health — it sets a
-  10-minute probe interval so probes never land. This scenario is
-  the complement: it lets a real probe Window cook and asserts the
-  hysteresis is *seeded* from that first Window (PLAN §8) rather
-  than ramped up from false. Without the seed, a WAN with
-  consecutiveUp > 1 spends its first `consecutiveUp - 1` cycles
-  below the up-threshold — so a perfectly healthy WAN is briefly
-  dropped and re-selected, a spurious down+up Decision pair on
-  every daemon start.
-
-  Topology: one ISP node and a router on a single VLAN. The
-  router's lone WAN probes the ISP; probes succeed throughout.
-
-  Sequence:
-    1. Cold start — primary is Selected on carrier alone, before
-       any probe has cooked.
-    2. The first good probe Window lands and seeds the hysteresis.
-    3. Assert wanwatch_group_decisions_total{reason="health"} is 0:
-       the seeded WAN's effective health never changed, so no
-       health Decision fired. Pre-fix this reads 2 — the spurious
-       down then up.
-
-  intervalMs is 1000ms — generous enough that the cold-start
-  carrier Selection reliably completes before the first probe
-  Window lands, the ordering this scenario depends on.
+  failover-v4 covers carrier-only cold-start health. Here a router's
+  lone WAN probes an ISP node successfully, and the scenario asserts
+  that the first Window seeds the hysteresis (PLAN §8) rather than
+  ramping it from false. Without the seed, a WAN with
+  consecutiveUp > 1 is dropped and re-selected on every daemon start:
+  a spurious health-reason down + up Decision pair.
 */
 {
   pkgs,
@@ -60,7 +41,7 @@ pkgs.testers.runNixOSTest {
           probe = {
             targets.v4 = [ "192.168.1.1" ];
             # Long enough that the cold-start carrier Selection
-            # lands before the first probe Window — see header.
+            # lands before the first probe Window.
             intervalMs = 1000;
             timeoutMs = 500;
             windowSize = 4;
@@ -104,17 +85,11 @@ pkgs.testers.runNixOSTest {
     # Selection is unambiguous.
     router.succeed("ip link set eth1 up")
 
-    # Pre-warm the network before the cold-start measurement.
-    # `wanwatch.service` starts on `network-pre.target`, so on a
-    # slow runner (especially the unstable kernel/networkd matrix)
-    # the daemon can begin probing eth1 before networkd has
-    # assigned its VLAN-1 IP — the first probe Window then lands
-    # all-Lost, hysteresis seeds unhealthy, and the WAN flaps
-    # once probes catch up. That flap is exactly what this test
-    # is supposed to detect *as a daemon bug*, so let it measure
-    # the daemon's behavior, not the runner's networkd race:
-    # block on router→isp reachability, then restart wanwatchd
-    # so its probe loop starts from a known-good network state.
+    # wanwatch.service starts on network-pre.target, so on a slow
+    # runner it can probe eth1 before networkd assigns its address;
+    # the all-Lost first Window then flaps the WAN for reasons
+    # unrelated to the daemon. Wait for reachability and restart so
+    # the measurement starts from a known-good network.
     router.wait_until_succeeds("ping -c 1 -W 1 192.168.1.1", timeout=30)
     router.systemctl("restart wanwatch.service")
     router.wait_for_unit("wanwatch.service")
@@ -128,11 +103,8 @@ pkgs.testers.runNixOSTest {
     #    ProbeResult has been folded in with a healthy verdict.
     observe.wait_family_metrics("primary", {"v4": True}, timeout=30)
 
-    # 3. The load-bearing assertion. The first probe Window seeds
-    #    the hysteresis (PLAN §8) instead of ramping it from false,
-    #    so the WAN's effective health never changes and no
-    #    health-reason Decision is emitted. Pre-fix the ramp drops
-    #    the WAN for consecutiveUp-1 cycles → a spurious down + up.
+    # 3. The seeded hysteresis (PLAN §8) keeps the WAN's effective
+    #    health unchanged, so no health-reason Decision is emitted.
     health = observe.decisions("home-uplink", "health")
     assert health == 0, (
         f"health-reason Decisions = {health}, want 0 — a healthy WAN "

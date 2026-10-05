@@ -1,34 +1,15 @@
 /*
-  failover-probe-loss — exercises the probe + threshold + hysteresis
-  chain end-to-end under realistic packet-loss conditions. The
-  other failover scenarios drive Decisions via carrier-only events;
-  this one keeps carrier up and induces failover purely through
-  the probe loop seeing loss exceed `probe.thresholds.lossPctDown`.
-
-  Topology: two ISP nodes on separate VLANs; router has one
-  interface per VLAN. Both WANs are pointToPoint (scope-link
-  routes, no explicit gateway needed).
+  failover-probe-loss — drive failover through the probe, threshold,
+  and hysteresis chain while carrier stays up. netem loss on the
+  primary uplink must switch the Group to the backup with a
+  health-reason Decision; clearing it must restore the primary.
 
     isp1 ─── VLAN 1 ─── eth1 ┐
                               ├── router
     isp2 ─── VLAN 2 ─── eth2 ┘
 
-  Sequence:
-    1. Wait for both probes to cook healthy → primary active.
-    2. Inject 100% packet loss on the router's primary uplink
-       via `tc qdisc add dev eth1 root netem loss 100%`.
-    3. Probe loop sees 100% loss > lossPctDown (25%); after
-       consecutiveDown samples the family verdict flips → WAN
-       aggregate flips → selector picks backup.
-    4. Verify decisions counter advanced with reason="health"
-       (not "carrier" — carrier is still up).
-    5. Clear the netem rule; probes succeed again; after
-       consecutiveUp samples primary takes back over.
-
-  Tunings chosen so the whole loop runs in single-digit seconds:
-  interval 200ms, timeout 100ms, window size 4,
-  consecutive{Up,Down}=2 — failover triggers ~400ms after netem
-  injection (2 samples × 200ms) plus apply + state-write latency.
+  Both WANs are pointToPoint. A 200 ms interval and
+  consecutive{Up,Down} = 2 keep each transition under a second.
 */
 {
   pkgs,
@@ -38,14 +19,12 @@
 pkgs.testers.runNixOSTest {
   name = "wanwatch-failover-probe-loss";
 
-  # Auto-IP: the NixOS test driver indexes nodes *globally*
-  # (alphabetical), not per-VLAN, so each node carries the same
-  # last octet on every VLAN it joins.
-  #   isp1   → idx 1 → 192.168.1.1
-  #   isp2   → idx 2 → 192.168.2.2
-  #   router → idx 3 → 192.168.1.3 + 192.168.2.3
-  # Probe targets below reflect that — primary aims at .1 (isp1's
-  # VLAN-1 address) and backup at .2 (isp2's VLAN-2 address).
+  /*
+    The test driver numbers nodes globally in alphabetical order, so
+    each node keeps its last octet on every VLAN: isp1 is 192.168.1.1,
+    isp2 is 192.168.2.2, and router is 192.168.1.3 and 192.168.2.3.
+    The probe targets below follow that numbering.
+  */
   nodes = {
     isp1 =
       { lib, ... }:
@@ -85,9 +64,8 @@ pkgs.testers.runNixOSTest {
                 intervalMs = 200;
                 timeoutMs = 100;
                 windowSize = 4;
-                # Loose RTT bounds so this scenario only exercises
-                # the loss-driven path; degraded latency is not
-                # under test here. (Up < Down is a lib invariant.)
+                # Loose RTT bounds keep this scenario on the
+                # loss-driven path.
                 thresholds = {
                   lossPctDown = 25;
                   lossPctUp = 5;
@@ -147,80 +125,59 @@ pkgs.testers.runNixOSTest {
     isp2.wait_for_unit("multi-user.target")
     router.wait_for_unit("wanwatch.service")
 
-    # Bring both uplinks carrier-up — the test framework brings
-    # them up by default, but pin it for clarity.
+    # The test driver brings uplinks up already; pin it for clarity.
     router.succeed("ip link set eth1 up")
     router.succeed("ip link set eth2 up")
 
-    # Pin the network setup before any probe assertion: wanwatchd
-    # starts in parallel with networkd, so it can begin its probe
-    # loop before the router's eth2 has its VLAN-2 IP or before
-    # isp2 finishes booting. On a fast machine the sliding window
-    # converges anyway; under GitHub-runner load the first dozen
-    # probes can all be unanswered, and a hysteresis with
-    # consecutiveUp=2 keeps the WAN unhealthy long enough that the
-    # 15s probe-healthy gate below times out — a false negative
-    # that looks like a daemon bug. Block here until *router →
-    # both ISPs* L3 reachability is real, then let the gate
-    # actually measure the daemon.
-    # `timeout=30` is generous on a healthy run (the ping for the
-    # working ISP returns in ~0.2s) but bounds the damage when the
-    # ping target is genuinely wrong — without it, the test driver
-    # falls back to its 900s default and one bad scenario burns 15
-    # minutes of CI time before failing.
+    # wanwatchd starts alongside networkd and can probe before the
+    # uplinks have addresses; on a loaded runner the unanswered
+    # probes keep a WAN unhealthy past the health gates below. Wait
+    # for reachability so the gates measure the daemon. The explicit
+    # timeout replaces the driver's 900 s default.
     router.wait_until_succeeds("ping -c 1 -W 1 192.168.1.1", timeout=30)
     router.wait_until_succeeds("ping -c 1 -W 1 192.168.2.2", timeout=30)
 
-    # 1. Primary wins on cold-start carrier health, then the probe
-    #    loop cooks both WANs as healthy. After convergence we
-    #    expect Active=primary (lowest priority among healthy).
+    # 1. Primary wins on cold-start carrier health and stays active
+    #    once the probes cook both WANs healthy.
     observe.wait_active("home-uplink", "primary", timeout=10)
 
-    # Pre-injection invariant: *both* WANs must be probe-healthy,
-    # not just carrier-up. Without this gate the wait_active
-    # above is satisfied by the cold-start carrier path long before
-    # the backup probe Window cooks, and step 3 would then time out
-    # failing over to a backup that was never reachable in the first
-    # place — a noise failure that masquerades as a daemon bug.
+    # Carrier alone satisfies the wait above; require probe Health on
+    # both WANs so step 3 cannot wait on an unreachable backup.
     observe.wait_healthy("primary")
     observe.wait_healthy("backup")
 
-    # Snapshot the health-decisions counter before we inject loss —
-    # the assertion below is "counter advanced", not "counter equal
-    # to N", so we don't have to track every Decision.
+    # Step 4 asserts that the counter advanced, not an exact value.
     before = observe.decisions("home-uplink", "health")
 
-    # 2. 100% packet loss on the primary uplink. netem at the
-    #    egress qdisc drops every outbound packet — ICMP echoes
-    #    leave the daemon's WriteTo but never reach isp1, so no
-    #    reply comes back and the cycle records Lost.
+    # 2. Egress netem drops every echo request on the primary
+    #    uplink, so each cycle records Lost.
     router.succeed("tc qdisc add dev eth1 root netem loss 100%")
 
-    # 3. Failover happens within ~consecutiveDown * intervalMs
-    #    plus apply + state-write overhead. With 2 × 200ms that's
-    #    ~400ms; 10s is generous.
+    # 3. Failover takes about consecutiveDown × intervalMs (400 ms)
+    #    plus Apply and State latency.
     observe.wait_active("home-uplink", "backup", timeout=10)
 
-    # 4. The Decision was probe/threshold-driven, not carrier-
-    #    driven — assert the `reason="health"` counter advanced.
+    # 4. The Decision was health-driven; carrier stayed up.
     observe.wait_decisions("home-uplink", "health", minimum=before + 1)
 
-    # state.json is transition-driven: assert the Decision snapshot's
-    # verdict and down threshold, then use Prometheus for later samples.
+    # state.json changes only on transitions: assert the Decision
+    # snapshot, then use Prometheus for later Samples.
     failed_state = observe.state()
     failed_v4 = failed_state["wans"]["primary"]["families"]["v4"]
-    assert failed_v4["healthy"] is False, f"failed family state = {failed_v4}"
+    assert failed_v4["healthy"] is False, (
+        f"failed family state = {failed_v4}"
+    )
     assert failed_v4["lossRatio"] >= 0.25, (
         f"transition lossRatio = {failed_v4['lossRatio']}, want ≥ 0.25"
     )
     observe.wait_probe_loss("primary", "v4", 0.5)
 
-    # 5. Clear the netem rule; primary should recover after
-    #    `consecutiveUp` good samples (2 × 200ms ≈ 400ms).
+    # 5. Clearing netem restores primary after consecutiveUp good
+    #    cycles.
     router.succeed("tc qdisc del dev eth1 root")
     observe.wait_active("home-uplink", "primary", timeout=10)
 
-    # Final sanity: primary's live loss has fallen to the recovery band.
+    # Primary's live loss falls back to the recovery band.
     observe.wait_probe_loss("primary", "v4", 0.0, 0.10)
   '';
 }

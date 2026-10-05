@@ -1,13 +1,12 @@
 /*
-  telegraf — happy-path module-eval with the opt-in Telegraf
-  companion module enabled. Asserts that the prometheus input is
-  wired to the daemon's metrics socket with the expected scrape
-  parameters and that the telegraf user is added to the wanwatch
-  group (so its supplementary-group membership grants socket read).
+  telegraf — happy-path module evaluation with the Telegraf companion
+  module. Asserts the Prometheus input scrapes the daemon's metrics
+  socket and the telegraf user joins the wanwatch group for read
+  access.
 */
 {
-  pkgs,
   nixosModule,
+  pkgs,
   telegrafModule,
 }:
 
@@ -46,17 +45,17 @@ let
     ];
   };
 
-  promInputs = evaluated.config.services.telegraf.extraConfig.inputs.prometheus;
-  promInput = builtins.head promInputs;
+  prometheusInput = builtins.head evaluated.config.services.telegraf.extraConfig.inputs.prometheus;
   telegrafGroups = evaluated.config.users.users.telegraf.extraGroups;
 in
 pkgs.runCommand "wanwatch-integration-telegraf" { } ''
   set -eu
 
   # Prometheus input points at the daemon's metrics socket.
-  test "${builtins.head promInput.urls}" = "unix:///run/wanwatch/metrics.sock"
-  test "${builtins.head promInput.namepass}" = "wanwatch_*"
-  test "${promInput.interval}" = "10s"
+  test "${builtins.head prometheusInput.urls}" = \
+    "unix:///run/wanwatch/metrics.sock"
+  test "${builtins.head prometheusInput.namepass}" = "wanwatch_*"
+  test "${prometheusInput.interval}" = "10s"
 
   # Telegraf user joins the wanwatch group for socket read access.
   case " ${pkgs.lib.concatStringsSep " " telegrafGroups} " in

@@ -1,23 +1,15 @@
 /*
-  Unit tests for `lib/internal/member.nix` (exposed as
-  `wanwatch.member`). Same `testFoo = { expr; expected; }` shape as
-  every other unit test; aggregated by `tests/unit/default.nix`.
-
-  Coverage discipline per PLAN.md §9.1: every public function
-  exercised on positive and negative inputs; every error kind
-  triggered in isolation and at least one aggregated multi-error
-  case; the §5.1 API skeleton fully exercised.
+  Unit tests for `lib/internal/member.nix`, exposed as
+  `wanwatch.member`. Per PLAN.md §9.1, each public function is
+  exercised on positive and negative inputs, each error kind is
+  triggered alone and in an aggregated case, and the §5.1 API
+  skeleton is covered.
 */
-{ pkgs, libnet, ... }:
+{ helpers, wanwatch, ... }:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (helpers) errorMatches evalThrows;
   inherit (wanwatch) member;
 
-  helpers = import ../helpers.nix { inherit pkgs; };
-  inherit (helpers) evalThrows errorMatches;
   tryError = helpers.tryError member;
 
   minimalInput = {
@@ -57,7 +49,7 @@ in
 
   testMakeFullPreservesAllFields = {
     expr = {
-      inherit (member.make fullInput) wan weight priority;
+      inherit (member.make fullInput) priority wan weight;
     };
     expected = {
       wan = "backup";
@@ -133,7 +125,7 @@ in
   testMultipleErrorsAggregated = {
     expr =
       let
-        err = tryError {
+        error = tryError {
           wan = "1bad";
           weight = 0;
           priority = -1;
@@ -144,7 +136,7 @@ in
           "memberInvalidPriority"
         ];
       in
-      builtins.all (k: errorMatches k err) kinds;
+      builtins.all (kind: errorMatches kind error) kinds;
     expected = true;
   };
 
@@ -201,10 +193,10 @@ in
     # `make` must be byte-identical to the first.
     expr =
       let
-        js1 = member.toJSONValue (member.make minimalInput);
-        js2 = member.toJSONValue (member.make js1);
+        firstJSON = member.toJSONValue (member.make minimalInput);
+        secondJSON = member.toJSONValue (member.make firstJSON);
       in
-      js1 == js2;
+      firstJSON == secondJSON;
     expected = true;
   };
 }

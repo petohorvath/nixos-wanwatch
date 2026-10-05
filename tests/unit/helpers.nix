@@ -1,83 +1,96 @@
 /*
-  Shared helpers for unit test files. Imported per-file as:
-
-    helpers = import ./helpers.nix { inherit pkgs; };
-    inherit (helpers) evalThrows errorMatches;
-
-  Lives alongside `runner.nix` so per-module test files (probe.nix,
-  wan.nix, …) can pull common assertion utilities without
-  reinventing them.
+  Shared assertion helpers for the unit-test suites. `default.nix`
+  passes them to every suite as `helpers`.
 */
 { pkgs }:
 let
+  inherit (pkgs) lib;
+
+  /*
+    Evaluate a NixOS option type against a value, so suites can test
+    option types without a full NixOS evaluation.
+
+    `type`: the option type under test.
+    `value`: the definition to merge into an option of that type.
+
+    Returns the merged value, including submodule defaults. Throws when
+    the type rejects the value; use `evalTypeFails` for negative cases.
+
+      evalType types.identifier "primary"  # => "primary"
+      evalType types.probe { targets.v4 = [ "1.1.1.1" ]; }
+  */
   evalType =
-    type: config:
-    (pkgs.lib.evalModules {
+    type: value:
+    (lib.evalModules {
       modules = [
-        {
-          options.value = pkgs.lib.mkOption { inherit type; };
-        }
-        { config.value = config; }
+        { options.value = lib.mkOption { inherit type; }; }
+        { config.value = value; }
       ];
     }).config.value;
 in
 {
   /*
-    True iff `expr` raises during evaluation. Standard wrapper over
-    `builtins.tryEval` for assert-it-throws cases.
+    Test whether evaluating an expression throws, for assert-it-throws
+    cases.
+
+    `expr`: the expression to evaluate.
+
+    Returns true when `builtins.tryEval` reports a failure. Evaluation
+    is shallow; force nested values before passing them in.
   */
   evalThrows = expr: !(builtins.tryEval expr).success;
 
   /*
-    Substring match for the bracketed error-kind tag emitted by
-    `internal.types.formatErrors`. The error string takes the shape
-    `<ctx>: [<kind>] <msg>; [<kind2>] <msg2>; …`, so a literal
-    `[kind]` substring confirms presence of that violation.
+    Test whether an aggregated error string carries an error kind.
+    `internal.primitives.formatErrors` renders errors as
+    `<context>: [<kind>] <message>; …`, so a literal `[kind]`
+    substring confirms that violation is present.
+
+    `kind`: the error kind, without brackets.
+    `message`: the error string to search.
+
+    Returns true when the message contains `[kind]`.
   */
-  errorMatches = kind: msg: pkgs.lib.hasInfix "[${kind}]" msg;
+  errorMatches = kind: message: lib.hasInfix "[${kind}]" message;
 
-  /*
-    Parametrized over a value-type module (probe, wan, …): returns
-    the error string from a failed `tryMake`, or `null` on success.
-
-    Usage:
-      tryError = helpers.tryError probe;
-      tryError { targets = [ ]; }   # → "probe.make: [probeNoTargets] ..."
-  */
-  tryError =
-    module: user:
-    let
-      r = module.tryMake user;
-    in
-    if r.success then null else r.error;
-
-  /*
-    Evaluate a NixOS option type against a config value. Returns
-    the evaluated result (post-defaults, post-coercion). Throws
-    when the type rejects the input; pair with `evalTypeFails` for
-    negative cases.
-
-    Usage:
-      evalType types.identifier "primary"  # → "primary"
-      evalType types.probe { targets = [ "1.1.1.1" ]; }
-  */
   inherit evalType;
 
   /*
-    True iff evaluating `type` against `config` throws — the
-    type-rejection assertion for `evalType`.
+    Test whether an option type rejects a value.
 
-    `builtins.tryEval` only forces one level; without `deepSeq`,
-    lazy thunks (e.g. element-level checks inside `listOf`) slip
-    past and the test runner later overflows trying to format the
-    unforced result. Matches nftzones' `evalFails` pattern.
+    `type`: the option type under test.
+    `value`: the definition to merge into an option of that type.
+
+    Returns true when `evalType type value` throws. The result is
+    forced with `builtins.deepSeq` because `builtins.tryEval` is
+    shallow: element checks inside `listOf` would otherwise escape it
+    and fail later, when the runner formats the result.
   */
   evalTypeFails =
-    type: config:
+    type: value:
     !(builtins.tryEval (
       let
-        r = evalType type config;
+        result = evalType type value;
       in
-      builtins.deepSeq r r
+      builtins.deepSeq result result
     )).success;
+
+  /*
+    Return the error of a failed `tryMake`, so suites can match error
+    kinds without unpacking the result.
+
+    `valueType`: a value-type module such as `wanwatch.probe`.
+    `input`: the attrset passed to `valueType.tryMake`.
+
+    Returns the error string, or null when construction succeeds.
+
+      tryError = helpers.tryError wanwatch.probe;
+      tryError { targets = { }; }  # => "probe.make: [probeNoTargets] …"
+  */
+  tryError =
+    valueType: input:
+    let
+      result = valueType.tryMake input;
+    in
+    if result.success then null else result.error;
 }

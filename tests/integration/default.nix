@@ -1,22 +1,16 @@
 /*
-  Integration tier — pure-eval scenarios + rejections (PLAN §9.3).
+  Integration tier: module-evaluation scenarios and rejection cases
+  (PLAN §9.3), aggregated into one derivation whose symlinks record
+  each realized check.
 
-    scenarios/  — each file evaluates the module against a realistic
-                  declaration and asserts the rendered config + cross-
-                  module outputs are well-formed.
-    rejections/ — each file declares an intentionally-invalid config
-                  and proves module evaluation throws. Confirms the
-                  Nix-side validators are wired into the live module
-                  path, not just unit-tested in isolation.
-
-  This file aggregates them into a single derivation so flake.nix
-  keeps its existing `checks.<system>.integration` attribute. Each
-  child still builds independently — symlinks below trace which
-  scenarios + rejections were realized.
+    scenarios/  — evaluate the module against a realistic declaration
+                  and assert the rendered config and module outputs.
+    rejections/ — declare an invalid config and prove that module
+                  evaluation throws.
 */
 {
-  pkgs,
   nixosModule,
+  pkgs,
   telegrafModule,
 }:
 
@@ -24,30 +18,30 @@ let
   inherit (pkgs) lib;
 
   scenarios = {
-    base = import ./scenarios/base.nix { inherit pkgs nixosModule; };
+    base = import ./scenarios/base.nix { inherit nixosModule pkgs; };
     telegraf = import ./scenarios/telegraf.nix {
-      inherit pkgs nixosModule telegrafModule;
+      inherit nixosModule pkgs telegrafModule;
     };
   };
 
   rejections = {
     probe-no-targets = import ./rejections/probe-no-targets.nix {
-      inherit pkgs nixosModule;
+      inherit nixosModule pkgs;
     };
     probe-family-mismatch = import ./rejections/probe-family-mismatch.nix {
-      inherit pkgs nixosModule;
+      inherit nixosModule pkgs;
     };
   };
 
-  symlinkLines =
-    group: prefix: drvs:
-    lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (n: drv: "ln -s ${drv} $out/${group}/${prefix}-${n}") drvs
-    );
+  toSymlinkCommands =
+    directory: prefix: checks:
+    lib.concatMapAttrsStringSep "\n" (
+      name: drv: "ln -s ${drv} $out/${directory}/${prefix}-${name}"
+    ) checks;
 in
 pkgs.runCommand "wanwatch-integration" { } ''
   set -eu
   mkdir -p $out/scenarios $out/rejections
-  ${symlinkLines "scenarios" "scenario" scenarios}
-  ${symlinkLines "rejections" "rejection" rejections}
+  ${toSymlinkCommands "scenarios" "scenario" scenarios}
+  ${toSymlinkCommands "rejections" "rejection" rejections}
 ''

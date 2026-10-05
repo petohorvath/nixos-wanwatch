@@ -1,20 +1,11 @@
 /*
-  Unit tests for `lib/types/primitives.nix` (exposed at
-  `wanwatch.types.{identifier,positiveInt,pctInt}`). Each type is
-  exercised via `lib.evalModules` against valid and invalid inputs.
-
-  Mirrors the nftzones convention `tests/unit/types/<name>.nix`.
+  Unit tests for `lib/types/primitives.nix`: each shared option type
+  is evaluated against valid and invalid values.
 */
-{ pkgs, libnet, ... }:
+{ helpers, wanwatch, ... }:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
-  inherit (wanwatch) types;
-
-  helpers = import ../helpers.nix { inherit pkgs; };
   inherit (helpers) evalType evalTypeFails;
+  inherit (wanwatch) types;
 in
 {
   # ===== identifier =====
@@ -50,9 +41,8 @@ in
   };
 
   testIdentifierRejectsUnderscore = {
-    # Stricter than libnet's interface-name check on purpose; matches
-    # nftzones' `primitives.identifier`. See lib/internal/primitives.nix
-    # `isValidName` for the rationale.
+    # Deliberately stricter than libnet's interface-name check; see
+    # `isValidName` in lib/internal/primitives.nix.
     expr = evalTypeFails types.identifier "home_uplink";
     expected = true;
   };
@@ -173,11 +163,8 @@ in
   };
 
   # ===== routingTableId =====
-  #
-  # Shares its range with `fwmark` by construction — the basics
-  # below cover that the type is wired and rejects the same edge
-  # cases. The lower bound of 1000 already buries the kernel-reserved
-  # ids {253, 254, 255}, so no `addCheck` is needed for those.
+  # Shares its range with `fwmark`; the 1000 floor already excludes
+  # the kernel-reserved ids 253, 254, and 255.
 
   testRoutingTableIdAcceptsLowerBound = {
     expr = evalType types.routingTableId 1000;
@@ -190,9 +177,8 @@ in
   };
 
   testRoutingTableIdRejectsKernelReservedMain = {
-    # `main` (254) is the kernel's normal table — writing into it
-    # would fight every other route-installer. Out of range here
-    # by virtue of the 1000 floor.
+    # Writing into `main` (254) would fight every other route
+    # installer.
     expr = evalTypeFails types.routingTableId 254;
     expected = true;
   };

@@ -1,16 +1,11 @@
 /*
-  failover-v4 — boot a single-node router with two v4-only WANs
-  (dummy0, dummy1), assert the daemon picks the highest-priority
-  member, induce carrier-down on the primary, and assert the
-  Selection (plus the default route in the group's table) switches
-  to the backup.
+  failover-v4 — a single-node router with two v4-only dummy WANs.
+  Carrier loss on the primary must switch the Selection and the
+  Group table's default route to the backup.
 
-  The daemon's probe targets here are unreachable on purpose —
-  dummy interfaces drop transmitted packets. PLAN §8's
-  cold-start carrier-only health (commit "Cold-start health
-  follows carrier alone") is what lets the test fire a Decision
-  without working ICMP. Long probe interval keeps the cooked
-  verdict from kicking in during the test window.
+  Dummy interfaces drop probes, so carrier-only cold-start health
+  (PLAN §8) drives the Decision; a long probe interval keeps cooked
+  verdicts out of the test window.
 */
 {
   pkgs,
@@ -131,8 +126,8 @@ pkgs.testers.runNixOSTest {
     #    carrier-up members). Cold-start health is carrier-only.
     observe.wait_active("home-uplink", "primary")
 
-    # 2. Verify the direct default route in the kernel, allowing networkd
-    # reconfiguration to settle after the link comes up.
+    # 2. Verify the direct default route in the kernel, allowing
+    #    networkd reconfiguration to settle after the link comes up.
     observe.wait_default_route("v4", "wan0", group="home-uplink")
 
     # 3. Induce carrier-down on the primary. ip link set <if>

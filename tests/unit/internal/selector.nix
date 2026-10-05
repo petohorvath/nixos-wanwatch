@@ -1,36 +1,32 @@
 /*
-  Unit tests for `lib/internal/selector.nix` (exposed as
-  `wanwatch.selector`). Mirrors the scenarios in
-  `daemon/internal/selector/primarybackup_test.go` —
-  cross-language drift is caught by manual diff between this file
-  and the Go test cases.
+  Unit tests for `lib/internal/selector.nix`, exposed as
+  `wanwatch.selector`. The scenarios mirror
+  `daemon/internal/selector/primarybackup_test.go`; compare the two
+  by hand to catch cross-language drift.
 */
-{ pkgs, libnet, ... }:
+{
+  pkgs,
+  wanwatch,
+  ...
+}:
 let
-  wanwatch = import ../../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
-  inherit (wanwatch) selector group;
+  inherit (pkgs) lib;
+  inherit (wanwatch) group selector;
 
-  # Build a one-line group input quickly. Members default to
-  # priority = (index + 1) so the order of the list is also the
-  # default priority order.
-  mkGroup =
+  # Members default to their 1-based list position as priority, so
+  # list order is priority order. Mark and table are arbitrary.
+  makeGroup =
     memberSpecs:
     group.make {
       name = "home";
-      members = pkgs.lib.imap1 (
-        i: m:
+      members = lib.imap1 (
+        position: memberSpec:
         {
-          priority = i;
+          priority = position;
           weight = 100;
         }
-        // m
+        // memberSpec
       ) memberSpecs;
-      # mark/table are required since the auto-allocator was
-      # removed; selector tests don't care about the specific
-      # values, just pick something in range.
       mark = 1000;
       table = 1000;
     };
@@ -39,14 +35,14 @@ in
   # ===== compute — empty members =====
 
   testEmptyMembersAllUnhealthy = {
-    expr = (selector.compute (mkGroup [ { wan = "only"; } ]) { only = false; }).active;
+    expr = (selector.compute (makeGroup [ { wan = "only"; } ]) { only = false; }).active;
     expected = null;
   };
 
   # ===== compute — single healthy =====
 
   testSingleHealthyMember = {
-    expr = (selector.compute (mkGroup [ { wan = "primary"; } ]) { primary = true; }).active;
+    expr = (selector.compute (makeGroup [ { wan = "primary"; } ]) { primary = true; }).active;
     expected = "primary";
   };
 
@@ -55,12 +51,12 @@ in
   testFailoverToBackup = {
     expr =
       let
-        g = mkGroup [
+        homeGroup = makeGroup [
           { wan = "primary"; }
           { wan = "backup"; }
         ];
       in
-      (selector.compute g {
+      (selector.compute homeGroup {
         primary = false;
         backup = true;
       }).active;
@@ -72,12 +68,12 @@ in
   testPrimaryWinsWhenBothHealthy = {
     expr =
       let
-        g = mkGroup [
+        homeGroup = makeGroup [
           { wan = "primary"; }
           { wan = "backup"; }
         ];
       in
-      (selector.compute g {
+      (selector.compute homeGroup {
         primary = true;
         backup = true;
       }).active;
@@ -89,12 +85,12 @@ in
   testAllUnhealthyYieldsNull = {
     expr =
       let
-        g = mkGroup [
+        homeGroup = makeGroup [
           { wan = "a"; }
           { wan = "b"; }
         ];
       in
-      (selector.compute g {
+      (selector.compute homeGroup {
         a = false;
         b = false;
       }).active;
@@ -106,9 +102,9 @@ in
   testPriorityRespectedOutOfListOrder = {
     expr =
       let
-        # Out-of-priority-order list — `mkGroup` would assign
-        # `priority = i+1`, so use explicit priorities.
-        g = group.make {
+        # `makeGroup` derives priority from list order, so set
+        # explicit priorities here.
+        homeGroup = group.make {
           name = "home";
           members = [
             {
@@ -128,7 +124,7 @@ in
           table = 1000;
         };
       in
-      (selector.compute g {
+      (selector.compute homeGroup {
         primary = true;
         middle = true;
         backup = true;
@@ -141,7 +137,7 @@ in
   testEqualPrioritiesBrokenByWanName = {
     expr =
       let
-        g = group.make {
+        homeGroup = group.make {
           name = "home";
           members = [
             {
@@ -161,7 +157,7 @@ in
           table = 1000;
         };
       in
-      (selector.compute g {
+      (selector.compute homeGroup {
         aaa = true;
         mmm = true;
         zzz = true;
@@ -172,28 +168,27 @@ in
   # ===== compute — missing health entry defaults to unhealthy =====
 
   testMissingHealthEntryUnhealthy = {
-    # `memberHealth` doesn't include `primary` — strategy treats
-    # it as `false`. Matches the Go default-zero behavior on a
-    # `map[string]bool` lookup.
+    # A WAN absent from `memberHealth` counts as unhealthy, matching
+    # Go's zero value for a `map[string]bool` lookup.
     expr =
       let
-        g = mkGroup [
+        homeGroup = makeGroup [
           { wan = "primary"; }
           { wan = "backup"; }
         ];
       in
-      (selector.compute g { backup = true; }).active;
+      (selector.compute homeGroup { backup = true; }).active;
     expected = "backup";
   };
 
   # ===== compute — weight is ignored =====
 
   testWeightIgnored = {
-    # Even though `backup` has 10× the weight of `primary`,
-    # primary-backup picks the lower-priority member.
+    # Despite `backup`'s far larger weight, primary-backup picks the
+    # lower-priority member.
     expr =
       let
-        g = group.make {
+        homeGroup = group.make {
           name = "home";
           members = [
             {
@@ -211,7 +206,7 @@ in
           table = 1000;
         };
       in
-      (selector.compute g {
+      (selector.compute homeGroup {
         primary = true;
         backup = true;
       }).active;
@@ -223,7 +218,7 @@ in
   testGroupNamePassedThrough = {
     expr =
       let
-        g = group.make {
+        homeGroup = group.make {
           name = "home-uplink";
           members = [
             {
@@ -235,7 +230,7 @@ in
           table = 1000;
         };
       in
-      (selector.compute g { primary = true; }).group;
+      (selector.compute homeGroup { primary = true; }).group;
     expected = "home-uplink";
   };
 
@@ -252,38 +247,36 @@ in
   };
 
   testStrategiesMatchGroupValidStrategies = {
-    # Drift catcher: every strategy `group.make` accepts must be
-    # implemented by `selector.compute`, and vice versa. Adding a
-    # strategy to one side and forgetting the other would let groups
-    # be constructed and then throw at first selector call —
-    # surface that mismatch at eval time instead.
+    # Every strategy `group.make` accepts must have a selector
+    # implementation, and vice versa; otherwise a valid group would
+    # throw on its first `selector.compute` call.
     expr =
       let
-        sortStr = pkgs.lib.sort (a: b: a < b);
+        sortStrings = lib.sort lib.lessThan;
       in
-      sortStr (builtins.attrNames selector.strategies) == sortStr group.validStrategies;
+      sortStrings (builtins.attrNames selector.strategies) == sortStrings group.validStrategies;
     expected = true;
   };
 
   # ===== compute — determinism =====
 
   testComputeDeterministic = {
-    # Same inputs → same outputs across many calls.
+    # Same inputs yield the same output across many calls.
     expr =
       let
-        g = mkGroup [
+        homeGroup = makeGroup [
           { wan = "a"; }
           { wan = "b"; }
           { wan = "c"; }
         ];
-        h = {
+        memberHealth = {
           a = true;
           b = true;
           c = true;
         };
-        results = builtins.genList (_: (selector.compute g h).active) 50;
+        results = builtins.genList (_: (selector.compute homeGroup memberHealth).active) 50;
       in
-      builtins.all (r: r == builtins.head results) results;
+      builtins.all (active: active == builtins.head results) results;
     expected = true;
   };
 }

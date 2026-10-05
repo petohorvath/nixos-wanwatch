@@ -1,30 +1,17 @@
 /*
-  Skeleton meta-test. Asserts that every value-type module in the
-  wanwatch lib exports the load-bearing API:
+  Skeleton meta-test: every value-type module (probe, member, wan,
+  group) exports the common `make` / `tryMake` / `toJSONValue` API.
+  The per-type suites test what these functions do; this suite catches
+  a new value type that omits one of them.
 
-    make / tryMake / toJSONValue
-
-  This is a guard rail, not a behaviour test. Per-type test files
-  (`probe.nix`, `wan.nix`, …) verify *what* each function does;
-  this file just verifies *that* every required function exists
-  and is callable. Catches the common "I added a new type and
-  forgot `toJSONValue`" regression at flake-check time.
-
-  Adding a new value type to `lib/` means adding one entry to
-  `valueTypes` below — that's the entire incremental cost.
-
-  Pure-function modules (selector, config) intentionally use a
-  *different* skeleton (compute / render / …) and are not
-  exercised here.
+  Pure-function modules (selector, config) use purpose-specific APIs
+  and are not checked here.
 */
-{ pkgs, libnet, ... }:
+{ pkgs, wanwatch, ... }:
 let
-  wanwatch = import ../../lib {
-    inherit (pkgs) lib;
-    inherit libnet;
-  };
+  inherit (pkgs) lib;
 
-  requiredCommonFunctions = [
+  requiredFunctionNames = [
     "make"
     "tryMake"
     "toJSONValue"
@@ -32,27 +19,25 @@ let
 
   valueTypes = {
     inherit (wanwatch)
-      probe
-      member
-      wan
       group
+      member
+      probe
+      wan
       ;
   };
 
-  mkPresenceTest = typeName: module: fnName: {
-    name = "testSkeleton_${typeName}_exports_${fnName}";
+  makePresenceTest = typeName: valueType: functionName: {
+    name = "testSkeleton_${typeName}_exports_${functionName}";
     value = {
-      expr = module ? ${fnName} && builtins.isFunction module.${fnName};
+      expr = valueType ? ${functionName} && builtins.isFunction valueType.${functionName};
       expected = true;
     };
   };
-
-  testsForType =
-    typeName: module:
-    builtins.listToAttrs (map (fnName: mkPresenceTest typeName module fnName) requiredCommonFunctions);
-
-  allSkeletonTests = builtins.foldl' (
-    acc: typeName: acc // testsForType typeName valueTypes.${typeName}
-  ) { } (builtins.attrNames valueTypes);
 in
-allSkeletonTests
+lib.pipe valueTypes [
+  (lib.mapAttrsToList (
+    typeName: valueType: map (makePresenceTest typeName valueType) requiredFunctionNames
+  ))
+  lib.flatten
+  builtins.listToAttrs
+]

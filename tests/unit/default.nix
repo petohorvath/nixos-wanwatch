@@ -1,29 +1,41 @@
 /*
-  Unit-test definitions for the wanwatch pure-Nix library.
+  Unit-test entry point for the wanwatch pure-Nix library.
 
-  Each `testFoo` attr is `{ expr; expected; }` and is consumed by
-  `runner.runTests` via `lib.runTests`. Per-module test files
-  (mirroring `lib/`'s layout) are merged in here as the library
-  grows — see PLAN.md §10 build order.
+  Builds the library and the shared helpers once, passes them to every
+  suite as one test context, and runs the merged `testFoo = { expr;
+  expected; }` attrsets through `runner.nix`.
 */
 { pkgs, libnet }:
 let
+  inherit (pkgs) lib;
+
   runner = import ./runner.nix { inherit pkgs; };
-  args = { inherit pkgs libnet; };
+
+  testContext = {
+    inherit libnet pkgs;
+    helpers = import ./helpers.nix { inherit pkgs; };
+    wanwatch = import ../../lib { inherit lib libnet; };
+  };
 in
-runner.runTests (
-  import ./internal/primitives.nix args
-  // import ./internal/probe.nix args
-  // import ./internal/member.nix args
-  // import ./internal/wan.nix args
-  // import ./internal/group.nix args
-  // import ./internal/selector.nix args
-  // import ./internal/config.nix args
-  // import ./types/primitives.nix args
-  // import ./types/probe.nix args
-  // import ./types/member.nix args
-  // import ./types/wan.nix args
-  // import ./types/group.nix args
-  // import ./composition.nix args
-  // import ./skeleton.nix args
-)
+lib.pipe
+  [
+    ./internal/primitives.nix
+    ./internal/probe.nix
+    ./internal/member.nix
+    ./internal/wan.nix
+    ./internal/group.nix
+    ./internal/selector.nix
+    ./internal/config.nix
+    ./types/primitives.nix
+    ./types/probe.nix
+    ./types/member.nix
+    ./types/wan.nix
+    ./types/group.nix
+    ./composition.nix
+    ./skeleton.nix
+  ]
+  [
+    (map (suitePath: import suitePath testContext))
+    lib.mergeAttrsList
+    runner.runTests
+  ]
