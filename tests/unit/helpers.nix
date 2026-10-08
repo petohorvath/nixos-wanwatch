@@ -1,11 +1,11 @@
 /*
-  Shared assertion helpers for the unit-test suites. `default.nix`
-  passes them to every suite as `helpers`.
+  Test helpers shared by the unit suites; `default.nix` passes them to
+  every suite as `helpers`. The `…Tests` helpers turn a case table into
+  nix-unit tests whose results list the misjudged cases, so a failure
+  names them.
 */
-{ pkgs }:
+{ lib }:
 let
-  inherit (pkgs) lib;
-
   /*
     Evaluate a NixOS option type against a value, so suites can test
     option types without a full NixOS evaluation.
@@ -14,10 +14,9 @@ let
     `value`: the definition to merge into an option of that type.
 
     Returns the merged value, including submodule defaults. Throws when
-    the type rejects the value; use `evalTypeFails` for negative cases.
+    the type rejects the value.
 
       evalType types.identifier "primary"  # => "primary"
-      evalType types.probe { targets.v4 = [ "1.1.1.1" ]; }
   */
   evalType =
     type: value:
@@ -32,48 +31,20 @@ let
         { config.value = value; }
       ];
     }).config.value;
-in
-{
-  /*
-    Test whether evaluating an expression throws, for assert-it-throws
-    cases.
-
-    `expr`: the expression to evaluate.
-
-    Returns true when `builtins.tryEval` reports a failure. Evaluation
-    is shallow; force nested values before passing them in.
-  */
-  evalThrows = expr: !(builtins.tryEval expr).success;
 
   /*
-    Test whether an aggregated error string carries an error kind.
-    `internal.primitives.formatErrors` renders errors as
-    `<context>: [<kind>] <message>; …`, so a literal `[kind]`
-    substring confirms that violation is present.
-
-    `kind`: the error kind, without brackets.
-    `message`: the error string to search.
-
-    Returns true when the message contains `[kind]`.
-  */
-  errorMatches = kind: message: lib.hasInfix "[${kind}]" message;
-
-  inherit evalType;
-
-  /*
-    Test whether an option type rejects a value.
+    Test whether an option type accepts a value. The result is forced
+    with `builtins.deepSeq` because `builtins.tryEval` is shallow:
+    element checks inside `listOf` would otherwise escape it.
 
     `type`: the option type under test.
     `value`: the definition to merge into an option of that type.
 
-    Returns true when `evalType type value` throws. The result is
-    forced with `builtins.deepSeq` because `builtins.tryEval` is
-    shallow: element checks inside `listOf` would otherwise escape it
-    and fail later, when the runner formats the result.
+    Returns true when `evalType type value` evaluates completely.
   */
-  evalTypeFails =
+  isAcceptedByType =
     type: value:
-    !(builtins.tryEval (
+    (builtins.tryEval (
       let
         result = evalType type value;
       in
@@ -81,21 +52,163 @@ in
     )).success;
 
   /*
-    Return the error of a failed `tryMake`, so suites can match error
-    kinds without unpacking the result.
+    List the error kinds of a `tryResult`. `formatErrors` renders each
+    error as `[<kind>] <message>`, so every bracketed camelCase word is
+    a kind, including those of nested errors that a wrapping kind such
+    as `wanInvalidProbe` forwards.
 
-    `valueType`: a value-type module such as `wanwatch.probe`.
-    `input`: the attrset passed to `valueType.tryMake`.
+    `result`: the `tryResult` returned by a `tryMake`.
 
-    Returns the error string, or null when construction succeeds.
+    Returns the kinds in report order, or `[ ]` on success.
 
-      tryError = helpers.tryError wanwatch.probe;
-      tryError { targets = { }; }  # => "probe.make: [probeNoTargets] …"
+      getErrorKinds (wanwatch.probe.tryMake { targets = { }; })
+      # => [ "probeNoTargets" ]
   */
-  tryError =
-    valueType: input:
+  getErrorKinds =
+    result:
+    if result.success then
+      [ ]
+    else
+      lib.pipe result.error [
+        (builtins.split "\\[([a-z][a-zA-Z]*)]")
+        (builtins.filter builtins.isList)
+        (map builtins.head)
+      ];
+
+  # Turns a case name such as `emptyBuckets` into `testEmptyBuckets`,
+  # the prefix nix-unit runs.
+  toTestName =
+    caseName:
+    "test" + lib.toUpper (builtins.substring 0 1 caseName) + builtins.substring 1 (-1) caseName;
+
+  /*
+    Build tests that a validator accepts every valid case and rejects
+    every invalid one. Each test lists the cases it misjudged and
+    expects none.
+
+    `isAccepted`: returns true when the validator accepts a case.
+    `isRejected`: returns true when the validator rejects a case as
+    intended.
+    `valid`, `invalid`: the cases; a missing side adds no test.
+
+    Returns `{ testAcceptsValid; testRejectsInvalid; }`.
+  */
+  makeCaseTests =
+    { isAccepted, isRejected }:
+    {
+      valid ? [ ],
+      invalid ? [ ],
+    }:
+    lib.optionalAttrs (valid != [ ]) {
+      testAcceptsValid = {
+        expr = builtins.filter (value: !isAccepted value) valid;
+        expected = [ ];
+      };
+    }
+    // lib.optionalAttrs (invalid != [ ]) {
+      testRejectsInvalid = {
+        expr = builtins.filter (value: !isRejected value) invalid;
+        expected = [ ];
+      };
+    };
+
+  /*
+    Build case tests for a predicate.
+
+    `predicate`: a function returning a Boolean.
+    `cases`: `{ valid; invalid; }`, such as a `fixtures.cases` table.
+
+    Returns the tests described for `makeCaseTests`.
+  */
+  predicateTests =
+    predicate:
+    makeCaseTests {
+      isAccepted = predicate;
+      isRejected = value: !predicate value;
+    };
+in
+{
+  inherit
+    evalType
+    getErrorKinds
+    isAcceptedByType
+    predicateTests
+    ;
+
+  /*
+    Evaluate a submodule type as `services.wanwatch` does, under an
+    attribute key, so a read-only `name` option takes the key.
+
+    `type`: a submodule option type, such as `types.wan`.
+    `input`: a value-type input; its `name`, if any, becomes the key
+    and the rest the definition.
+
+    Returns the merged submodule value.
+  */
+  evalSubmodule =
+    type: input:
     let
-      result = valueType.tryMake input;
+      key = input.name or "value";
     in
-    if result.success then null else result.error;
+    (evalType (lib.types.attrsOf type) { ${key} = removeAttrs input [ "name" ]; }).${key};
+
+  /*
+    Build case tests for an option type.
+
+    `type`: the option type under test.
+    `cases`: `{ valid; invalid; }`, such as a `fixtures.cases` table.
+
+    Returns the tests described for `makeCaseTests`.
+  */
+  typeTests = type: predicateTests (isAcceptedByType type);
+
+  /*
+    Build case tests for one field of a value type: `tryMake` accepts
+    each valid value and rejects each invalid one with exactly `kind`.
+
+    `tryMake`: the value type's `tryMake`.
+    `input`: a valid input whose field the cases replace.
+    `path`: the attribute path of the field, such as
+    `[ "hysteresis" "consecutiveUp" ]`.
+    `kind`: the error kind an invalid value must produce.
+    `cases`: `{ valid; invalid; }`, such as a `fixtures.cases` table.
+
+    Returns the tests described for `makeCaseTests`.
+  */
+  fieldTests =
+    {
+      tryMake,
+      input,
+      path,
+      kind,
+    }:
+    let
+      tryMakeWith = value: tryMake (lib.recursiveUpdate input (lib.setAttrByPath path value));
+    in
+    makeCaseTests {
+      isAccepted = value: (tryMakeWith value).success;
+      isRejected = value: getErrorKinds (tryMakeWith value) == [ kind ];
+    };
+
+  /*
+    Build one test per rejected input, each expecting `tryMake` to
+    report exactly the kind it is filed under.
+
+    `tryMake`: the value type's `tryMake`.
+    `inputsByKind`: `{ <kind> = { <caseName> = <input>; }; }`.
+
+    Returns `{ <kind> = { test<CaseName> = <test>; }; }`.
+  */
+  rejectionTests =
+    tryMake:
+    lib.mapAttrs (
+      kind:
+      lib.mapAttrs' (
+        caseName: input:
+        lib.nameValuePair (toTestName caseName) {
+          expr = getErrorKinds (tryMake input);
+          expected = [ kind ];
+        }
+      )
+    );
 }

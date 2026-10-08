@@ -1,202 +1,67 @@
 /*
-  Unit tests for `lib/internal/member.nix`, exposed as
-  `wanwatch.member`. Per AGENTS.md, each public function is
-  exercised on positive and negative inputs, each error kind is
-  triggered alone and in an aggregated case, and the §5.1 API
-  skeleton is covered.
+  Tests for `lib/internal/member.nix`, exposed as `wanwatch.member`.
+  `skeleton.nix` covers the `make` / `tryMake` / `toJSONValue`
+  contract.
 */
-{ helpers, wanwatch, ... }:
+{
+  fixtures,
+  helpers,
+  wanwatch,
+  ...
+}:
 let
-  inherit (helpers) errorMatches evalThrows;
+  inherit (fixtures) cases;
+  inherit (fixtures.inputs.member) minimal;
+  inherit (helpers) fieldTests getErrorKinds;
   inherit (wanwatch) member;
 
-  tryError = helpers.tryError member;
-
-  minimalInput = {
-    wan = "primary";
-  };
-
-  fullInput = {
-    wan = "backup";
-    weight = 50;
-    priority = 2;
-  };
+  memberField =
+    field: kind:
+    fieldTests {
+      inherit (member) tryMake;
+      inherit kind;
+      input = minimal;
+      path = [ field ];
+    };
 in
 {
-  # ===== Happy path — minimal input =====
-
-  testMemberMakeMinimalReturnsValue = {
-    expr = builtins.isAttrs (member.make minimalInput);
-    expected = true;
-  };
-
-  testMakeMinimalUsesDefaultWeight = {
-    expr = (member.make minimalInput).weight;
-    expected = 100;
-  };
-
-  testMakeMinimalUsesDefaultPriority = {
-    expr = (member.make minimalInput).priority;
-    expected = 1;
-  };
-
-  testMakeMinimalPreservesWan = {
-    expr = (member.make minimalInput).wan;
-    expected = "primary";
-  };
-
-  # ===== Happy path — full input =====
-
-  testMemberMakeFullPreservesAllFields = {
-    expr = {
-      inherit (member.make fullInput) priority wan weight;
+  defaults = {
+    testValues = {
+      expr = member.defaults;
+      expected = {
+        weight = 100;
+        priority = 1;
+      };
     };
-    expected = {
-      wan = "backup";
-      weight = 50;
-      priority = 2;
+
+    testFillMinimalInput = {
+      expr = member.make minimal;
+      expected = member.defaults // minimal;
     };
   };
 
-  # ===== Error: memberInvalidWan =====
-
-  testRejectsMissingWan = {
-    expr = errorMatches "memberInvalidWan" (tryError { });
-    expected = true;
+  fields = {
+    wan = memberField "wan" "memberInvalidWan" cases.identifiers;
+    weight = memberField "weight" "memberInvalidWeight" cases.positiveInts;
+    priority = memberField "priority" "memberInvalidPriority" cases.positiveInts;
   };
 
-  testRejectsEmptyWan = {
-    expr = errorMatches "memberInvalidWan" (tryError {
-      wan = "";
-    });
-    expected = true;
+  rejections = helpers.rejectionTests member.tryMake {
+    memberInvalidWan.missingWan = { };
   };
 
-  testRejectsLeadingDigitWan = {
-    expr = errorMatches "memberInvalidWan" (tryError {
-      wan = "1primary";
-    });
-    expected = true;
-  };
-
-  testRejectsSpaceInWan = {
-    expr = errorMatches "memberInvalidWan" (tryError {
-      wan = "two words";
-    });
-    expected = true;
-  };
-
-  testAcceptsHyphenatedWan = {
-    expr = (member.tryMake { wan = "home-uplink"; }).success;
-    expected = true;
-  };
-
-  # ===== Error: memberInvalidWeight =====
-
-  testRejectsZeroWeight = {
-    expr = errorMatches "memberInvalidWeight" (tryError (minimalInput // { weight = 0; }));
-    expected = true;
-  };
-
-  testRejectsNegativeWeight = {
-    expr = errorMatches "memberInvalidWeight" (tryError (minimalInput // { weight = -1; }));
-    expected = true;
-  };
-
-  testRejectsStringWeight = {
-    expr = errorMatches "memberInvalidWeight" (tryError (minimalInput // { weight = "high"; }));
-    expected = true;
-  };
-
-  # ===== Error: memberInvalidPriority =====
-
-  testRejectsZeroPriority = {
-    expr = errorMatches "memberInvalidPriority" (tryError (minimalInput // { priority = 0; }));
-    expected = true;
-  };
-
-  testRejectsNegativePriority = {
-    expr = errorMatches "memberInvalidPriority" (tryError (minimalInput // { priority = -5; }));
-    expected = true;
-  };
-
-  # ===== Multi-error aggregation =====
-
-  testMemberMultipleErrorsAggregated = {
-    expr =
-      let
-        error = tryError {
-          wan = "1bad";
-          weight = 0;
-          priority = -1;
-        };
-        kinds = [
-          "memberInvalidWan"
-          "memberInvalidWeight"
-          "memberInvalidPriority"
-        ];
-      in
-      builtins.all (kind: errorMatches kind error) kinds;
-    expected = true;
-  };
-
-  # ===== make throws =====
-
-  testMemberMakeThrowsOnInvalid = {
-    expr = evalThrows (member.make { wan = ""; });
-    expected = true;
-  };
-
-  # ===== tryMake contract =====
-
-  testMemberTryMakeOkOnValid = {
-    expr = (member.tryMake minimalInput).success;
-    expected = true;
-  };
-
-  testMemberTryMakeErrOnInvalid = {
-    expr = (member.tryMake { wan = ""; }).success;
-    expected = false;
-  };
-
-  testMemberTryMakeErrorNullOnSuccess = {
-    expr = (member.tryMake minimalInput).error;
-    expected = null;
-  };
-
-  testMemberTryMakeValueNullOnFailure = {
-    expr = (member.tryMake { wan = ""; }).value;
-    expected = null;
-  };
-
-  # ===== toJSONValue =====
-
-  testToJSONValueIncludesWan = {
-    expr = (member.toJSONValue (member.make minimalInput)).wan;
-    expected = "primary";
-  };
-
-  # ===== Defaults exposed =====
-
-  testMemberDefaultsExposed = {
-    expr = member.defaults;
-    expected = {
-      weight = 100;
-      priority = 1;
-    };
-  };
-
-  # ===== Round-trip =====
-
-  testMemberRoundTrip = {
-    # AGENTS.md (5): re-emitting the JSON shape after a second
-    # `make` must be byte-identical to the first.
-    expr =
-      let
-        firstJSON = member.toJSONValue (member.make minimalInput);
-        secondJSON = member.toJSONValue (member.make firstJSON);
-      in
-      firstJSON == secondJSON;
-    expected = true;
+  testReportsEveryViolation = {
+    expr = getErrorKinds (
+      member.tryMake {
+        wan = "1bad";
+        weight = 0;
+        priority = -1;
+      }
+    );
+    expected = [
+      "memberInvalidWan"
+      "memberInvalidWeight"
+      "memberInvalidPriority"
+    ];
   };
 }

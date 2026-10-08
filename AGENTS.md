@@ -64,7 +64,7 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 
 | Check | Covers |
 |---|---|
-| `unit` | Pure-Nix library tests, including the value-type skeleton meta-test |
+| `unit` | Pure-Nix library tests, including the value-type skeleton tests |
 | `integration` | Module evaluation, rendered config, Telegraf wiring, and expected rejections |
 | `daemon` | All Go tests in a hermetic, network-disabled build |
 | `coverage` | Per-package Go coverage floors defined in `flake.nix` |
@@ -72,7 +72,10 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 | `package` | The production daemon derivation |
 | `vm-<scenario>`, `vm-unstable-<scenario>` | NixOS VM scenarios on stable and unstable nixpkgs (Linux with KVM) |
 
+The `unit` and `integration` checks run the flake's `tests` output with [nix-unit](https://github.com/nix-community/nix-unit) in the sandbox. For per-test results, run nix-unit directly; `nix-unit --flake .#tests.unit` narrows the run.
+
 ```sh
+nix develop --command nix-unit --flake .#tests
 nix build .#checks.x86_64-linux.unit
 nix build .#checks.x86_64-linux.vm-smoke
 cd daemon && go test -race -timeout 120s ./...
@@ -85,6 +88,8 @@ CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, t
 ## Conventions
 
 Every Nix value type (`wan`, `probe`, `group`, `member`) implements the `make`, `tryMake`, and `toJSONValue` skeleton that `tests/unit/skeleton.nix` asserts. Pure-function modules such as `selector` and `config` use purpose-specific APIs.
+
+Nix tests are nix-unit attrsets of `testFoo = { expr; expected; }` (or `expectedError`), nested by module. Shared inputs and the valid and invalid cases of each value domain live in `tests/unit/fixtures.nix`; reuse a case table wherever an option type and a validator check the same domain, so the two layers stay in agreement.
 
 Nix code uses current APIs and explicit dependencies: `inherit (x) y` rather than file-scope `with`, `lib.types.oneOf` rather than `lib.types.either`, and never the removed `lib.types.uniq`. Every NixOS option has a type, a description, and a default or example.
 

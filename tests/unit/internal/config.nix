@@ -1,82 +1,132 @@
 /*
-  Unit tests for `lib/internal/config.nix`, the daemon-config JSON
-  renderer: global defaults and overrides, cross-group duplicate
-  mark/table detection in `assertUniqueMarksAndTables`, the rendered shape,
-  and the `toJSON` string form.
+  Tests for `lib/internal/config.nix`, the daemon-config renderer:
+  global defaults and overrides, cross-Group mark and table checks, the
+  rendered shape, and the JSON string form.
 */
 {
-  helpers,
-  pkgs,
+  fixtures,
+  lib,
   wanwatch,
   ...
 }:
 let
-  inherit (pkgs) lib;
-  inherit (helpers) evalThrows;
   inherit (wanwatch)
     config
     group
     wan
     ;
 
-  # A one-member group; `overrides` sets its mark and table.
-  makeGroup =
-    name: overrides:
+  # One-member Groups keyed by name, each with its `[ mark table ]`.
+  makeGroups = lib.mapAttrs (
+    name: markAndTable:
     group.make (
-      {
+      fixtures.inputs.group.minimal
+      // {
         inherit name;
-        members = [
-          {
-            wan = "primary";
-            priority = 1;
-          }
+        mark = builtins.elemAt markAndTable 0;
+        table = builtins.elemAt markAndTable 1;
+      }
+    )
+  );
+
+  distinctGroups = makeGroups {
+    home = [
+      1000
+      1000
+    ];
+    work = [
+      1001
+      1001
+    ];
+  };
+
+  wans = {
+    primary = wan.make fixtures.inputs.wan.minimal;
+    vpn = wan.make fixtures.inputs.wan.full;
+  };
+
+  renderInput = {
+    global.logLevel = "warn";
+    inherit wans;
+    groups = distinctGroups;
+  };
+
+  # The deprecated alias must behave like the new name.
+  uniquenessChecks = {
+    inherit (config) assertUniqueMarksAndTables resolveAllocations;
+  };
+
+  makeUniquenessTests = _: assertUnique: {
+    testEmptyInput = {
+      expr = assertUnique { };
+      expected = { };
+    };
+
+    # Marks and tables are separate number spaces, so each Group may
+    # use one number for both.
+    testReturnsGroupsUnchanged = {
+      expr = assertUnique distinctGroups;
+      expected = distinctGroups;
+    };
+
+    testRejectsSharedMark = {
+      expr = assertUnique (makeGroups {
+        a = [
+          1500
+          1500
         ];
-        mark = 1000;
-        table = 1000;
-      }
-      // overrides
-    );
+        b = [
+          1500
+          1600
+        ];
+      });
+      expectedError = {
+        type = "ThrownError";
+        msg = "mark 1500 is shared by groups \\['a', 'b']";
+      };
+    };
 
-  primaryWan = wan.make {
-    name = "primary";
-    interface = "eth0";
-    probe.targets.v4 = [ "1.1.1.1" ];
-  };
+    testRejectsSharedTable = {
+      expr = assertUnique (makeGroups {
+        a = [
+          1500
+          1500
+        ];
+        b = [
+          1600
+          1500
+        ];
+      });
+      expectedError = {
+        type = "ThrownError";
+        msg = "table 1500 is shared by groups \\['a', 'b']";
+      };
+    };
 
-  backupWan = wan.make {
-    name = "backup";
-    interface = "wwan0";
-    probe.targets.v4 = [ "8.8.8.8" ];
-  };
-
-  homeGroup = group.make {
-    name = "home";
-    members = [
-      {
-        wan = "primary";
-        priority = 1;
-      }
-    ];
-    mark = 1000;
-    table = 1000;
-  };
-
-  workGroup = group.make {
-    name = "work";
-    members = [
-      {
-        wan = "backup";
-        priority = 1;
-      }
-    ];
-    mark = 1001;
-    table = 1001;
+    testNamesEveryGroupSharingAMark = {
+      expr = assertUnique (makeGroups {
+        a = [
+          1500
+          1500
+        ];
+        b = [
+          1500
+          1600
+        ];
+        c = [
+          1500
+          1700
+        ];
+      });
+      expectedError = {
+        type = "ThrownError";
+        msg = "mark 1500 is shared by groups \\['a', 'b', 'c']";
+      };
+    };
   };
 in
 {
-  # ===== defaultGlobal =====
-
-  testDefaultGlobalShape = {
+  testDefaultGlobal = {
     expr = config.defaultGlobal;
     expected = {
       statePath = "/run/wanwatch/state.json";
@@ -87,289 +137,78 @@ in
     };
   };
 
-  # ===== schemaVersion =====
-
-  testSchemaVersionIsInt = {
-    expr = builtins.isInt config.schemaVersion;
-    expected = true;
-  };
-
-  testSchemaVersionStartsAtOne = {
+  testSchemaVersion = {
     expr = config.schemaVersion;
     expected = 1;
   };
 
-  # ===== assertUniqueMarksAndTables — pass-through =====
+  uniqueness = lib.mapAttrs makeUniquenessTests uniquenessChecks;
 
-  testUniqueMarksAndTablesEmptyInput = {
-    expr = config.assertUniqueMarksAndTables { };
-    expected = { };
-  };
-
-  testUniqueMarksAndTablesReturnsGroupsUnchanged = {
-    # The check validates without transforming: distinct
-    # marks and tables echo the input back untouched.
-    expr =
-      let
-        input = {
-          home = homeGroup;
-          work = workGroup;
-        };
-      in
-      config.assertUniqueMarksAndTables input == input;
-    expected = true;
-  };
-
-  testUniqueMarksAndTablesPreservesExplicitValues = {
-    expr =
-      let
-        resolved = config.assertUniqueMarksAndTables {
-          home = homeGroup;
-          work = workGroup;
-        };
-      in
-      {
-        homeMark = resolved.home.mark;
-        homeTable = resolved.home.table;
-        workMark = resolved.work.mark;
-        workTable = resolved.work.table;
+  render = {
+    testEmptyInput = {
+      expr = config.render { };
+      expected = {
+        schema = config.schemaVersion;
+        global = config.defaultGlobal;
+        wans = { };
+        groups = { };
       };
-    expected = {
-      homeMark = 1000;
-      homeTable = 1000;
-      workMark = 1001;
-      workTable = 1001;
     };
-  };
 
-  testUniqueMarksAndTablesAllowsMarkEqualToTable = {
-    # Marks and tables are independent number spaces, so duplicates
-    # are checked within each field, not across them.
-    expr =
-      let
-        sameNumbers = makeGroup "sameNumbers" {
-          mark = 1500;
-          table = 1500;
-        };
-      in
-      (config.assertUniqueMarksAndTables { inherit sameNumbers; }).sameNumbers.mark == 1500;
-    expected = true;
-  };
-
-  # ===== assertUniqueMarksAndTables — duplicate detection =====
-
-  testUniqueMarksAndTablesThrowsOnDuplicateMark = {
-    expr =
-      evalThrows
-        (config.assertUniqueMarksAndTables {
-          a = makeGroup "a" {
-            mark = 1500;
-            table = 1500;
-          };
-          b = makeGroup "b" {
-            mark = 1500; # collides with a
-            table = 1600;
-          };
-        }).a.mark;
-    expected = true;
-  };
-
-  testUniqueMarksAndTablesThrowsOnDuplicateTable = {
-    expr =
-      evalThrows
-        (config.assertUniqueMarksAndTables {
-          a = makeGroup "a" {
-            mark = 1500;
-            table = 1500;
-          };
-          b = makeGroup "b" {
-            mark = 1600;
-            table = 1500; # collides with a
-          };
-        }).a.table;
-    expected = true;
-  };
-
-  testUniqueMarksAndTablesThreeWayDuplicateMark = {
-    expr =
-      evalThrows
-        (config.assertUniqueMarksAndTables {
-          a = makeGroup "a" {
-            mark = 1500;
-            table = 1500;
-          };
-          b = makeGroup "b" {
-            mark = 1500;
-            table = 1600;
-          };
-          c = makeGroup "c" {
-            mark = 1500;
-            table = 1700;
-          };
-        }).a.mark;
-    expected = true;
-  };
-
-  # ===== resolveAllocations — deprecated alias =====
-
-  testResolveAllocationsAliasReturnsGroupsUnchanged = {
-    expr =
-      let
-        input = {
-          home = homeGroup;
-          work = workGroup;
-        };
-      in
-      config.resolveAllocations input == input;
-    expected = true;
-  };
-
-  testResolveAllocationsAliasThrowsOnDuplicateMark = {
-    expr =
-      evalThrows
-        (config.resolveAllocations {
-          a = makeGroup "a" {
-            mark = 1500;
-            table = 1500;
-          };
-          b = makeGroup "b" {
-            mark = 1500;
-            table = 1600;
-          };
-        }).a.mark;
-    expected = true;
-  };
-
-  # ===== render — shape =====
-
-  testRenderHasSchema = {
-    expr = (config.render { }).schema;
-    expected = 1;
-  };
-
-  testRenderEmptyGlobalUsesDefaults = {
-    expr = (config.render { }).global;
-    expected = config.defaultGlobal;
-  };
-
-  testRenderGlobalOverridesDefaults = {
-    expr =
-      (config.render {
-        global = {
-          logLevel = "debug";
-          statePath = "/var/run/wanwatch/state.json";
-          hookTimeoutMs = 9000;
-        };
-      }).global;
-    expected = {
-      statePath = "/var/run/wanwatch/state.json";
-      hooksDir = "/etc/wanwatch/hooks";
-      metricsSocket = "/run/wanwatch/metrics.sock";
-      logLevel = "debug";
-      hookTimeoutMs = 9000;
-    };
-  };
-
-  testRenderEmbedsWans = {
-    expr =
-      let
-        rendered = config.render {
-          wans = {
-            primary = primaryWan;
-            backup = backupWan;
-          };
-        };
-      in
-      builtins.attrNames rendered.wans;
-    expected = [
-      "backup"
-      "primary"
-    ];
-  };
-
-  testRenderWansAreSerializedObjects = {
-    expr =
-      let
-        rendered = config.render {
-          wans = {
-            primary = primaryWan;
-          };
-        };
-      in
-      rendered.wans.primary.interface;
-    expected = "eth0";
-  };
-
-  testRenderGroupsCarryUserMarkAndTable = {
-    expr =
-      let
-        rendered = config.render {
-          groups = {
-            home = homeGroup;
-          };
-        };
-      in
-      {
-        inherit (rendered.groups.home) mark table;
-      };
-    expected = {
-      mark = 1000;
-      table = 1000;
-    };
-  };
-
-  testRenderEmptyInputs = {
-    expr = config.render { };
-    expected = {
-      schema = 1;
-      global = config.defaultGlobal;
-      wans = { };
-      groups = { };
-    };
-  };
-
-  # ===== toJSON — string output =====
-
-  testToJSONReturnsString = {
-    expr = builtins.isString (config.toJSON { });
-    expected = true;
-  };
-
-  testToJSONIncludesSchema = {
-    expr = lib.hasInfix "\"schema\":1" (config.toJSON { });
-    expected = true;
-  };
-
-  testToJSONIncludesGlobal = {
-    expr = lib.hasInfix "\"global\":{" (config.toJSON { });
-    expected = true;
-  };
-
-  testToJSONRoundTrip = {
-    expr =
-      let
-        input = {
+    testMergesGlobalOverDefaults = {
+      expr =
+        (config.render {
           global = {
-            logLevel = "warn";
+            logLevel = "debug";
+            hookTimeoutMs = 9000;
           };
-          wans = {
-            primary = primaryWan;
-          };
-          groups = {
-            home = homeGroup;
-          };
+        }).global;
+      expected = config.defaultGlobal // {
+        logLevel = "debug";
+        hookTimeoutMs = 9000;
+      };
+    };
+
+    testSerializesWansAndGroups = {
+      expr = removeAttrs (config.render renderInput) [ "global" ];
+      expected = {
+        schema = config.schemaVersion;
+        wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
+        groups = builtins.mapAttrs (_: group.toJSONValue) distinctGroups;
+      };
+    };
+
+    testRejectsSharedMark = {
+      expr = config.render {
+        groups = makeGroups {
+          a = [
+            1500
+            1500
+          ];
+          b = [
+            1500
+            1600
+          ];
         };
-        rendered = config.render input;
-        roundTripped = builtins.fromJSON (config.toJSON input);
-      in
-      roundTripped == rendered;
-    expected = true;
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = "mark 1500 is shared";
+      };
+    };
   };
 
-  # ===== toJSONValue alias =====
+  toJSON = {
+    testParsesBackToRender = {
+      expr = builtins.fromJSON (config.toJSON renderInput);
+      expected = config.render renderInput;
+    };
+  };
 
-  testToJSONValueIsRender = {
-    expr = config.toJSONValue { } == config.render { };
-    expected = true;
+  toJSONValue = {
+    testIsRender = {
+      expr = config.toJSONValue renderInput;
+      expected = config.render renderInput;
+    };
   };
 }

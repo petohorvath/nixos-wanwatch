@@ -1,104 +1,47 @@
 /*
-  Unit tests for `lib/types/wan.nix`: per-field validation and the
-  submodule's defaults. `tests/unit/internal/wan.nix` covers
-  cross-field validation in `wan.make` / `wan.tryMake`.
+  Tests for `lib/types/wan.nix`: per-field validation. `skeleton.nix`
+  checks that the `wan` submodule evaluates inputs to what `wan.make`
+  builds; `internal/wan.nix` covers the checks option types cannot
+  express.
 */
-{ helpers, wanwatch, ... }:
+{
+  fixtures,
+  helpers,
+  wanwatch,
+  ...
+}:
 let
-  inherit (helpers) evalType evalTypeFails;
+  inherit (fixtures) cases;
+  inherit (helpers) evalSubmodule typeTests;
   inherit (wanwatch) types;
 
-  # `name` is read-only and defaults to the attribute key; `evalType`
-  # declares the option as `value`, so the submodule sees "value".
-  baseConfig = {
-    interface = "eth0";
-    probe.targets.v4 = [ "1.1.1.1" ];
-  };
+  # `wans.<name>` supplies the name, so inputs leave it out.
+  minimal = removeAttrs fixtures.inputs.wan.minimal [ "name" ];
 in
 {
-  # ===== leaf types =====
+  wanName = typeTests types.wanName cases.identifiers;
+  wanInterface = typeTests types.wanInterface cases.interfaceNames;
 
-  testWanNameAcceptsIdentifier = {
-    expr = evalType types.wanName "primary";
-    expected = "primary";
-  };
-
-  testWanNameRejectsLeadingDigit = {
-    expr = evalTypeFails types.wanName "1bad";
-    expected = true;
-  };
-
-  testWanInterfaceAcceptsEth0 = {
-    expr = evalType types.wanInterface "eth0";
-    expected = "eth0";
-  };
-
-  testWanInterfaceRejectsTooLong = {
-    expr = evalTypeFails types.wanInterface "this-name-is-too-long";
-    expected = true;
-  };
-
-  testWanInterfaceRejectsSpace = {
-    expr = evalTypeFails types.wanInterface "eth 0";
-    expected = true;
-  };
-
-  # ===== wan — top-level submodule =====
-
-  testWanMinimalShape = {
-    # types/probe.nix covers the probe defaults exhaustively; this
-    # checks the outer fields and that the probe was filled in.
-    expr =
-      let
-        wan = evalType types.wan baseConfig;
-      in
-      {
-        inherit (wan) interface name pointToPoint;
-        probeMethod = wan.probe.method;
-        probeTargets = wan.probe.targets;
-      };
-    expected = {
-      name = "value"; # derived from `options.value` in `evalType`
-      interface = "eth0";
-      pointToPoint = false;
-      probeMethod = "icmp";
-      probeTargets = {
-        v4 = [ "1.1.1.1" ];
-        v6 = [ ];
-      };
+  wan = {
+    testNameTakesAttributeKey = {
+      expr = (evalSubmodule types.wan (minimal // { name = "uplink"; })).name;
+      expected = "uplink";
     };
+  }
+  // typeTests types.wan {
+    invalid = [
+      (removeAttrs minimal [ "interface" ])
+      (minimal // { interface = "eth 0"; })
+      (minimal // { pointToPoint = "yes"; })
+      (
+        minimal
+        // {
+          probe = minimal.probe // {
+            method = "tcp";
+          };
+        }
+      )
+    ];
   };
 
-  testWanPointToPointAcceptsTrue = {
-    expr = (evalType types.wan (baseConfig // { pointToPoint = true; })).pointToPoint;
-    expected = true;
-  };
-
-  testWanPointToPointDefaultsFalse = {
-    expr = (evalType types.wan baseConfig).pointToPoint;
-    expected = false;
-  };
-
-  testWanRejectsBadInterface = {
-    expr = evalTypeFails types.wan (baseConfig // { interface = "eth 0"; });
-    expected = true;
-  };
-
-  testWanRejectsNonBoolPointToPoint = {
-    expr = evalTypeFails types.wan (baseConfig // { pointToPoint = "yes"; });
-    expected = true;
-  };
-
-  testWanRejectsBadProbe = {
-    expr = evalTypeFails types.wan (
-      baseConfig
-      // {
-        probe = {
-          targets.v4 = [ "1.1.1.1" ];
-          method = "tcp";
-        };
-      }
-    );
-    expected = true;
-  };
 }
