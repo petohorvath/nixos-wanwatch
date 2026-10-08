@@ -12,7 +12,7 @@ import (
 
 // FwmarkRule describes "lookup `Table` when the packet carries
 // `Mark` in its fwmark slot." Installed once per (group, family)
-// at daemon start — see PLAN §6.1 step 2.
+// at daemon start — see docs/nftzones-integration.md step 2.
 type FwmarkRule struct {
 	Family probe.Family
 	Mark   int

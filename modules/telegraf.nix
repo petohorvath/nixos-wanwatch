@@ -1,6 +1,6 @@
 /*
   `services.wanwatch.telegraf`: optional Telegraf scraping of the
-  daemon's metrics (PLAN §7.3). Adds a Prometheus input that reads
+  daemon's metrics (docs/metrics.md). Adds a Prometheus input that reads
   `wanwatch_*` metrics from the daemon's Unix socket and adds the
   `telegraf` user to the daemon's group so it can open the socket.
   Import it alongside the main wanwatch module:

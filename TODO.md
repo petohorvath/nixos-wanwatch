@@ -3,7 +3,7 @@
 Deferred work — items intentionally out of scope for the current release,
 plus accumulated cleanups. Closed items move to [`CHANGELOG.md`](./CHANGELOG.md);
 design changes large enough to warrant authoritative discussion land in
-[`PLAN.md`](./PLAN.md) first.
+an ADR under [`docs/adr/`](./docs/adr/) first.
 
 Status legend:
 
@@ -20,7 +20,7 @@ Status legend:
 ### `wanwatchctl` status CLI
 
 Small CLI for status queries: `wanwatchctl status`, `wanwatchctl group <name>`.
-Reads `state.json`; no privileged ops. PLAN §12 OQ #8.
+Reads `state.json`; no privileged ops.
 
 ### Migrate `wanwatch.types.{fwmark,routingTableId}` to nix-libnet
 
@@ -47,17 +47,17 @@ the apply converges). Useful for "about to switch" notifications or
 staging work.
 
 Pre-hooks stay notification-only: a pre-hook that *gates* or *blocks*
-the apply would make hooks part of the apply transaction, which PLAN
-§5.5 explicitly rules out — promoting them would need a PLAN change
-first. `daemon/cmd/wanwatchd/daemon.go` (notifyHooks / publishDecision),
-PLAN §5.5 env-var contract.
+the apply would make hooks part of the apply transaction, which
+[ADR-0009](./docs/adr/0009-publish-after-apply-converges.md) rules
+out — promoting them would need a new ADR first. `daemon/cmd/wanwatchd/daemon.go` (notifyHooks / publishDecision),
+docs/specs/daemon-state.md env-var contract.
 
 ### Stale-route policy on family-set shrink
 
 When a Decision moves to a WAN that serves fewer families than the
 previous active (e.g. dual-stack → v4-only), the group's table
 retains the old v6 route untouched. Decide: clear vs retain.
-PLAN §6.1 (line 641); add a `services.wanwatch.global.staleRoutes`
+docs/nftzones-integration.md; add a `services.wanwatch.global.staleRoutes`
 enum once policy lands.
 
 ### Low-latency state subscription
@@ -65,14 +65,14 @@ enum once policy lands.
 State readers polling `state.json` at >1 Hz miss short-lived
 states. Add a Unix-socket event stream consumers can subscribe to
 for push notifications. Keep `state.json` as the snapshot of
-record. PLAN §12 OQ #6.
+record.
 
 ### state.json schema-evolution discipline
 
 Write `docs/specs/state-evolution.md` codifying the version-bump
 rules (now applied informally — see `daemon-state.md`'s revised
 "Compatibility policy" section). Will need refining once schema 3
-lands. PLAN §12 OQ #1.
+lands. the TODO.md schema-evolution item.
 
 ### Re-add `wanwatch_probe_samples_total`
 
@@ -106,7 +106,7 @@ v1 produces one Selection per group; both families apply to the
 same active WAN. v2 splits — v4 can route via primary while v6
 routes via backup. State-space doubles per group with two families;
 Decision metric labels gain a `family` dimension.
-PLAN §12 OQ #4.
+See [ADR-0002](./docs/adr/0002-one-selection-per-group.md).
 
 ### `load-balance` strategy + multipath nexthops
 
@@ -114,7 +114,7 @@ Multi-active routing across healthy members. Requires
 `apply.WriteDefault` to emit MultiPath nexthops and the metrics
 catalog to allow multiple `1`s for `wanwatch_group_active{group,wan}`.
 The `weight` field on Member is reserved for this.
-`docs/selector.md:18,73`, `docs/specs/failover.md:85`,
+`docs/selector.md`, `docs/specs/failover.md` (single-active invariant),
 `daemon/internal/selector/primarybackup.go:10`.
 
 ### Multi-state Health: degraded / unknown
@@ -139,13 +139,12 @@ inputs.
 
 Prefer the higher-bandwidth WAN even at slightly higher latency.
 Out of scope for v1's pure-health-based selection.
-PLAN §12 OQ #9.
 
 ### SIGHUP hot-reload
 
 Currently restart-only. Hot-reload adds complexity: re-allocating
-marks/tables would force kernel-state reconciliation. PLAN §12 OQ
-#7 marks it deliberately deferred. Lives in v2 because the right
+marks/tables would force kernel-state reconciliation.
+[ADR-0006](./docs/adr/0006-restart-only-reconfiguration.md) defers it. Lives in v2 because the right
 shape changes Selection / Apply semantics, not because the
 implementation is mechanical.
 
@@ -219,7 +218,7 @@ Fix candidates depending on which leg:
 
 ### Unprivileged-ICMP path
 
-PLAN §8 originally promised `SOCK_DGRAM+IPPROTO_ICMP` as the
+The v1 design originally promised `SOCK_DGRAM+IPPROTO_ICMP` as the
 preferred probe socket, with `CAP_NET_RAW` dropped at runtime —
 the daemon (`daemon/internal/probe/pinger.go:209`) ships
 raw-socket only.

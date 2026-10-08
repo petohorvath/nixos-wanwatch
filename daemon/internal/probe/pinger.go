@@ -30,7 +30,7 @@ type pingConn interface {
 type Pinger struct {
 	Wan        string
 	Family     Family
-	Interface  string // bound via SO_BINDTODEVICE per PLAN §8
+	Interface  string // bound via SO_BINDTODEVICE per docs/specs/probe-algorithm.md
 	Targets    []string
 	Ident      uint16
 	Interval   time.Duration
@@ -199,7 +199,7 @@ func (p *Pinger) resolveTargets() (map[string]net.Addr, error) {
 
 // dialICMP opens a raw ICMP socket for `family` and binds it to
 // `iface` via SO_BINDTODEVICE. Requires CAP_NET_RAW — the NixOS
-// module hands the daemon that capability per PLAN §8.
+// module hands the daemon that capability per docs/specs/probe-algorithm.md.
 //
 // We use net.ListenPacket rather than x/net/icmp because we own
 // the wire format (EchoRequestBytes / ParseEchoReply in icmp.go)

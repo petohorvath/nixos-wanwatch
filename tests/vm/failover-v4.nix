@@ -4,7 +4,7 @@
   Group table's default route to the backup.
 
   Dummy interfaces drop probes, so carrier-only cold-start health
-  (PLAN §8) drives the Decision; a long probe interval keeps cooked
+  (docs/specs/failover.md) drives the Decision; a long probe interval keeps cooked
   verdicts out of the test window.
 */
 {
@@ -71,7 +71,7 @@ pkgs.testers.runNixOSTest {
               targets.v4 = [ "192.0.2.1" ];
               # Stretch the probe loop so cooked verdicts don't
               # land during the test — carrier alone drives the
-              # Decision under PLAN §8 cold-start.
+              # Decision under docs/specs/failover.md cold-start.
               intervalMs = 600000;
               timeoutMs = 30000;
               hysteresis = {

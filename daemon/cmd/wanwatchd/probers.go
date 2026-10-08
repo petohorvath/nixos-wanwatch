@@ -18,7 +18,7 @@ import (
 //
 // Idents are allocated once up front so a hash collision between
 // (WAN, family) keys is surfaced at startup rather than as a silent
-// reply-misroute at runtime (PLAN §8).
+// reply-misroute at runtime (docs/specs/probe-algorithm.md).
 //
 // A pinger that exits with anything other than context cancellation
 // calls `cancel` with the cause, taking the whole daemon down so

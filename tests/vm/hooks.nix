@@ -1,6 +1,6 @@
 /*
   hooks — trigger a carrier-driven switch Decision and verify that a
-  capturing Hook receives the PLAN §5.5 WANWATCH_* environment. Both
+  capturing Hook receives the docs/specs/daemon-state.md WANWATCH_* environment. Both
   WANs are pointToPoint, so the gateway variables are empty.
 */
 {

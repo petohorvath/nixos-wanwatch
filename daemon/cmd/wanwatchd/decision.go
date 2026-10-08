@@ -28,7 +28,7 @@ func evaluateThresholds(prev bool, stats probe.FamilyStats, t config.Thresholds)
 	return false
 }
 
-// FamilyHealthPolicy values per PLAN §5.1. Strings (not an enum)
+// FamilyHealthPolicy values per docs/specs/daemon-config.md. Strings (not an enum)
 // because they're a config wire-format contract; the Nix side
 // emits the same literals into the daemon-config JSON.
 const (
@@ -43,7 +43,7 @@ const (
 //   - familyPolicyAny — at least one probed family must be healthy
 //
 // A family that hasn't received its first ProbeResult yet (`cooked
-// = false`) is treated as healthy — PLAN §8 cold-start says
+// = false`) is treated as healthy — docs/specs/failover.md cold-start says
 // "health is unknown but carrier is at least known", so we trust
 // carrier alone until the first sample arrives.
 func combineFamilies(families map[probe.Family]*familyState, policy string) bool {

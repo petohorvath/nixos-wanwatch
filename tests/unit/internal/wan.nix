@@ -1,6 +1,6 @@
 /*
   Unit tests for `lib/internal/wan.nix`, exposed as `wanwatch.wan`.
-  Per PLAN.md §9.1, each public function is exercised on positive and
+  Per AGENTS.md, each public function is exercised on positive and
   negative inputs, each error kind is triggered alone and in an
   aggregated case, and the §5.1 API skeleton is covered. A WAN's
   families derive from its probe targets.
@@ -284,7 +284,7 @@ in
   # ===== Round-trip =====
 
   testWanRoundTrip = {
-    # PLAN §9.1 (5): re-emitting the JSON shape after a second
+    # AGENTS.md (5): re-emitting the JSON shape after a second
     # `make` must be byte-identical to the first, nested probe
     # included.
     expr =

@@ -118,7 +118,7 @@ let
         description = ''
           Addresses to probe, by family. At least one of `v4` and `v6`
           must be non-empty; the WAN serves the families listed here
-          (PLAN §5.4).
+          (docs/adr/0004-runtime-gateway-discovery.md).
         '';
       };
       intervalMs = mkOption {
@@ -161,7 +161,7 @@ let
         description = ''
           How per-family Health combines into WAN Health. With `"all"`
           (the default), the WAN is healthy when every configured family
-          is healthy; with `"any"`, when at least one is (PLAN §5.4).
+          is healthy; with `"any"`, when at least one is (docs/adr/0005-family-health-policy-defaults-to-all.md).
         '';
       };
     };

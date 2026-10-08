@@ -6,7 +6,7 @@
 // either the old or the new file, never a partial one.
 //
 // Hook execution is best-effort: failures are logged but don't
-// block the apply transaction. PLAN §5.5 fixes the env-var contract;
+// block the apply transaction. docs/specs/daemon-state.md fixes the env-var contract;
 // `hooks.go` implements the dispatcher.
 package state
 

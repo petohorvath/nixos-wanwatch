@@ -272,7 +272,7 @@
           };
 
           /*
-            Per-package coverage floors (PLAN §9.2); `cmd/wanwatchd` is
+            Per-package coverage floors (AGENTS.md); `cmd/wanwatchd` is
             exempt because the VM tier exercises it. Floors track measured
             coverage: raise them as coverage improves, and lower one only
             with a comment explaining the regression.

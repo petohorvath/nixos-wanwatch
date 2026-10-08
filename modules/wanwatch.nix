@@ -21,7 +21,7 @@
 
   The read-only `marks.<group>` and `tables.<group>` options echo each
   Group's fwmark and routing table, so other modules such as nftzones
-  can reference them by name (PLAN §6).
+  can reference them by name (docs/nftzones-integration.md).
 */
 { wanwatch }:
 
@@ -69,7 +69,7 @@ let
         description = ''
           Root of the hook-script tree. On every Decision the daemon
           runs the scripts in `<hooksDir>/{up,down,switch}.d/`
-          (PLAN §5.5).
+          (docs/specs/daemon-state.md).
         '';
       };
       metricsSocket = lib.mkOption {
@@ -189,7 +189,7 @@ in
       '';
       description = ''
         Read-only copy of each `services.wanwatch.groups.<group>.table`.
-        Each table ID serves both IPv4 and IPv6 routes (PLAN §6.1).
+        Each table ID serves both IPv4 and IPv6 routes (docs/nftzones-integration.md).
       '';
     };
   };
@@ -250,7 +250,7 @@ in
         Group = cfg.group;
 
         # CAP_NET_ADMIN for route/rule writes; CAP_NET_RAW for the
-        # ICMP probe socket binding (PLAN §8).
+        # ICMP probe socket binding (docs/specs/probe-algorithm.md).
         AmbientCapabilities = [
           "CAP_NET_ADMIN"
           "CAP_NET_RAW"

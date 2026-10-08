@@ -52,7 +52,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ## [0.1.0] — 2026-05-12
 
-Initial public release. Feature-complete per [`PLAN.md`](./PLAN.md) v1 scope.
+Initial public release. Feature-complete per the [v1 design plan](https://github.com/petohorvath/nixos-wanwatch/blob/042c384/PLAN.md).
 
 ### Added
 

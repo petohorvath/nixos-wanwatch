@@ -7,7 +7,7 @@ nixpkgs.
 The observer accepts the existing machine directly. Topology, network readiness,
 fault injection, Hook assertions, and Telegraf output checks stay in scenarios.
 
-Choose the observation that proves the behavior (PLAN §5.5):
+Choose the observation that proves the behavior (docs/specs/daemon-state.md):
 
 - `wait_active(group, active)` reads Selection from State. `active=None`
   requires an explicit JSON null. Cold-start Selection can use carrier alone.

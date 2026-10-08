@@ -4,7 +4,7 @@
 
   failover-v4 covers carrier-only cold-start health. Here a router's
   lone WAN probes an ISP node successfully, and the scenario asserts
-  that the first Window seeds the hysteresis (PLAN §8) rather than
+  that the first Window seeds the hysteresis (docs/specs/failover.md) rather than
   ramping it from false. Without the seed, a WAN with
   consecutiveUp > 1 is dropped and re-selected on every daemon start:
   a spurious health-reason down + up Decision pair.
@@ -95,7 +95,7 @@ pkgs.testers.runNixOSTest {
     router.wait_for_unit("wanwatch.service")
 
     # 1. Cold start: primary is Selected on carrier alone, before
-    #    any probe has cooked (PLAN §8 cold-start carrier health).
+    #    any probe has cooked (docs/specs/failover.md cold-start carrier health).
     observe.wait_active("home-uplink", "primary")
 
     # 2. Let the first good probe Window land and seed the
@@ -103,7 +103,7 @@ pkgs.testers.runNixOSTest {
     #    ProbeResult has been folded in with a healthy verdict.
     observe.wait_family_metrics("primary", {"v4": True}, timeout=30)
 
-    # 3. The seeded hysteresis (PLAN §8) keeps the WAN's effective
+    # 3. The seeded hysteresis (docs/specs/failover.md) keeps the WAN's effective
     #    health unchanged, so no health-reason Decision is emitted.
     health = observe.decisions("home-uplink", "health")
     assert health == 0, (

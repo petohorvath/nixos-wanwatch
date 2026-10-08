@@ -8,7 +8,7 @@
 // window manually (e.g. replaying recorded probe traces).
 //
 // The ICMP transport layer (sockets, identifier allocation,
-// interface binding) is in icmp.go (added in Pass 2 per PLAN §10).
+// interface binding) is in icmp.go.
 package probe
 
 import (

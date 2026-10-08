@@ -12,7 +12,7 @@
     thresholds         — loss and RTT thresholds in both directions
     hysteresis         — consecutive-cycle counters in both directions
     familyHealthPolicy — "all" or "any": how per-family Health combines
-                         into WAN Health (PLAN §5.4)
+                         into WAN Health (docs/adr/0005-family-health-policy-defaults-to-all.md)
 
   Only `targets` is required; `defaults` supplies the other fields.
 */
@@ -285,7 +285,7 @@ let
 
   /*
     Report which address families a probe covers, so `wan.make` can
-    derive the families a WAN serves (PLAN §5.4).
+    derive the families a WAN serves (docs/adr/0004-runtime-gateway-discovery.md).
 
     `probe`: a probe value.
 

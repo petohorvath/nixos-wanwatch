@@ -243,10 +243,10 @@ func TestRunTimestampFallback(t *testing.T) {
 
 func TestEventConstants(t *testing.T) {
 	t.Parallel()
-	// PLAN §5.5 fixes these names. The systemd hook directory layout
+	// docs/specs/daemon-state.md fixes these names. The systemd hook directory layout
 	// depends on them too: /etc/wanwatch/hooks/up.d, down.d, switch.d.
 	if EventUp != "up" || EventDown != "down" || EventSwitch != "switch" {
-		t.Errorf("event names drifted from PLAN §5.5: up=%q, down=%q, switch=%q",
+		t.Errorf("event names drifted from docs/specs/daemon-state.md: up=%q, down=%q, switch=%q",
 			EventUp, EventDown, EventSwitch)
 	}
 }
@@ -483,7 +483,7 @@ func TestCancelHookESRCHFallsBackToDirectKill(t *testing.T) {
 // TestCancelHookBothESRCHReportsProcessDone: pgrp kill ESRCH +
 // direct kill ErrProcessDone = the child genuinely exited. Surface
 // that to exec.Cmd so it doesn't run its WaitDelay-driven fallback
-// kill (PLAN §5.5 wraps this in 'process already finished').
+// kill (docs/specs/daemon-state.md wraps this in 'process already finished').
 func TestCancelHookBothESRCHReportsProcessDone(t *testing.T) {
 	t.Parallel()
 	pgrpKill := func(_ int, _ syscall.Signal) error { return syscall.ESRCH }

@@ -1,5 +1,5 @@
 // Package metrics owns the daemon's Prometheus registry and its
-// Unix-socket HTTP endpoint. PLAN §7.2 fixes the metric catalog —
+// Unix-socket HTTP endpoint. docs/metrics.md fixes the metric catalog —
 // every metric defined here corresponds to one row in that table,
 // so name and label drift is detectable by diffing this file
 // against the doc.
@@ -21,7 +21,7 @@ import (
 )
 
 // Namespace is the Prometheus metric-name prefix for every metric
-// in this package — `wanwatch_*` per PLAN §7.2.
+// in this package — `wanwatch_*` per docs/metrics.md.
 const Namespace = "wanwatch"
 
 // Registry bundles the typed metric handles plus the underlying
@@ -30,7 +30,7 @@ const Namespace = "wanwatch"
 type Registry struct {
 	reg *prometheus.Registry
 
-	// Probe layer — labels per PLAN §7.2.
+	// Probe layer — labels per docs/metrics.md.
 	ProbeRTT    *prometheus.GaugeVec
 	ProbeJitter *prometheus.GaugeVec
 	ProbeLoss   *prometheus.GaugeVec
@@ -58,7 +58,7 @@ type Registry struct {
 	BuildInfo         *prometheus.GaugeVec
 }
 
-// New constructs a Registry with every metric in PLAN §7.2
+// New constructs a Registry with every metric in docs/metrics.md
 // registered. The returned Registry's Handler() serves /metrics.
 func New() *Registry {
 	reg := prometheus.NewRegistry()

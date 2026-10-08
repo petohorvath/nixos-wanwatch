@@ -1,4 +1,4 @@
-"""WAN observations for the NixOS VM scenarios (PLAN §5.5 and §9.4).
+"""WAN observations for the NixOS VM scenarios (docs/specs/daemon-state.md and §9.4).
 
 State proves transitions, Prometheus proves live Probe progress, and kernel
 routes independently prove Apply. The concrete NixOS machine supplies execute;

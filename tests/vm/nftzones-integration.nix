@@ -1,5 +1,5 @@
 /*
-  nftzones-integration — the rule-installation contract of PLAN §6.1.
+  nftzones-integration — the rule-installation contract of docs/nftzones-integration.md.
   An nftzones sroute references `services.wanwatch.marks.<group>`;
   the live nftables ruleset must contain that mark, and the daemon
   must install the fwmark rules and the Group's default route.
@@ -66,7 +66,7 @@ pkgs.testers.runNixOSTest {
             wan-home.interfaces = [ "wan0" ];
           };
           # Mark LAN-sourced forwarded traffic for the Group (the
-          # PLAN §6.2 example).
+          # docs/nftzones-integration.md example).
           sroutes.lan-via-home = {
             from = [ "lan" ];
             rule = [ (mangle meta.mark config.services.wanwatch.marks.home-uplink) ];
@@ -144,7 +144,7 @@ pkgs.testers.runNixOSTest {
     )
 
     # 2. The daemon installed the fwmark rule for both families
-    #    (PLAN §6.1). `ip rule show fwmark X` filtering varies across
+    #    (docs/nftzones-integration.md). `ip rule show fwmark X` filtering varies across
     #    iproute2 releases, so grep the full listing. Poll as smoke.nix
     #    does in case bootstrap ordering regresses.
     def wait_for_fwmark_rule(family_flag, mark, timeout=10):

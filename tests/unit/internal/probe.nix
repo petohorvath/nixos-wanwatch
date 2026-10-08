@@ -1,6 +1,6 @@
 /*
   Unit tests for `lib/internal/probe.nix`, exposed as `wanwatch.probe`.
-  Per PLAN.md §9.1, each public function is exercised on positive and
+  Per AGENTS.md, each public function is exercised on positive and
   negative inputs, each error kind is triggered alone and in an
   aggregated case, and the §5.1 API skeleton is covered.
 */
@@ -618,7 +618,7 @@ in
   # ===== Round-trip =====
 
   testProbeRoundTrip = {
-    # PLAN §9.1 (5): `toJSONValue` output is itself a valid `make`
+    # AGENTS.md (5): `toJSONValue` output is itself a valid `make`
     # input, and re-emitting it after a second `make` is
     # byte-identical to the first.
     expr =

@@ -9,7 +9,7 @@ package selector
 // Initial verdict is `false`. Once observations start, the verdict
 // flips to true only after `consecutiveUp` healthy observations in
 // a row, and back to false only after `consecutiveDown` unhealthy
-// ones. The first observation is special: per PLAN §8 the cold-start
+// ones. The first observation is special: per docs/specs/failover.md the cold-start
 // handoff seeds the verdict straight from the measured Health (see
 // Seed), so a (WAN, family) need not climb the up-ramp from scratch
 // when its first probe Window lands healthy.
@@ -64,7 +64,7 @@ func (h *HysteresisState) Observe(observedHealthy bool) bool {
 }
 
 // Seed initializes the verdict directly from the first observed
-// Health, bypassing the consecutive-cycle ramp — the PLAN §8
+// Health, bypassing the consecutive-cycle ramp — the docs/specs/failover.md
 // cold-start handoff. Until its first probe Window completes a
 // (WAN, family) is trusted via carrier alone; when that Window
 // lands, climbing to the measured Health over `consecutiveUp`

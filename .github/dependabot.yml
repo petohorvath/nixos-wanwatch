@@ -10,7 +10,7 @@ updates:
       interval: "monthly"
 
     # Keep the automated scope narrow: all non-primary inputs remain part
-    # of the deliberate manual dependency review in PLAN §11.10.
+    # of the deliberate manual dependency review in AGENTS.md.
     allow:
       - dependency-name: "nixpkgs"
 

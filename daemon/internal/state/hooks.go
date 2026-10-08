@@ -14,7 +14,7 @@ import (
 )
 
 // Event is the type of Decision being signalled to hooks. Matches
-// the PLAN §5.5 `WANWATCH_EVENT` enumeration.
+// the docs/specs/daemon-state.md `WANWATCH_EVENT` enumeration.
 type Event string
 
 // Hook events emitted on a Decision: a previously-absent Selection
@@ -27,7 +27,7 @@ const (
 )
 
 // HookContext carries every field needed to populate the env vars
-// defined in PLAN §5.5. Empty-string fields are emitted as empty
+// defined in docs/specs/daemon-state.md. Empty-string fields are emitted as empty
 // env vars (not unset).
 type HookContext struct {
 	Event        Event
@@ -65,7 +65,7 @@ type hookResult struct {
 // the env vars derived from HookContext.
 //
 // Timeout is the per-hook deadline, wired from the config's
-// `global.hookTimeoutMs` (PLAN §12 OQ #5). A zero Timeout falls back
+// `global.hookTimeoutMs` (docs/specs/daemon-config.md). A zero Timeout falls back
 // to DefaultHookTimeout — the value a hookRunner constructed directly,
 // without a config, gets. MaxHooks caps how many hooks one event
 // runs — the rest come back as hookResult{Skipped: true}; zero
@@ -77,7 +77,7 @@ type hookRunner struct {
 }
 
 // DefaultHookTimeout is the per-hook deadline applied when
-// hookRunner.Timeout is zero. Matches PLAN §12 OQ #5.
+// hookRunner.Timeout is zero. Matches docs/specs/daemon-config.md.
 const DefaultHookTimeout = 5 * time.Second
 
 // maxHookOutput caps the combined stdout+stderr captured per hook.
@@ -86,7 +86,7 @@ const DefaultHookTimeout = 5 * time.Second
 // captured output is marked truncated.
 const maxHookOutput = 16 << 10
 
-// Env-var names passed to every hook invocation. Fixed by PLAN §5.5
+// Env-var names passed to every hook invocation. Fixed by docs/specs/daemon-state.md
 // — hook scripts depend on them. Exported so callers (and tests)
 // can reference the contract by name rather than by string literal.
 const (
@@ -107,7 +107,7 @@ const (
 )
 
 // run executes the hooks under `<Dir>/<ctx.Event>.d/` with the env
-// vars in PLAN §5.5. Returns one hookResult per file. A missing
+// vars in docs/specs/daemon-state.md. Returns one hookResult per file. A missing
 // event directory returns nil — not an error; users with no hooks
 // shouldn't see noise in the logs.
 //
@@ -273,7 +273,7 @@ func (b *cappedBuffer) String() string {
 
 // buildEnv constructs the env-var slice for a hook invocation.
 // Pulls from the parent process env (so PATH etc. are inherited)
-// and appends the PLAN §5.5 `WANWATCH_*` variables.
+// and appends the docs/specs/daemon-state.md `WANWATCH_*` variables.
 func buildEnv(ctx HookContext) []string {
 	base := os.Environ()
 	families := strings.Join(ctx.Families, ",")

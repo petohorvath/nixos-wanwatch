@@ -13,7 +13,7 @@ import (
 // DefaultSocketMode is the file mode applied to the metrics socket
 // when Server.Mode is zero. 0o660 lets the daemon's `wanwatch`
 // group read it — Telegraf joins via supplementary group per
-// PLAN §7.1.
+// docs/metrics.md.
 const DefaultSocketMode os.FileMode = 0o660
 
 // shutdownTimeout bounds how long Serve waits for in-flight scrapes

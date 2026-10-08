@@ -7,7 +7,7 @@ import (
 )
 
 // IdentKey identifies a single probe socket (one per WAN+family
-// tuple, per PLAN §8 internal/probe).
+// tuple, per docs/specs/probe-algorithm.md internal/probe).
 type IdentKey struct {
 	Wan    string
 	Family Family

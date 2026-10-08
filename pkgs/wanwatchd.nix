@@ -1,6 +1,6 @@
 /*
   wanwatchd, the Go daemon that probes WANs, follows rtnetlink events,
-  applies routing state, and serves Prometheus metrics (PLAN §8).
+  applies routing state, and serves Prometheus metrics (docs/specs/failover.md).
 
     pkgs.callPackage ./wanwatchd.nix {
       version = "0.1.0";
@@ -52,7 +52,7 @@ buildGoModule {
   ];
 
   # The tests run in the `daemon`, `coverage`, and `race` flake checks
-  # and the VM tier (PLAN §9.4), not in the package build.
+  # and the VM tier (AGENTS.md), not in the package build.
   doCheck = false;
 
   meta = {

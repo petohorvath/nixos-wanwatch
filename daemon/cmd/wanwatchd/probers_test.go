@@ -30,7 +30,7 @@ func TestIdentKeysForIsDeterministic(t *testing.T) {
 	t.Parallel()
 	// Map iteration is randomized but identKeysFor must produce a
 	// stable order so the ident allocation is reproducible across
-	// restarts (PLAN §8).
+	// restarts (docs/specs/failover.md).
 	a := identKeysFor(testCfg())
 	b := identKeysFor(testCfg())
 	if len(a) != len(b) {

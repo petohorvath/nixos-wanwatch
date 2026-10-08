@@ -70,7 +70,7 @@ func TestFlushBySourcePropagatesValidationError(t *testing.T) {
 	t.Parallel()
 	// nil ip → fail fast before any netlink call. This branch is
 	// the only one we can drive without root + a live conntrack
-	// table; the netlink-bound path is VM-tier per PLAN §9.4.
+	// table; the netlink-bound path is VM-tier per AGENTS.md.
 	n, err := FlushBySource(t.Context(), probe.FamilyV4, nil)
 	if err == nil {
 		t.Fatal("FlushBySource(nil ip) = nil err, want validation error")
@@ -136,7 +136,7 @@ func TestFlushBySourceViaWrapsDeleteError(t *testing.T) {
 	if !strings.Contains(err.Error(), "apply: conntrack flush") {
 		t.Errorf("err = %q, want apply context prefix", err.Error())
 	}
-	// PLAN §5.5: conntrack flush returns the partial count even on
+	// docs/specs/daemon-state.md: conntrack flush returns the partial count even on
 	// error so the caller can log "deleted N before failing".
 	if n != 3 {
 		t.Errorf("count on error = %d, want 3 (partial deletion preserved)", n)
