@@ -18,7 +18,7 @@ The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `schema` | int | yes | Always `1` in this spec. |
-| `global` | object | yes | Process-wide settings. Missing keys take `defaultGlobal` values. |
+| `global` | object | yes | Process-wide settings. The Nix renderer merges user settings over `defaultGlobal`, so the rendered file always has every key; the daemon applies no defaults and rejects missing or empty values. |
 | `wans` | object | yes | Map from WAN name to WAN object. May be empty. |
 | `groups` | object | yes | Map from Group name to Group object. May be empty. |
 
@@ -147,7 +147,7 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 | Option types (`lib/types/`) | Wrong field types, enum mismatches, malformed IP literals (via libnet). |
 | `wanwatch.<type>.tryMake` | Cross-field invariants: Family coupling, duplicate Members, threshold ordering. |
 | `config.assertUniqueMarksAndTables` | Marks or tables shared across Groups. |
-| `daemon/internal/config/Validate` | Structural problems after deserialization: name/key disagreement, dangling `member.wan` references, empty paths in `global`. |
+| `daemon/internal/config/Validate` | Unknown keys and trailing data at parse time, then the first failing check of: empty paths or non-positive `hookTimeoutMs` in `global`; name/key disagreement; empty `interface`; `method` other than `icmp`; no Targets; non-positive `intervalMs`, `timeoutMs`, or `windowSize`; `familyHealthPolicy` other than `all` or `any`; loss thresholds outside `0..100` or not ordered up < down; RTT thresholds not positive or not ordered up < down; Hysteresis counters below 1; unknown `strategy`; non-positive `table` or `mark`; no Members; dangling `member.wan` references. |
 
 ## Compatibility policy
 

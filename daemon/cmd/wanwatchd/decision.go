@@ -42,10 +42,9 @@ const (
 //   - familyPolicyAll — every probed family must be healthy
 //   - familyPolicyAny — at least one probed family must be healthy
 //
-// A family that hasn't received its first ProbeResult yet (`cooked
-// = false`) is treated as healthy — docs/specs/failover.md cold-start says
-// "health is unknown but carrier is at least known", so we trust
-// carrier alone until the first sample arrives.
+// A family that hasn't received its first full probe Window yet
+// (`cooked = false`) is treated as healthy — the docs/specs/failover.md
+// cold-start invariant trusts carrier alone until the Window fills.
 func combineFamilies(families map[probe.Family]*familyState, policy string) bool {
 	var probed, healthy int
 	for _, f := range families {

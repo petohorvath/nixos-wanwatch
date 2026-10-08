@@ -30,7 +30,7 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 | Field | Type | Meaning |
 |---|---|---|
 | `schema` | int | The daemon's `SchemaVersion`. |
-| `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon overwrites any caller-supplied value. |
+| `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon fills it with the current time unless the caller supplies one; a Decision supplies the same timestamp it passes to Hooks as `WANWATCH_TS`. |
 | `wans` | object | Map from WAN name to per-WAN State. |
 | `groups` | object | Map from Group name to per-Group State. |
 

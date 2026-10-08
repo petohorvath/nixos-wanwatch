@@ -65,7 +65,7 @@ ICMPv6 (RFC 4443) is identical except that `type = 128`. Echo replies use `type 
 | Family | Checksum | Notes |
 |---|---|---|
 | v4 | Computed by the daemon (RFC 1071 one's complement) | The daemon fills it in. |
-| v6 | Computed by the kernel on send | The daemon leaves it zero; the pseudo-header is unavailable from `SOCK_DGRAM`. |
+| v6 | Computed by the kernel on send | The daemon leaves it zero; the kernel fills it on `IPPROTO_ICMPV6` raw sockets (RFC 3542 `IPV6_CHECKSUM`), since only the kernel knows the pseudo-header's source address. |
 
 ## Socket setup
 

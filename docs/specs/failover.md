@@ -25,7 +25,7 @@ An event recomputes every Group containing the affected WAN. Each `decision.Grou
 
 ## Cold-start invariant
 
-Until the first `ProbeResult` lands for a (WAN, Family), that Family votes healthy in `combineFamilies`. Combined with `carrierUp()`, a healthy boot runs this chain in under a second, before any Probe finishes:
+Until a (WAN, Family) delivers its first `ProbeResult` with a full Window (`WindowFilled`), that Family is uncooked and votes healthy in `combineFamilies`. Combined with `carrierUp()`, a healthy boot runs this chain in under a second, before any Window fills:
 
 1. The daemon boots and installs rules; no Probes have completed.
 2. rtnl reports `carrier=up, operstate=up` on the primary.
@@ -34,7 +34,7 @@ Until the first `ProbeResult` lands for a (WAN, Family), that Family votes healt
 5. `apply.WriteDefault` writes the default route.
 6. State and Hooks fire.
 
-If the first ProbeResult contains Lost Samples (Target unreachable), the Hysteresis verdict stays unhealthy and the WAN flips down: the steady-state failure path, compressed to one cycle.
+Results that arrive before the Window fills update metrics and retry pending Applies, but leave Health alone, so a Lost first Sample cannot seed a spurious down→up Decision pair. The first full Window seeds Hysteresis directly from its threshold verdict, bypassing the consecutive-cycle ramp. If that verdict is unhealthy, the WAN flips down at once; later Windows go through the normal `consecutiveUp` and `consecutiveDown` ramp.
 
 ## Failover
 
@@ -74,7 +74,7 @@ t=10     carrier returns on wan0
          Decision fires; routes rewritten; hooks run.
 ```
 
-After a Probe-driven failure (rather than a carrier loss), `wan.healthy` stays `false` until `consecutiveUp` Samples accumulate. Steady-state recovery latency is `intervalMs × consecutiveUp`: 3 × 1 s = 3 s with the defaults.
+After a Probe-driven failure (rather than a carrier loss), `wan.healthy` stays `false` until `consecutiveUp` Samples accumulate. Steady-state recovery latency is `intervalMs × consecutiveUp`: 500 ms × 5 = 2.5 s with the defaults.
 
 ## Single-active invariant
 
