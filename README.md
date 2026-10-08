@@ -2,7 +2,7 @@
 
 Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides which is healthy, selects an active member per group, and switches kernel routing state on health changes.
 
-**Status**: v0.1.0 — feature-complete per [`PLAN.md`](./PLAN.md). Library, NixOS module, daemon, and full test tier (unit + integration + VM) are in place.
+**Status**: v0.1.0 shipped the v1 design: library, NixOS module, daemon, and unit, integration, and VM test tiers. See [`CHANGELOG.md`](./CHANGELOG.md) for unreleased changes.
 
 ## What it does
 
@@ -82,22 +82,18 @@ nix build .#wanwatchd # build the daemon binary
 nix develop           # devshell with go, gopls, golangci-lint
 ```
 
-For executable reviews in a minimal Linux sandbox, use
-`bash tooling/review-env.sh COMMAND [ARG...]`. It provides the locked Go
-toolchain and GCC with vendored dependencies. See
-[review environment setup](.greptile/rules.md) for the optional upstream
-Nix bootstrap and focused validation commands.
+For executable reviews in a minimal Linux sandbox, use `bash tooling/review-env.sh COMMAND [ARG...]`. It provides the locked Go toolchain and GCC with vendored dependencies. See [review environment setup](.greptile/rules.md) for the optional upstream Nix bootstrap and focused validation commands.
 
 ## Documentation
 
-- [`PLAN.md`](./PLAN.md) — authoritative v1 design.
-- [`docs/wan-monitoring.md`](./docs/wan-monitoring.md) — newcomer's introduction.
-- [`docs/architecture.md`](./docs/architecture.md) — layering + data flow.
-- [`docs/selector.md`](./docs/selector.md) — strategy + hysteresis algorithm.
-- [`docs/nftzones-integration.md`](./docs/nftzones-integration.md) — wiring with the zone-based firewall.
-- [`docs/metrics.md`](./docs/metrics.md) — Prometheus catalog.
-- [`docs/specs/`](./docs/specs/) — frozen JSON contracts and prior-art distillation.
-- [`GLOSSARY.md`](./GLOSSARY.md) — enforced terminology.
+- [`GLOSSARY.md`](./GLOSSARY.md): terminology.
+- [`docs/wan-monitoring.md`](./docs/wan-monitoring.md): introduction for newcomers.
+- [`docs/architecture.md`](./docs/architecture.md): layers and data flow.
+- [`docs/selector.md`](./docs/selector.md): Strategy and Hysteresis.
+- [`docs/nftzones-integration.md`](./docs/nftzones-integration.md): wiring with the zone-based firewall.
+- [`docs/metrics.md`](./docs/metrics.md): Prometheus catalog.
+- [`docs/specs/`](./docs/specs/): frozen JSON contracts, failover and probe semantics, and prior art.
+- [`docs/adr/`](./docs/adr/): architectural decisions.
 
 ## License
 
