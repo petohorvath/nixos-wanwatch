@@ -1,6 +1,6 @@
 /*
   Unit tests for `lib/internal/group.nix`, exposed as `wanwatch.group`.
-  Per PLAN.md §9.1, each public function is exercised on positive and
+  Per AGENTS.md, each public function is exercised on positive and
   negative inputs and each error kind is triggered alone. The
   duplicate-member check covers single and multiple duplicates;
   `table` and `mark` cover their [1000, 32767] bounds and absence.
@@ -418,7 +418,7 @@ in
   # ===== Round-trip =====
 
   testGroupRoundTrip = {
-    # PLAN §9.1 (5): re-emitting the JSON shape after a second
+    # AGENTS.md (5): re-emitting the JSON shape after a second
     # `make` must be byte-identical to the first, nested members
     # included.
     expr =

@@ -1,6 +1,6 @@
 /*
   Integration tier: module-evaluation scenarios and rejection cases
-  (PLAN §9.3), aggregated into one derivation whose symlinks record
+  (AGENTS.md), aggregated into one derivation whose symlinks record
   each realized check.
 
     scenarios/  — evaluate the module against a realistic declaration

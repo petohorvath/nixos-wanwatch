@@ -224,7 +224,7 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 func TestSchemaVersionConstantStable(t *testing.T) {
 	t.Parallel()
 	// Pre-release we pin SchemaVersion at 1. Changing this is a
-	// load-bearing decision — see PLAN §12 OQ #1 and the constant's
+	// load-bearing decision — see the TODO.md schema-evolution item and the constant's
 	// doc-comment for the bump policy.
 	if SchemaVersion != 1 {
 		t.Errorf("SchemaVersion = %d, want 1 (pre-release pin)", SchemaVersion)

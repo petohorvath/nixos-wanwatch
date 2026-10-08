@@ -16,7 +16,7 @@ import (
 //   - locally-originated traffic (original src == WAN IP)
 //   - forwarded + SNATted traffic (reply src == WAN IP)
 //
-// PLAN §5.5 marks conntrack flush as best-effort — the caller
+// docs/specs/daemon-state.md marks conntrack flush as best-effort — the caller
 // (orchestrator) logs failures but does not fail the apply step.
 // Returns the number of entries deleted. ctx is checked at entry —
 // see WriteDefault for the cancellation contract.

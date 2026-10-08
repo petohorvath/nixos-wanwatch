@@ -1,5 +1,5 @@
 /*
-  recovery-v6 — IPv6 counterpart of recovery (PLAN §9.4). Carrier
+  recovery-v6 — IPv6 counterpart of recovery (AGENTS.md). Carrier
   events alone drive failover and recovery on dummy interfaces. The
   v6 default route in the Group's table is checked at every
   transition, so the kernel must follow the Selection in State.

@@ -100,7 +100,7 @@ func TestCombineFamiliesAny(t *testing.T) {
 
 func TestCombineFamiliesUncookedIsHealthyVote(t *testing.T) {
 	t.Parallel()
-	// PLAN §8 cold-start: before the first probe sample lands,
+	// docs/specs/failover.md cold-start: before the first probe sample lands,
 	// the family contributes a healthy vote so a carrier-up rtnl
 	// event can fire an initial Decision.
 	if !combineFamilies(map[probe.Family]*familyState{
@@ -328,7 +328,7 @@ func TestCombineFamiliesNilEntry(t *testing.T) {
 // cold-start cooked-false-counts-as-healthy rule turns this red
 // in a way the per-package coverage % never could.
 //
-// Cold-start cooked=false counts as healthy (PLAN §8: "health
+// Cold-start cooked=false counts as healthy (docs/specs/failover.md: "health
 // unknown but carrier known → trust carrier"). Both families
 // cooked=false with carrier-up is a healthy WAN under either
 // policy.

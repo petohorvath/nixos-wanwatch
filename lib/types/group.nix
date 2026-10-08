@@ -69,7 +69,7 @@ let
           example = 1000;
           description = ''
             Routing-table ID for this Group's policy-routed traffic.
-            The ID serves both IPv4 and IPv6 routes (PLAN §6.1). No two
+            The ID serves both IPv4 and IPv6 routes (docs/nftzones-integration.md). No two
             Groups may share a table.
           '';
         };

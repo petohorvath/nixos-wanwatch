@@ -135,7 +135,7 @@ func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
 // TestHandleProbeResultSeedsHysteresisNoColdStartFlap: a healthy
 // WAN with consecutiveUp>1 must not flap during warm-up. The first
 // ProbeResult seeds the hysteresis straight from the measured
-// Health (PLAN §8) instead of ramping up from false — without the
+// Health (docs/specs/failover.md) instead of ramping up from false — without the
 // seed, a good first probe leaves the hysteresis verdict false
 // until consecutiveUp probes in, briefly dropping a healthy WAN.
 func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
@@ -179,7 +179,7 @@ func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
 // first ProbeResult (the probe loop fires before the route has
 // converged → Lost first sample) must not seed the hysteresis. The
 // family stays uncooked, combineFamilies keeps the WAN healthy via
-// carrier alone (PLAN §8), and no spurious health Decision fires.
+// carrier alone (docs/specs/failover.md), and no spurious health Decision fires.
 // Once a full Window lands healthy, the seed fires and the family
 // transitions in one shot — never down→up.
 func TestHandleProbeResultDefersSeedUntilWindowFilled(t *testing.T) {
@@ -252,7 +252,7 @@ func TestHandleProbeResultDefersSeedUntilWindowFilled(t *testing.T) {
 	}
 }
 
-// TestColdStartCookHealthyDoesNotBumpDecisions: PLAN §8 cold-start
+// TestColdStartCookHealthyDoesNotBumpDecisions: docs/specs/failover.md cold-start
 // requires hysteresis to seed from the first healthy probe Window
 // rather than ramp up from false, so a WAN that's already healthy
 // via carrier-only never flaps during warm-up. recomputeAffectedGroups
@@ -960,7 +960,7 @@ func TestHandleProbeResultUnknownFamilyNoOp(t *testing.T) {
 // family going unhealthy doesn't move the aggregate (the other
 // family is still healthy via cold-start). No Decision fires, but
 // the per-family `healthy` field in state.json *does* change — so
-// per PLAN §5.5 state.json is republished anyway: it mirrors live
+// per docs/specs/daemon-state.md state.json is republished anyway: it mirrors live
 // per-family Health, not just Decisions. Prior to the family-flip
 // republish this case left state.json stale relative to the
 // Prometheus view, and made it impossible to use state.json to

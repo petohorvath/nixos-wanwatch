@@ -1,6 +1,6 @@
 /*
   Unit tests for `lib/internal/primitives.nix`, exposed as
-  `wanwatch.internal.primitives`. Per PLAN.md §9.1, each public
+  `wanwatch.internal.primitives`. Per AGENTS.md, each public
   function is exercised on positive and negative inputs.
 */
 { pkgs, wanwatch, ... }:

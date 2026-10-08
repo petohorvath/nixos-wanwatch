@@ -93,7 +93,7 @@ func TestResolveTargetsAcceptsV4Literals(t *testing.T) {
 
 func TestResolveTargetsRejectsHostnames(t *testing.T) {
 	t.Parallel()
-	// PLAN §5.1 — probe.targets are IP literals; DNS happens at
+	// docs/specs/daemon-config.md — probe.targets are IP literals; DNS happens at
 	// config-render time, not in the daemon.
 	p := newPinger([]string{"example.com"})
 	if _, err := p.resolveTargets(); err == nil {

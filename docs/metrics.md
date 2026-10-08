@@ -1,79 +1,79 @@
 # Metrics catalog
 
-The daemon exposes Prometheus-format metrics over a Unix socket at `/run/wanwatch/metrics.sock` (configurable via `services.wanwatch.global.metricsSocket`). The socket is mode `0660` and owned by `wanwatch:wanwatch`; Telegraf reads via supplementary group membership.
+The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock`, configurable with `services.wanwatch.global.metricsSocket`. The socket has mode `0660` and owner `wanwatch:wanwatch`; Telegraf reads it through supplementary group membership.
 
-Every metric is prefixed `wanwatch_`. The catalog below is the source of truth — `daemon/internal/metrics/metrics.go` registers exactly these series.
+This catalog matches the series registered in `daemon/internal/metrics/metrics.go`. Every name has the `wanwatch_` prefix.
 
-## Probe layer
-
-| Metric | Type | Labels | Meaning |
-|---|---|---|---|
-| `wanwatch_probe_rtt_seconds` | gauge | `wan`, `target`, `family` | Last sample's RTT per probe target. |
-| `wanwatch_probe_jitter_seconds` | gauge | `wan`, `family` | Per-(WAN, family) jitter across the sliding window. |
-| `wanwatch_probe_loss_ratio` | gauge | `wan`, `family` | Per-(WAN, family) packet loss in `[0, 1]`. |
-
-## WAN layer
+## Probe
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `wanwatch_wan_carrier` | gauge | `wan` | `1` = carrier up (IFF_LOWER_UP), `0` = down. |
-| `wanwatch_wan_operstate` | gauge | `wan` | IFLA_OPERSTATE integer (`0`=unknown, `6`=up). |
-| `wanwatch_wan_family_healthy` | gauge | `wan`, `family` | `1` = healthy under thresholds + hysteresis. |
-| `wanwatch_wan_healthy` | gauge | `wan` | Aggregate per `probe.familyHealthPolicy`. |
-| `wanwatch_wan_carrier_changes_total` | counter | `wan` | Carrier transitions observed. |
+| `wanwatch_probe_rtt_seconds` | gauge | `wan`, `target`, `family` | RTT of the last Sample per Target. |
+| `wanwatch_probe_jitter_seconds` | gauge | `wan`, `family` | Jitter across the Window. |
+| `wanwatch_probe_loss_ratio` | gauge | `wan`, `family` | Loss in `[0, 1]`. |
 
-## Group layer
+## WAN
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `wanwatch_group_active` | gauge | `group`, `wan` | `1` for the currently active Member; `0` for the others. |
-| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions emitted. `reason ∈ {health, carrier}` in v1 — `startup` and `manual` (for the post-v1 `wanwatchctl`) are reserved but not yet emitted. |
+| `wanwatch_wan_carrier` | gauge | `wan` | `1` = carrier up (`IFF_LOWER_UP`), `0` = down. |
+| `wanwatch_wan_operstate` | gauge | `wan` | `IFLA_OPERSTATE` integer (`0` = unknown, `6` = up). |
+| `wanwatch_wan_family_healthy` | gauge | `wan`, `family` | `1` = healthy after thresholds and Hysteresis. |
+| `wanwatch_wan_healthy` | gauge | `wan` | WAN Health under `probe.familyHealthPolicy`. |
+| `wanwatch_wan_carrier_changes_total` | counter | `wan` | Carrier transitions. |
 
-## Apply layer
+## Group
 
-Split into per-family and family-agnostic so labels never collapse to empty.
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `wanwatch_group_active` | gauge | `group`, `wan` | `1` for the active Member, `0` for the others. |
+| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. Emitted `reason` values are `health` and `carrier`; `startup` and `manual` are reserved. |
+
+## Apply
+
+Apply metrics are split into per-Family and Family-agnostic series so no label is ever empty.
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `wanwatch_apply_route_duration_seconds` | histogram | `group`, `family` | Wall time of `RouteReplace`. |
 | `wanwatch_apply_route_errors_total` | counter | `group`, `family` | Route writes that returned a netlink error. |
-| `wanwatch_apply_op_errors_total` | counter | `group`, `op` | Errors per family-agnostic op. `op ∈ {conntrack_flush, ifindex_lookup, rule_install}` in v1 — `state_write` and `hook` are reserved but not yet emitted. |
+| `wanwatch_apply_op_errors_total` | counter | `group`, `op` | Family-agnostic errors. Emitted `op` values are `conntrack_flush`, `ifindex_lookup`, and `rule_install`; `state_write` and `hook` are reserved. |
 
-## Daemon-wide
+## Daemon
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `wanwatch_state_publications_total` | counter | — | Successful atomic writes of `state.json`. |
-| `wanwatch_hook_invocations_total` | counter | `event`, `result` | Hook invocations. `event ∈ {up, down, switch}`, `result ∈ {ok, nonzero, timeout}`. |
-| `wanwatch_build_info` | gauge | `version`, `go_version`, `commit` | Set to `1` at startup; labels identify the binary. |
+| `wanwatch_hook_invocations_total` | counter | `event`, `result` | Hook runs. `event` is `up`, `down`, or `switch`; `result` is `ok`, `nonzero`, or `timeout`. |
+| `wanwatch_build_info` | gauge | `version`, `go_version`, `commit` | `1`; the labels identify the binary. |
 
 ## Example PromQL
 
-Detect a WAN flapping:
+WAN flapping:
 
 ```promql
 rate(wanwatch_wan_carrier_changes_total[5m]) > 0.05
 ```
 
-Per-group time-since-last-switch:
+Time since the last switch per Group:
 
 ```promql
 time() - max by (group) (wanwatch_group_decisions_total)
 ```
 
-Alert when no group has a healthy active member:
+Group without a healthy active Member:
 
 ```promql
 max by (group) (wanwatch_group_active) == 0
 ```
 
-Probe loss above 30% on any (WAN, family):
+Loss above 30% on any (WAN, Family):
 
 ```promql
 wanwatch_probe_loss_ratio > 0.30
 ```
 
-Compare RTT across families on the same WAN:
+RTT across Families on one WAN:
 
 ```promql
 wanwatch_probe_rtt_seconds{wan="primary"}
@@ -81,14 +81,14 @@ wanwatch_probe_rtt_seconds{wan="primary"}
 
 ## Scrape configuration
 
-Telegraf (via the opt-in companion module):
+Enable the companion Telegraf module:
 
 ```nix
 services.wanwatch.telegraf.enable = true;
 services.wanwatch.telegraf.interval = "10s";  # default
 ```
 
-The module pushes the equivalent of:
+It adds the equivalent of:
 
 ```toml
 [[inputs.prometheus]]
@@ -97,11 +97,11 @@ The module pushes the equivalent of:
   namepass = [ "wanwatch_*" ]
 ```
 
-Raw Prometheus / curl scrape:
+Scrape manually with curl:
 
 ```sh
 sudo -u telegraf curl --unix-socket /run/wanwatch/metrics.sock \
     http://wanwatch/metrics
 ```
 
-Sub-10 s scrape intervals stress the daemon's per-cycle hot path with no observability benefit — keep at ≥10 s unless debugging.
+Keep scrape intervals at 10 s or longer except when debugging; shorter intervals load the daemon without improving observability.

@@ -12,11 +12,11 @@ type TargetStats struct {
 
 // FamilyStats is the per-(WAN, family) aggregate of all Targets'
 // stats. PerTarget retains the breakdown for the per-target
-// Prometheus gauges (PLAN §7.2).
+// Prometheus gauges (docs/metrics.md).
 //
 // WindowFilled reports whether every per-target sliding window has
 // reached its configured capacity. The daemon uses it to honour the
-// PLAN §8 contract that hysteresis seeds from the first probe
+// docs/specs/failover.md contract that hysteresis seeds from the first probe
 // *Window*, not the first probe *Sample* — without this gate a Lost
 // first sample (probe loop fires before the kernel routes / target
 // host responds) seeds the verdict unhealthy and triggers a
@@ -44,7 +44,7 @@ type ProbeResult struct {
 
 // Aggregate reduces a set of per-Target WindowStats into a single
 // FamilyStats. Each target's mean RTT, jitter, and loss feed into
-// the family aggregate as an unweighted mean — PLAN §8 doesn't
+// the family aggregate as an unweighted mean — docs/specs/failover.md doesn't
 // specify a weighting scheme so the simplest interpretation wins
 // for v1.
 //

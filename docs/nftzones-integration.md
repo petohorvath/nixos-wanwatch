@@ -1,18 +1,18 @@
 # nftzones integration
 
-`nixos-wanwatch` and `nix-nftzones` compose via two attribute outputs and a runtime convention. **No nftzones changes are required** — the integration is a wanwatch-side contract that any firewall consumer can use.
+`nixos-wanwatch` and `nix-nftzones` compose through two published Nix values and a runtime convention. nftzones needs no changes: the contract is on the wanwatch side, and any nftables or iptables configuration can use it. See [ADR 0007](./adr/0007-nftzones-integration-via-published-values.md).
 
-## The contract
+## Contract
 
-| Step | Owner | What |
+| Step | Owner | Action |
 |---|---|---|
-| 1 | wanwatch | Allocates a deterministic fwmark + routing-table id per Group. Exposes them as `config.services.wanwatch.marks.<group>` and `.tables.<group>`. |
-| 2 | wanwatch (daemon) | Installs `ip rule add fwmark <mark> table <table>` and the v6 equivalent at startup. Idempotent. |
-| 3 | wanwatch (daemon) | Writes `default via <gw> dev <iface>` into the group's table per family on every Decision. |
-| 4 | nftzones (user) | Sets `meta mark set <mark>` in `sroute` / `droute` rules, referencing `config.services.wanwatch.marks.<group>` by name. |
-| 5 | nftzones (user, optional) | Adds an `snat` rule masquerading egress out of the WAN zone — the SNAT automatically follows the active interface because the route does. |
+| 1 | wanwatch (module) | Publishes each Group's user-declared `mark` and `table` as `config.services.wanwatch.marks.<group>` and `.tables.<group>`. |
+| 2 | wanwatch (daemon) | Installs `ip rule add fwmark <mark> table <table>` and its IPv6 equivalent at startup. Idempotent. |
+| 3 | wanwatch (daemon) | On every Decision, writes the active Member's default route into the Group's table for each Family. |
+| 4 | nftzones (user) | Sets `meta mark set <mark>` in `sroute` or `droute` rules, referencing `config.services.wanwatch.marks.<group>`. |
+| 5 | nftzones (user, optional) | Adds an `snat` rule for egress out of the WAN zone. It follows the active interface because the route does. |
 
-The table id is *shared* across families: v4 uses `table <table>` in the v4 RIB; v6 uses the same `table <table>` in the v6 RIB. Both populated by the same daemon Decision.
+One table ID serves both Families: the same `table <table>` exists in the IPv4 and IPv6 routing tables, and one Decision populates both.
 
 ## End-to-end example
 
@@ -68,36 +68,37 @@ The table id is *shared* across families: v4 uses `table <table>` in the v4 RIB;
 }
 ```
 
-What this configures:
+This configuration has the following effect:
 
-1. `wanwatch.marks.home-uplink` is the integer the user wrote on `services.wanwatch.groups.home-uplink.mark` — re-exposed as a read-only output so downstream modules reference by name.
-2. The `mangle` rule in nftzones renders to `meta mark set 0x3e8` (= 1000) in the loaded nftables ruleset.
-3. The wanwatchd daemon, at startup, adds `ip rule add fwmark 0x3e8 table 1000` and the v6 equivalent.
-4. On every Decision, wanwatchd rewrites table `1000`'s default route per family to the active member's gateway.
-5. The nftzones snat rule masquerades LAN-origin traffic in the `wan-home` zone. Because the SNAT applies in the wan zone (regardless of which interface in that zone), it follows the daemon's route changes for free.
+1. `services.wanwatch.marks.home-uplink` is the integer declared in `services.wanwatch.groups.home-uplink.mark`, re-exposed read-only so downstream modules reference it by name.
+2. The nftzones `mangle` rule renders to `meta mark set 0x3e8` (1000).
+3. At startup, `wanwatchd` adds `ip rule add fwmark 0x3e8 table 1000` and its IPv6 equivalent.
+4. On every Decision, `wanwatchd` rewrites table `1000`'s default route per Family for the active Member.
+5. The nftzones `snat` rule masquerades LAN traffic leaving the `wan-home` zone. It applies to every interface in the zone, so it follows the daemon's route changes.
 
 ## What changes on a Decision
 
+Failover from `primary` (dual-stack) to `backup` (point-to-point, IPv4 only) changes only the routes:
+
+```text
+Before failover:                 After failover:
+ip rule:                         ip rule:                    (unchanged)
+  fwmark 0x3e8 lookup 1000         fwmark 0x3e8 lookup 1000
+
+ip route table 1000:             ip route table 1000:
+  default via 192.0.2.1 eth0       default dev wwan0 scope link
+ip -6 route table 1000:          ip -6 route table 1000:     (unchanged)
+  default via 2001:db8::1 eth0     default via 2001:db8::1 eth0
+
+nft rule (sroutes.lan-via-home): nft rule:                   (unchanged)
+  meta mark set 0x3e8              meta mark set 0x3e8
 ```
-Before failover:                After failover:
-ip rule:                        ip rule:                  (unchanged)
-  fwmark 0x3e8 lookup 1000        fwmark 0x3e8 lookup 1000
 
-ip route table 1000:            ip route table 1000:
-  default via 192.0.2.1 eth0      default via 100.64.0.1 wwan0
-ip -6 route table 1000:         ip -6 route table 1000:
-  default via 2001:db8::1 eth0    default via 2001:db8::1 wwan0  (if backup has v6)
-                                  (no v6 default at all)         (if backup has only v4)
+The mark, the policy rule, and the nftables ruleset stay stable. A Family the new Member does not serve keeps its previous route; the stale-route policy is tracked in [`TODO.md`](../TODO.md).
 
-nft rule (sroutes.lan-via-home): nft rule:                 (unchanged)
-  meta mark set 0x3e8             meta mark set 0x3e8
-```
+## Why reference marks by name
 
-Only the route changes. The mark, the rule, and the nftables ruleset are all stable.
-
-## Why per-name, not per-int
-
-A typical "fwmark routing" how-to assigns marks manually and threads the integer literal through every downstream file:
+Typical fwmark-routing recipes repeat the integer in every file:
 
 ```nft
 table inet fw {
@@ -107,35 +108,34 @@ table inet fw {
 # ip route add default via 192.0.2.1 dev eth0 table 100
 ```
 
-Two failure modes:
+That invites two failures:
 
-1. **Drift**: someone bumps the mark in one file and forgets the other.
-2. **Collision**: a third config (e.g. WireGuard, Tailscale, Calico) picks the same integer.
+1. **Drift**: one file changes the mark and another does not.
+2. **Collision**: another configuration, such as WireGuard, Tailscale, or Calico, picks the same integer.
 
-wanwatch sidesteps both by keeping the integer in one place — `services.wanwatch.groups.<group>.mark` — and re-exposing it as `services.wanwatch.marks.<group>` for cross-module reference:
+wanwatch keeps the integer in one place, `services.wanwatch.groups.<group>.mark`, and re-exposes it as `services.wanwatch.marks.<group>`:
 
-- Same name everywhere → same int, by construction.
-- `config.assertUniqueMarksAndTables` asserts no two groups share a `mark` or `table` at module-eval time and refuses to render on duplicate.
-- The `wanwatch.types.fwmark` / `routingTableId` types pin the integer to `[1000, 32767]`, well clear of the kernel-reserved tables `{253, 254, 255}` and the small-integer space ad-hoc scripts often use.
+- The same name always yields the same integer.
+- `config.assertUniqueMarksAndTables` rejects two Groups sharing a `mark` or `table` at evaluation time.
+- `wanwatch.types.fwmark` and `routingTableId` restrict values to `[1000, 32767]`, clear of the kernel-reserved tables `{253, 254, 255}` and the small integers ad hoc scripts tend to use.
 
-## Cross-references
+## Source map
 
-| File | What |
+| File | Role |
 |---|---|
-| `lib/internal/config.nix:assertUniqueMarksAndTables` | Cross-group duplicate-mark / duplicate-table detection. |
-| `lib/internal/marks.nix` / `tables.nix` | Allocators (hash + linear probe). |
+| `lib/internal/config.nix:assertUniqueMarksAndTables` | Rejects duplicate marks and tables across Groups. |
 | `daemon/internal/apply/rule.go:EnsureRule` | Installs the fwmark policy rules at startup. |
-| `daemon/internal/apply/route.go:WriteDefault` | Rewrites the table's default on every Decision. |
-| `tests/vm/nftzones-integration.nix` | VM scenario asserting the full contract on a live kernel. |
+| `daemon/internal/apply/route.go:WriteDefault` | Rewrites the table's default route on every Decision. |
+| `tests/vm/nftzones-integration.nix` | VM scenario asserting the contract on a live kernel. |
 
-## Decision policy: SNAT vs DNAT
+## SNAT and DNAT
 
-For most home-router cases, **SNAT in the WAN zone is the right tool**. The `sroute` mangle marks the traffic; the policy rule + routing table picks the egress interface; SNAT in the WAN zone rewrites the source IP to the active interface's address. Failover changes only the route; the SNAT rule never needs to know about it.
+SNAT in the WAN zone suits most home routers. The `sroute` mangle marks traffic, the policy rule and routing table pick the egress interface, and SNAT rewrites the source to the active interface's address. Failover changes only the route, so the SNAT rule never needs to know about it.
 
-DNAT (port forwarding inbound) is asymmetric — inbound flows arrive on the *active* interface. If the active changes mid-flow, existing connections break (no graceful path without conntrack helpers). v1 has no opinion here; users wire DNAT manually against the interfaces.
+DNAT (inbound port forwarding) is asymmetric: inbound flows arrive on the active interface, so a mid-flow switch breaks existing connections. wanwatch has no DNAT policy; wire DNAT manually against the interfaces.
 
-## What this doesn't cover
+## Out of scope
 
-- **Multi-WAN load balancing** — v1 is single-active. The `load-balance` strategy arrives in v2 with multipath nexthops.
-- **Per-flow policy** — the mark is per-Group. If two flows out of the LAN should go through different WANs simultaneously, declare two Groups (`home-uplink` and `voip-uplink`) and two sroute rules.
-- **IPv6 prefix delegation** — wanwatch doesn't touch addressing; it only writes default routes via gateways the user declared. PD changes are the user's problem (or systemd-networkd's).
+- **Load balancing.** Selection is single-active; see [ADR 0001](./adr/0001-single-active-failover.md).
+- **Per-flow policy.** The mark is per Group. To route two LAN flows through different WANs at once, declare two Groups (for example `home-uplink` and `voip-uplink`) and two `sroute` rules.
+- **IPv6 prefix delegation.** wanwatch only writes default routes through discovered Gateways and never touches addressing. Prefix-delegation changes belong to the network manager, such as systemd-networkd.

@@ -1,6 +1,6 @@
 name: audit
 
-# Weekly vulnerability scan promised by PLAN §11.10 and AGENTS.md
+# Weekly vulnerability scan promised by AGENTS.md and AGENTS.md
 # §Tests and checks. Two independent jobs:
 #
 #   - govulncheck — scans the built daemon for vulnerable Go symbols
@@ -10,7 +10,7 @@ name: audit
 #
 # A job failure means "something flagged" — the run goes red and
 # the failure surfaces in GitHub's notification stream. We
-# intentionally do not auto-file issues yet; PLAN §11.10 mentions
+# intentionally do not auto-file issues yet; AGENTS.md mentions
 # that as a follow-up, but the simpler "fail loudly" shape is
 # enough to get attention while we're early-release.
 

@@ -73,7 +73,7 @@ const (
 
 // EchoRequestBytes builds an ICMP/ICMPv6 echo request, ready to be
 // passed to a packet conn's WriteTo. ident is the 16-bit identifier
-// (one allocation per (WAN, family) — see PLAN §8 internal/probe);
+// (one allocation per (WAN, family) — see docs/specs/probe-algorithm.md internal/probe);
 // seq is the per-socket monotonic sequence number, modulo 2^16.
 // payload is appended after the 8-byte header — zero-length payload
 // is fine but a few bytes help with debugging in tcpdump traces.

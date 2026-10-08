@@ -111,7 +111,7 @@ pkgs.testers.runNixOSTest {
     )
 
     # 5. Bootstrap installs the Group's fwmark rules in both families
-    #    (PLAN §6.1) before sd_notify READY. Poll anyway, so a future
+    #    (docs/nftzones-integration.md) before sd_notify READY. Poll anyway, so a future
     #    reordering of bootstrap writes fails with a clear timeout.
     mark = router.succeed(
         "jq -r '.groups.\"home-uplink\".mark' /etc/wanwatch/config.json"

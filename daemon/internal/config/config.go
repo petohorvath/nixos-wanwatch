@@ -6,7 +6,7 @@
 // layers (a non-positive intervalMs, for one, would panic
 // time.NewTicker deep in a prober goroutine).
 //
-// Schema in PLAN §5.5 / `docs/specs/daemon-config.md` (Pass 6).
+// Schema in docs/specs/daemon-state.md / `docs/specs/daemon-config.md` (Pass 6).
 package config
 
 import (

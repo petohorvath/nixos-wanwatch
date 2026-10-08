@@ -269,8 +269,8 @@ func TestHysteresisFlipsOnlyAfterRequiredRun(t *testing.T) {
 // TestHysteresisSeedBypassesRamp: Seed sets the verdict directly
 // from the first observation — no consecutive-cycle ramp. A state
 // with consecutiveUp=3 seeded healthy is healthy at once, where
-// Observe would need three healthy observations. This is the PLAN
-// §8 cold-start handoff that keeps a healthy WAN from flapping
+// Observe would need three healthy observations. This is the
+// cold-start handoff (docs/specs/failover.md) that keeps a healthy WAN from flapping
 // during warm-up.
 func TestHysteresisSeedBypassesRamp(t *testing.T) {
 	t.Parallel()

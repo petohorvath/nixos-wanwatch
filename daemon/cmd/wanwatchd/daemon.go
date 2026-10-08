@@ -21,7 +21,7 @@ import (
 // per Pinger goroutine; updated when a ProbeResult arrives.
 //
 // `cooked` flips to true on the first ProbeResult whose sliding
-// window is filled — until then, PLAN §8 cold-start grants the
+// window is filled — until then, docs/specs/failover.md cold-start grants the
 // family healthy-via-carrier (handled in combineFamilies). Without
 // this an interface that boots before its first probe cycle would
 // be unhealthy and the daemon would publish no Selection even when
@@ -77,7 +77,7 @@ func (w *wanState) carrierUp() bool {
 // stored field would inevitably go stale when one updated without
 // the other. combineFamilies counts an uncooked family as healthy,
 // so before the first probe Window this reduces to carrierUp() —
-// the PLAN §8 cold-start rule.
+// the docs/specs/failover.md cold-start rule.
 func (w *wanState) healthy() bool {
 	return w.carrierUp() && combineFamilies(w.families, w.cfg.Probe.FamilyHealthPolicy)
 }
@@ -178,7 +178,7 @@ func (d *daemon) bootstrap(ctx context.Context) error {
 	// Publish an initial state.json so consumers (state-readers,
 	// wanwatch_state_publications_total, integration checks) see
 	// the daemon's view from the very first scrape — even before
-	// any probe sample lands. PLAN §8 cold-start.
+	// any probe sample lands. docs/specs/failover.md cold-start.
 	d.writeStateSnapshot(time.Time{})
 	return nil
 }
@@ -200,7 +200,7 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	// Cold-start gate: defer hysteresis seed until the first probe
 	// Window is *full*. Until then, the family stays `cooked=false`
 	// and combineFamilies treats it as healthy via carrier alone
-	// (PLAN §8). Without this gate, a Lost first Sample — common on
+	// (docs/specs/failover.md). Without this gate, a Lost first Sample — common on
 	// loaded CI runners, where the probe loop fires before the
 	// route to the target has converged — seeds the hysteresis
 	// unhealthy and produces a spurious down→up Decision pair once
@@ -224,7 +224,7 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	prevHealthy := ws.healthy()
 
 	// First *full* Window for a (WAN, family) seeds the hysteresis
-	// from the measured Health (PLAN §8 cold-start handoff); every
+	// from the measured Health (docs/specs/failover.md cold-start handoff); every
 	// Window after ramps through Observe's consecutive-cycle logic.
 	prevCooked := fs.cooked
 	fs.cooked = true
@@ -257,13 +257,13 @@ func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	// above; one that doesn't (e.g. v4 drops while v6 holds under
 	// familyHealthPolicy=any) wouldn't otherwise update state.json
 	// at all, leaving wans[<name>].families[<f>].healthy stale
-	// relative to the live Prometheus view. PLAN §5.5: state.json
+	// relative to the live Prometheus view. docs/specs/daemon-state.md: state.json
 	// mirrors per-family Health, not just Decisions.
 	d.writeStateSnapshot(time.Time{})
 }
 
 // handleLinkEvent updates per-WAN carrier/operstate. Carrier-down
-// fast-tracks the WAN to unhealthy (PLAN §8 cold-start invariant)
+// fast-tracks the WAN to unhealthy (docs/specs/failover.md cold-start invariant)
 // — the selector sees the carrier change immediately, without
 // waiting for the probe to time out.
 func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
@@ -342,7 +342,7 @@ func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committe
 // Switch-only: it runs when both old and next are present. On a
 // `down` there is no healthy successor and the old default route is
 // left in place, so a flush would only churn. Best-effort per
-// PLAN §6.1 — a resolve or flush failure is logged and metered but
+// docs/nftzones-integration.md — a resolve or flush failure is logged and metered but
 // never fails the Decision; the routes have already converged.
 func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, old, next selector.Active) {
 	if !old.Has || !next.Has {
@@ -396,8 +396,8 @@ func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 // It returns an error if any family *hard*-fails — the ifindex
 // lookup, or a netlink write — so the Decision module can hold the
 // Decision pending and retry. A family with no gateway cached yet
-// is *not* a failure: that write is intentionally deferred (PLAN
-// §6), and handleRouteEvent reapplies it once the gateway is
+// is *not* a failure: that write is intentionally deferred (docs/adr/0004-runtime-gateway-discovery.md),
+// and handleRouteEvent reapplies it once the gateway is
 // discovered.
 func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan string, families ...probe.Family) error {
 	ws, ok := d.wans[activeWan]

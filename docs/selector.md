@@ -1,6 +1,6 @@
 # Selector
 
-The selector maps per-WAN Health to a per-Group Selection. It is pure and deterministic: same inputs always produce the same output. Two parallel implementations exist — `lib/internal/selector.nix` (pure Nix) and `daemon/internal/selector/` (Go) — and a cross-language drift test pins their strategy registries against each other.
+The selector maps per-WAN Health to a per-Group Selection. It is a pure, deterministic function implemented twice: `lib/internal/selector.nix` (Nix) and `daemon/internal/selector/` (Go). A cross-language test pins their Strategy registries to each other.
 
 ## Inputs
 
@@ -15,8 +15,8 @@ type Group struct {
 
 type Member struct {
     Wan      string
-    Weight   int     // reserved for v2 multi-active
-    Priority int     // lower is preferred
+    Weight   int // reserved for multi-active Strategies
+    Priority int // lower is preferred
 }
 
 type MemberHealth struct {
@@ -25,7 +25,7 @@ type MemberHealth struct {
 }
 ```
 
-`Healthy` is the *externally-visible* verdict, post-threshold and post-hysteresis. The selector never sees raw probe stats.
+`Healthy` is the Health verdict after thresholds and Hysteresis. The selector never sees raw Probe statistics.
 
 ## Output
 
@@ -35,23 +35,21 @@ type Selection struct {
     Active Active
 }
 
-// Comparable (Go `==` works between Actives), removing the
-// `*string` nil-check + deref pattern at every consumer.
+// Comparable with ==.
 type Active struct {
     Wan string
     Has bool
 }
 
-// NoActive is the zero-value Active; exported for readability at
-// call sites that want to name the "no member healthy" case.
+// The "no Member healthy" value.
 var NoActive = Active{}
 ```
 
-When `Active.Has` is false (`Active == NoActive`), the daemon writes no default route into the group's table. The fwmark policy rule stays in place — userspace traffic gets marked but has no next hop until a member recovers.
+When `Active == NoActive`, the daemon writes no routes for the Group. The previous default route and the fwmark rule stay in place until a Member recovers.
 
 ## Strategy: `primary-backup`
 
-```
+```text
 healthy = members where MemberHealth.Healthy
 if healthy is empty:
     return Selection{Active: NoActive}
@@ -59,17 +57,15 @@ sort healthy by (priority asc, wan asc)
 return Selection{Active: Active{Wan: healthy[0].Member.Wan, Has: true}}
 ```
 
-Lowest `priority` wins. Ties broken by lexicographic WAN name — guarantees determinism even when two healthy members share the same priority. `weight` is ignored entirely.
+The lowest `priority` wins, and ties go to the lexicographically first WAN name, so equal priorities stay deterministic. `weight` is ignored.
 
-### Examples
-
-| Members (priority, healthy) | Active |
+| Members (priority, Health) | Active |
 |---|---|
 | `[primary=1 ✓, backup=2 ✓]` | `primary` |
 | `[primary=1 ✗, backup=2 ✓]` | `backup` |
 | `[primary=1 ✗, backup=2 ✗]` | `NoActive` |
-| `[a=1 ✓, b=1 ✓, c=1 ✓]` | `a` (tie, lex name) |
-| `[primary=2 ✗, backup=2 ✓, fallback=3 ✓]` | `backup` (lower priority among healthy) |
+| `[a=1 ✓, b=1 ✓, c=1 ✓]` | `a` (tie, lexicographic name) |
+| `[primary=2 ✗, backup=2 ✓, fallback=3 ✓]` | `backup` (lowest healthy priority) |
 
 ## Strategy registry
 
@@ -79,45 +75,37 @@ var strategies = map[string]Strategy{
 }
 ```
 
-`group.validStrategies` (Nix) and `selector.KnownStrategies()` (Go) are the two surfaces that name the registry. A test under `tests/unit/internal/selector.nix` (`testStrategiesMatchGroupValidStrategies`) asserts both produce the same set — adding a strategy on one side without the other fails at eval time, not at first `selector.Select` call.
-
-v2 will add `load-balance` once multi-active lands.
+`group.validStrategies` (Nix) and `selector.KnownStrategies()` (Go) both name the registry. `testStrategiesMatchGroupValidStrategies` in `tests/unit/internal/selector.nix` asserts they match, so adding a Strategy on one side only fails at evaluation time. A `load-balance` Strategy is deferred until multi-active Selection exists; see [ADR 0001](./adr/0001-single-active-failover.md).
 
 ## Hysteresis
 
-The selector treats Healthy as a boolean. Producing that boolean from raw probe samples involves two stages:
+Two stages turn raw Samples into the boolean Health the selector consumes.
 
-### Stage 1 — band-pass thresholds (per family)
+### Stage 1: band-pass thresholds (per Family)
 
-| State | Flip-down rule | Flip-up rule |
+| Current Health | Becomes unhealthy when | Becomes healthy when |
 |---|---|---|
-| Healthy | `loss ≥ lossPctDown` OR `rtt ≥ rttMsDown` | (stay) |
-| Unhealthy | (stay) | `loss ≤ lossPctUp` AND `rtt ≤ rttMsUp` |
+| healthy | `loss ≥ lossPctDown` or `rtt ≥ rttMsDown` | — |
+| unhealthy | — | `loss ≤ lossPctUp` and `rtt ≤ rttMsUp` |
 
-Between the bands the verdict holds. The Nix-side option-type validator enforces `Up < Down` for both metrics so the band is always non-empty.
+Between the bands, Health holds. The Nix option type enforces `Up < Down` for both metrics.
 
-### Stage 2 — consecutive-cycle filter
+### Stage 2: consecutive-cycle filter
 
-A `HysteresisState` per (WAN, family) counts consecutive observations in the new direction. The verdict flips only after `consecutiveUp` (or `consecutiveDown`) successive samples cross the threshold the same way.
+A `HysteresisState` per (WAN, Family) counts consecutive observations in the new direction. Health flips only after `consecutiveUp` or `consecutiveDown` successive observations agree. Thresholds below 1 are clamped to 1; the Nix layer is the authoritative validator.
 
 ```go
-type HysteresisState struct {
-    healthyCount   int
-    unhealthyCount int
-    healthy        bool   // externally visible
-}
-
-func (h *HysteresisState) Observe(observed bool, up, down int) bool {
-    if observed {
+func (h *HysteresisState) Observe(observedHealthy bool) bool {
+    if observedHealthy {
         h.unhealthyCount = 0
         h.healthyCount++
-        if !h.healthy && h.healthyCount >= up {
+        if !h.healthy && h.healthyCount >= h.consecutiveUp {
             h.healthy = true
         }
     } else {
         h.healthyCount = 0
         h.unhealthyCount++
-        if h.healthy && h.unhealthyCount >= down {
+        if h.healthy && h.unhealthyCount >= h.consecutiveDown {
             h.healthy = false
         }
     }
@@ -125,27 +113,23 @@ func (h *HysteresisState) Observe(observed bool, up, down int) bool {
 }
 ```
 
-### Cold-start path
+### Cold start
 
-Until the first *full* probe Window cooks for a family, that family's `familyState.cooked` flag is `false`. `combineFamilies` treats an uncooked family as a healthy vote — `carrier=up` alone is enough to mark the WAN healthy and fire an initial Decision. Once a full Window lands (`FamilyStats.WindowFilled = true`), the hysteresis-gated verdict takes over via `Hysteresis.Seed` and subsequent `ProbeResult`s feed `Hysteresis.Observe`.
+A Family stays uncooked (`familyState.cooked = false`) until its first full Window. `combineFamilies` counts an uncooked Family as healthy, so carrier-up alone makes the WAN healthy and produces an initial Decision instead of publishing no Selection while Samples accumulate.
 
-The "first *full* Window" qualifier matters: emitting on every probe Sample (as the daemon used to) lets a Lost first Sample seed the hysteresis unhealthy, so a healthy WAN flaps down→up once probes converge — a spurious Decision pair PLAN §8 expressly wants to avoid. Waiting for a filled Window means we evaluate a stable verdict, not a one-off transient.
-
-This honors PLAN §8: "health is unknown but carrier is at least known". Without it, a freshly-booted daemon would publish no Selection until probes finished accumulating samples.
+When the Window fills (`FamilyStats.WindowFilled`), `HysteresisState.Seed` adopts the measured Health directly, and later results go through `Observe`. Waiting for a full Window prevents one lost first Sample from seeding the WAN unhealthy and producing a spurious down/up Decision pair. The cold-start invariant is specified in [`specs/failover.md`](./specs/failover.md#cold-start-invariant).
 
 ### Carrier fast-track
 
-A carrier-down event flips the WAN's `carrierUp()` to false. `buildMemberHealth` ANDs that into Healthy, so the member becomes immediately unhealthy without waiting for the probe loop to time out. Recovery follows the reverse path: carrier-up flips back to `carrierUp()` and the Selection re-evaluates.
+Carrier loss makes `carrierUp()` false, and `buildMemberHealth` ANDs it into `Healthy`, so the Member becomes unhealthy without waiting for Probe timeouts. Carrier recovery reverses the path and the Selection re-evaluates.
 
 ## Determinism
 
-`selector.compute` (Nix) and `selector.Select` (Go) are pure functions over `(Group, []MemberHealth)`. The hysteresis is stateful, but its inputs are explicit — every test exercises a fresh `HysteresisState`. Replaying the same observation sequence always produces the same verdict.
-
-The `tests/unit/internal/selector.nix:testComputeDeterministic` test pins this: same inputs across 50 calls produce identical outputs.
+`selector.compute` (Nix) and `selector.Select` (Go) are pure functions of `(Group, []MemberHealth)`. Hysteresis is stateful but has explicit inputs, so replaying the same observation sequence yields the same Health. `testComputeDeterministic` in `tests/unit/internal/selector.nix` checks that 50 identical calls return identical output.
 
 ## Family-policy aggregation
 
-```nix
+```text
 combineFamilies(families, policy):
     probed, healthy = 0, 0
     for f in families:
@@ -158,12 +142,12 @@ combineFamilies(families, policy):
         default:    return healthy == probed  # "all"
 ```
 
-The default is `"all"` — conservative for a routing-critical decision. `"any"` is useful for dual-stack WANs where one family being temporarily reachable is enough.
+The default `all` is conservative for a routing decision; `any` suits dual-stack WANs where one reachable Family is enough. See [ADR 0005](./adr/0005-family-health-policy-defaults-to-all.md).
 
-## What the selector does NOT decide
+## Out of scope
 
-- **When to fail over.** That's hysteresis (above) and `intervalMs * consecutiveDown` after a probe-driven Decision, or sub-second after a carrier event.
-- **Which routes / rules to install.** The apply layer (`daemon/internal/apply/`) translates a Selection into kernel state.
-- **What to tell userspace.** The state writer + hook runner do that.
+- **Failover timing.** Hysteresis sets it: about `intervalMs * consecutiveDown` for a Probe-driven Decision, sub-second for a carrier event.
+- **Routes and rules.** `daemon/internal/apply/` translates a Selection into kernel state.
+- **Userspace notification.** The State writer and Hook runner handle it.
 
-The selector is the strategy layer only. Tests live next to it (`selector_test.go`, `primarybackup_test.go`, `hysteresis_test.go`, `tests/unit/internal/selector.nix`); the full Decision pipeline is tested at the cmd/wanwatchd boundary and again end-to-end in `tests/vm/`.
+Selector tests live in `selector_test.go`, `primarybackup_test.go`, `hysteresis_test.go`, and `tests/unit/internal/selector.nix`. The full Decision pipeline is tested in `cmd/wanwatchd` and end to end in `tests/vm/`.
