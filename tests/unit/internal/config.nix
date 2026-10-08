@@ -16,28 +16,20 @@ let
     wan
     ;
 
-  # One-member Groups keyed by name, each with its `[ mark table ]`.
+  # One-member Groups keyed by name, each with the given mark and table.
   makeGroups = lib.mapAttrs (
-    name: markAndTable:
-    group.make (
-      fixtures.inputs.group.minimal
-      // {
-        inherit name;
-        mark = builtins.elemAt markAndTable 0;
-        table = builtins.elemAt markAndTable 1;
-      }
-    )
+    name: markAndTable: group.make (fixtures.inputs.group.minimal // markAndTable // { inherit name; })
   );
 
   distinctGroups = makeGroups {
-    home = [
-      1000
-      1000
-    ];
-    work = [
-      1001
-      1001
-    ];
+    home = {
+      mark = 1000;
+      table = 1000;
+    };
+    work = {
+      mark = 1001;
+      table = 1001;
+    };
   };
 
   wans = {
@@ -56,7 +48,7 @@ let
     inherit (config) assertUniqueMarksAndTables resolveAllocations;
   };
 
-  makeUniquenessTests = _: assertUnique: {
+  uniquenessTests = _: assertUnique: {
     testEmptyInput = {
       expr = assertUnique { };
       expected = { };
@@ -71,14 +63,14 @@ let
 
     testRejectsSharedMark = {
       expr = assertUnique (makeGroups {
-        a = [
-          1500
-          1500
-        ];
-        b = [
-          1500
-          1600
-        ];
+        a = {
+          mark = 1500;
+          table = 1500;
+        };
+        b = {
+          mark = 1500;
+          table = 1600;
+        };
       });
       expectedError = {
         type = "ThrownError";
@@ -88,14 +80,14 @@ let
 
     testRejectsSharedTable = {
       expr = assertUnique (makeGroups {
-        a = [
-          1500
-          1500
-        ];
-        b = [
-          1600
-          1500
-        ];
+        a = {
+          mark = 1500;
+          table = 1500;
+        };
+        b = {
+          mark = 1600;
+          table = 1500;
+        };
       });
       expectedError = {
         type = "ThrownError";
@@ -105,18 +97,18 @@ let
 
     testNamesEveryGroupSharingAMark = {
       expr = assertUnique (makeGroups {
-        a = [
-          1500
-          1500
-        ];
-        b = [
-          1500
-          1600
-        ];
-        c = [
-          1500
-          1700
-        ];
+        a = {
+          mark = 1500;
+          table = 1500;
+        };
+        b = {
+          mark = 1500;
+          table = 1600;
+        };
+        c = {
+          mark = 1500;
+          table = 1700;
+        };
       });
       expectedError = {
         type = "ThrownError";
@@ -142,7 +134,7 @@ in
     expected = 1;
   };
 
-  uniqueness = lib.mapAttrs makeUniquenessTests uniquenessChecks;
+  uniqueness = lib.mapAttrs uniquenessTests uniquenessChecks;
 
   render = {
     testEmptyInput = {
@@ -181,14 +173,14 @@ in
     testRejectsSharedMark = {
       expr = config.render {
         groups = makeGroups {
-          a = [
-            1500
-            1500
-          ];
-          b = [
-            1500
-            1600
-          ];
+          a = {
+            mark = 1500;
+            table = 1500;
+          };
+          b = {
+            mark = 1500;
+            table = 1600;
+          };
         };
       };
       expectedError = {

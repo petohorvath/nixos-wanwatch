@@ -93,7 +93,7 @@ let
 
     Returns `{ testAcceptsValid; testRejectsInvalid; }`.
   */
-  makeCaseTests =
+  caseTests =
     { isAccepted, isRejected }:
     {
       valid ? [ ],
@@ -118,11 +118,11 @@ let
     `predicate`: a function returning a Boolean.
     `cases`: `{ valid; invalid; }`, such as a `fixtures.cases` table.
 
-    Returns the tests described for `makeCaseTests`.
+    Returns the tests described for `caseTests`.
   */
   predicateTests =
     predicate:
-    makeCaseTests {
+    caseTests {
       isAccepted = predicate;
       isRejected = value: !predicate value;
     };
@@ -158,34 +158,35 @@ in
     `type`: the option type under test.
     `cases`: `{ valid; invalid; }`, such as a `fixtures.cases` table.
 
-    Returns the tests described for `makeCaseTests`.
+    Returns the tests described for `caseTests`.
   */
   typeTests = type: predicateTests (isAcceptedByType type);
 
   /*
     Build case tests for one field of a value type: `tryMake` accepts
     each valid value and rejects each invalid one with exactly `kind`.
+    Suites bind the first argument once per value type.
 
     `tryMake`: the value type's `tryMake`.
     `input`: a valid input whose field the cases replace.
-    `path`: the attribute path of the field, such as
-    `[ "hysteresis" "consecutiveUp" ]`.
+    `field`: the field's attribute path, dot-separated, such as
+    `"hysteresis.consecutiveUp"`.
     `kind`: the error kind an invalid value must produce.
     `cases`: `{ valid; invalid; }`, such as a `fixtures.cases` table.
 
-    Returns the tests described for `makeCaseTests`.
+    Returns the tests described for `caseTests`.
+
+      probeFieldTests = fieldTests { inherit (probe) tryMake; input = …; };
+      probeFieldTests "method" "probeInvalidMethod" cases.methods
   */
   fieldTests =
-    {
-      tryMake,
-      input,
-      path,
-      kind,
-    }:
+    { tryMake, input }:
+    field: kind:
     let
-      tryMakeWith = value: tryMake (lib.recursiveUpdate input (lib.setAttrByPath path value));
+      tryMakeWith =
+        value: tryMake (lib.recursiveUpdate input (lib.setAttrByPath (lib.splitString "." field) value));
     in
-    makeCaseTests {
+    caseTests {
       isAccepted = value: (tryMakeWith value).success;
       isRejected = value: getErrorKinds (tryMakeWith value) == [ kind ];
     };

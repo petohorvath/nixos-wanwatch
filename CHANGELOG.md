@@ -32,7 +32,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 - `daemon/internal/rtnl.RouteSubscriber` — emits per-`(iface, family)` default-route add/del events from the main RIB, filtered to WAN interfaces.
 - `daemon/cmd/wanwatchd.gatewayCache` — mirrors the kernel's view; drives non-PtP route writes and re-applies on route flap.
 - VM scenarios added since 0.1.0: `tests/vm/cold-start.nix`, `tests/vm/failover-probe-loss.nix` (v4 netem-driven), `tests/vm/failover-probe-loss-v6.nix` (v6 netem-driven; closes the v6 probe + threshold + hysteresis gap that the carrier-driven `failover-v6.nix` left unexercised), `tests/vm/gateway-discovery.nix`.
-- `tests/integration/` split into `scenarios/` + `rejections/` per PLAN §9.3, with two rejection cases (`probe-no-targets`, `probe-family-mismatch`) proving the lib validators stay wired into the live module-eval path.
+- Integration rejection cases (`testProbeNoTargets`, `testProbeFamilyMismatch` in `tests/integration/`) proving the lib validators stay wired into the live module-eval path.
 - `daemon/cmd/wanwatchd/daemon_test.go` — first unit coverage for the daemon's pipeline (`writeStateSnapshot`, `handleProbeResult`, `handleRouteEvent`). Lived as `state.go` before with no test file.
 - `wanwatch_apply_op_errors_total{op="rule_install"}` is now incremented on bootstrap `EnsureRule` failure (was: silent from the metric's perspective).
 

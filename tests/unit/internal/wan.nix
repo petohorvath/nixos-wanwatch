@@ -1,7 +1,7 @@
 /*
   Tests for `lib/internal/wan.nix`, exposed as `wanwatch.wan`.
   `skeleton.nix` covers the `make` / `tryMake` / `toJSONValue`
-  contract. A WAN's families derive from its probe targets.
+  contract.
 */
 {
   fixtures,
@@ -12,17 +12,13 @@
 let
   inherit (fixtures) cases;
   inherit (fixtures.inputs.wan) full minimal;
-  inherit (helpers) fieldTests getErrorKinds;
+  inherit (helpers) getErrorKinds;
   inherit (wanwatch) probe wan;
 
-  wanField =
-    field: kind:
-    fieldTests {
-      inherit (wan) tryMake;
-      inherit kind;
-      input = minimal;
-      path = [ field ];
-    };
+  wanFieldTests = helpers.fieldTests {
+    inherit (wan) tryMake;
+    input = minimal;
+  };
 in
 {
   testPointToPointDefaultsToFalse = {
@@ -47,36 +43,22 @@ in
     ];
   };
 
-  families = {
-    testV4Only = {
-      expr = wan.families (wan.make minimal);
-      expected = {
-        v4 = true;
-        v6 = false;
-      };
-    };
-
-    testV6Only = {
-      expr = wan.families (wan.make (minimal // { probe.targets.v6 = [ "2606:4700:4700::1111" ]; }));
-      expected = {
-        v4 = false;
-        v6 = true;
-      };
-    };
-
-    testDualStack = {
-      expr = wan.families (wan.make full);
-      expected = {
-        v4 = true;
-        v6 = true;
-      };
-    };
+  # A WAN serves the Families its Probe Targets cover.
+  testFamiliesFollowProbe = {
+    expr = map (input: wan.families (wan.make input)) [
+      minimal
+      full
+    ];
+    expected = map (input: probe.families (probe.make input.probe)) [
+      minimal
+      full
+    ];
   };
 
   fields = {
-    name = wanField "name" "wanInvalidName" cases.identifiers;
-    interface = wanField "interface" "wanInvalidInterface" cases.interfaceNames;
-    pointToPoint = wanField "pointToPoint" "wanInvalidPointToPoint" cases.booleans;
+    name = wanFieldTests "name" "wanInvalidName" cases.identifiers;
+    interface = wanFieldTests "interface" "wanInvalidInterface" cases.interfaceNames;
+    pointToPoint = wanFieldTests "pointToPoint" "wanInvalidPointToPoint" cases.booleans;
   };
 
   rejections = helpers.rejectionTests wan.tryMake {
@@ -84,7 +66,7 @@ in
     wanInvalidInterface.missingInterface = removeAttrs minimal [ "interface" ];
   };
 
-  # The probe's own report follows the wrapping kind.
+  # The Probe's own error kinds follow the wrapping kind.
   testForwardsProbeErrors = {
     expr = getErrorKinds (wan.tryMake (minimal // { probe.targets = { }; }));
     expected = [

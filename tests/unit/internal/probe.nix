@@ -14,16 +14,13 @@
 let
   inherit (fixtures) cases;
   inherit (fixtures.inputs.probe) minimal;
-  inherit (helpers) fieldTests getErrorKinds;
+  inherit (helpers) getErrorKinds;
   inherit (wanwatch) probe;
 
-  probeField =
-    path: kind:
-    fieldTests {
-      inherit (probe) tryMake;
-      inherit kind path;
-      input = minimal;
-    };
+  probeFieldTests = helpers.fieldTests {
+    inherit (probe) tryMake;
+    input = minimal;
+  };
 
   withThresholds = thresholds: minimal // { inherit thresholds; };
 in
@@ -121,31 +118,34 @@ in
     };
   };
 
-  # Samples may overlap, dpinger-style, so `timeoutMs` may reach or
-  # exceed `intervalMs`.
-  timeout = helpers.predicateTests (input: (probe.tryMake input).success) {
+  accepts = helpers.predicateTests (input: (probe.tryMake input).success) {
     valid = [
+      # Samples may overlap, dpinger-style, so `timeoutMs` may reach or
+      # exceed `intervalMs`.
       (minimal // { timeoutMs = probe.defaults.intervalMs; })
       (minimal // { timeoutMs = 2 * probe.defaults.intervalMs; })
+      # Loss thresholds span the whole percentage range.
+      (withThresholds {
+        lossPctDown = 100;
+        lossPctUp = 0;
+      })
     ];
   };
 
   fields = {
-    method = probeField [ "method" ] "probeInvalidMethod" cases.methods;
-    intervalMs = probeField [ "intervalMs" ] "probeNonPositiveInterval" cases.positiveInts;
-    timeoutMs = probeField [ "timeoutMs" ] "probeNonPositiveTimeout" cases.positiveInts;
-    windowSize = probeField [ "windowSize" ] "probeNonPositiveWindow" cases.positiveInts;
-    consecutiveDown = probeField [
-      "hysteresis"
-      "consecutiveDown"
-    ] "probeNonPositiveHysteresis" cases.positiveInts;
-    consecutiveUp = probeField [
-      "hysteresis"
-      "consecutiveUp"
-    ] "probeNonPositiveHysteresis" cases.positiveInts;
-    familyHealthPolicy = probeField [
-      "familyHealthPolicy"
-    ] "probeInvalidFamilyPolicy" cases.familyHealthPolicies;
+    method = probeFieldTests "method" "probeInvalidMethod" cases.methods;
+    intervalMs = probeFieldTests "intervalMs" "probeNonPositiveInterval" cases.positiveInts;
+    timeoutMs = probeFieldTests "timeoutMs" "probeNonPositiveTimeout" cases.positiveInts;
+    windowSize = probeFieldTests "windowSize" "probeNonPositiveWindow" cases.positiveInts;
+    consecutiveDown =
+      probeFieldTests "hysteresis.consecutiveDown" "probeNonPositiveHysteresis"
+        cases.positiveInts;
+    consecutiveUp =
+      probeFieldTests "hysteresis.consecutiveUp" "probeNonPositiveHysteresis"
+        cases.positiveInts;
+    familyHealthPolicy =
+      probeFieldTests "familyHealthPolicy" "probeInvalidFamilyPolicy"
+        cases.familyHealthPolicies;
   };
 
   rejections = helpers.rejectionTests probe.tryMake {

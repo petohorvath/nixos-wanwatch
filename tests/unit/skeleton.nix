@@ -43,7 +43,7 @@ let
     };
   };
 
-  makeContractTests =
+  contractTests =
     typeName: invalid:
     let
       valueType = wanwatch.${typeName};
@@ -112,4 +112,4 @@ let
       };
     };
 in
-lib.mapAttrs makeContractTests invalidInputs
+lib.mapAttrs contractTests invalidInputs

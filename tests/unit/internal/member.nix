@@ -12,17 +12,13 @@
 let
   inherit (fixtures) cases;
   inherit (fixtures.inputs.member) minimal;
-  inherit (helpers) fieldTests getErrorKinds;
+  inherit (helpers) getErrorKinds;
   inherit (wanwatch) member;
 
-  memberField =
-    field: kind:
-    fieldTests {
-      inherit (member) tryMake;
-      inherit kind;
-      input = minimal;
-      path = [ field ];
-    };
+  memberFieldTests = helpers.fieldTests {
+    inherit (member) tryMake;
+    input = minimal;
+  };
 in
 {
   defaults = {
@@ -41,9 +37,9 @@ in
   };
 
   fields = {
-    wan = memberField "wan" "memberInvalidWan" cases.identifiers;
-    weight = memberField "weight" "memberInvalidWeight" cases.positiveInts;
-    priority = memberField "priority" "memberInvalidPriority" cases.positiveInts;
+    wan = memberFieldTests "wan" "memberInvalidWan" cases.identifiers;
+    weight = memberFieldTests "weight" "memberInvalidWeight" cases.positiveInts;
+    priority = memberFieldTests "priority" "memberInvalidPriority" cases.positiveInts;
   };
 
   rejections = helpers.rejectionTests member.tryMake {

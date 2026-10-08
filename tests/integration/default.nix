@@ -31,7 +31,7 @@ let
   renderConfig = config: builtins.fromJSON config.environment.etc."wanwatch/config.json".text;
 
   # A primary and a backup WAN in one Group.
-  uplinks = {
+  primaryAndBackup = {
     services.wanwatch = {
       enable = true;
       wans = {
@@ -75,7 +75,7 @@ let
             interface = "eth0";
             probe = { inherit targets; };
           };
-          groups.uplink = {
+          groups.home = {
             members = [ { wan = "broken"; } ];
             mark = 1000;
             table = 1000;
@@ -84,12 +84,12 @@ let
       }
     ];
 
-  base = evaluate [ uplinks ];
-  rendered = renderConfig base;
+  baseConfig = evaluate [ primaryAndBackup ];
+  rendered = renderConfig baseConfig;
 
-  telegraf = evaluate [
+  telegrafConfig = evaluate [
     nixosModules.telegraf
-    uplinks
+    primaryAndBackup
     {
       services.wanwatch.telegraf.enable = true;
       services.telegraf.enable = true;
@@ -153,7 +153,7 @@ in
     # Other modules, such as nftzones, read the published values.
     testPublishesMarksAndTables = {
       expr = {
-        inherit (base.services.wanwatch) marks tables;
+        inherit (baseConfig.services.wanwatch) marks tables;
       };
       expected = {
         marks.home-uplink = 1000;
@@ -162,7 +162,7 @@ in
     };
 
     testServiceCapabilities = {
-      expr = base.systemd.services.wanwatch.serviceConfig.AmbientCapabilities;
+      expr = baseConfig.systemd.services.wanwatch.serviceConfig.AmbientCapabilities;
       expected = [
         "CAP_NET_ADMIN"
         "CAP_NET_RAW"
@@ -172,7 +172,7 @@ in
 
   telegraf = {
     testScrapesMetricsSocket = {
-      expr = telegraf.services.telegraf.extraConfig.inputs.prometheus;
+      expr = telegrafConfig.services.telegraf.extraConfig.inputs.prometheus;
       expected = [
         {
           urls = [ "unix:///run/wanwatch/metrics.sock" ];
@@ -184,7 +184,7 @@ in
 
     # The metrics socket has mode 0660.
     testJoinsWanwatchGroup = {
-      expr = builtins.elem "wanwatch" telegraf.users.users.telegraf.extraGroups;
+      expr = builtins.elem "wanwatch" telegrafConfig.users.users.telegraf.extraGroups;
       expected = true;
     };
   };

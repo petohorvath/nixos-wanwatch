@@ -13,17 +13,13 @@
 let
   inherit (fixtures) cases;
   inherit (fixtures.inputs.group) full minimal;
-  inherit (helpers) fieldTests getErrorKinds;
+  inherit (helpers) getErrorKinds;
   inherit (wanwatch) group member;
 
-  groupField =
-    field: kind:
-    fieldTests {
-      inherit (group) tryMake;
-      inherit kind;
-      input = minimal;
-      path = [ field ];
-    };
+  groupFieldTests = helpers.fieldTests {
+    inherit (group) tryMake;
+    input = minimal;
+  };
 
   withMembers = wans: minimal // { members = map (wan: { inherit wan; }) wans; };
 in
@@ -57,10 +53,10 @@ in
   };
 
   fields = {
-    name = groupField "name" "groupInvalidName" cases.identifiers;
-    strategy = groupField "strategy" "groupInvalidStrategy" cases.strategies;
-    table = groupField "table" "groupInvalidTable" cases.markTableIds;
-    mark = groupField "mark" "groupInvalidMark" cases.markTableIds;
+    name = groupFieldTests "name" "groupInvalidName" cases.identifiers;
+    strategy = groupFieldTests "strategy" "groupInvalidStrategy" cases.strategies;
+    table = groupFieldTests "table" "groupInvalidTable" cases.markTableIds;
+    mark = groupFieldTests "mark" "groupInvalidMark" cases.markTableIds;
   };
 
   rejections = helpers.rejectionTests group.tryMake {
@@ -80,7 +76,7 @@ in
     groupInvalidMark.missingMark = removeAttrs minimal [ "mark" ];
   };
 
-  # The member's own report follows the wrapping kind.
+  # The Member's own error kinds follow the wrapping kind.
   testForwardsMemberErrors = {
     expr = getErrorKinds (group.tryMake (withMembers [ "1bad" ]));
     expected = [

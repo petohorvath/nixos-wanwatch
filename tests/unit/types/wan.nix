@@ -24,8 +24,8 @@ in
 
   wan = {
     testNameTakesAttributeKey = {
-      expr = (evalSubmodule types.wan (minimal // { name = "uplink"; })).name;
-      expected = "uplink";
+      expr = (evalSubmodule types.wan (minimal // { name = "backup"; })).name;
+      expected = "backup";
     };
   }
   // typeTests types.wan {
