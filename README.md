@@ -97,7 +97,7 @@ Nix bootstrap and focused validation commands.
 - [`docs/nftzones-integration.md`](./docs/nftzones-integration.md) — wiring with the zone-based firewall.
 - [`docs/metrics.md`](./docs/metrics.md) — Prometheus catalog.
 - [`docs/specs/`](./docs/specs/) — frozen JSON contracts and prior-art distillation.
-- [`docs/glossary.md`](./docs/glossary.md) — enforced terminology.
+- [`GLOSSARY.md`](./GLOSSARY.md) — enforced terminology.
 
 ## License
 

@@ -152,7 +152,7 @@ Changes to architecture, public contracts, compatibility, migration, security bo
 
 ## Terminology and implementation conventions
 
-Use the definitions in [`docs/glossary.md`](./docs/glossary.md) exactly. In particular, a Probe is configuration, a Sample is one attempt, Health is the derived WAN status, a Selection is the current chosen Member, a Decision is a Selection change, and Apply is kernel mutation. Add or revise glossary entries with the change that introduces the concept.
+Use the definitions in [`GLOSSARY.md`](./GLOSSARY.md) exactly. In particular, a Probe is configuration, a Sample is one attempt, Health is the derived WAN status, a Selection is the current chosen Member, a Decision is a Selection change, and Apply is kernel mutation. Add or revise glossary entries with the change that introduces the concept.
 
 Every Nix value type (`wan`, `probe`, `group`, `member`) follows the common `make`, `tryMake`, and `toJSONValue` skeleton. Preserve the meta-test in `tests/unit/skeleton.nix`. Pure-function modules such as `selector` and `config` use purpose-specific APIs instead.
 
@@ -168,13 +168,27 @@ Tests belong with the behavior they protect. Exercise happy paths, rejection pat
 - [`PLAN.md`](./PLAN.md): authoritative v1 design, historical build plan, and conventions.
 - [`CHANGELOG.md`](./CHANGELOG.md): released and unreleased behavior changes and migrations.
 - [`TODO.md`](./TODO.md): deferred work and known cleanup.
-- [`docs/glossary.md`](./docs/glossary.md): authoritative terminology.
+- [`GLOSSARY.md`](./GLOSSARY.md): authoritative terminology.
 - [`docs/wan-monitoring.md`](./docs/wan-monitoring.md): conceptual introduction.
 - [`docs/architecture.md`](./docs/architecture.md): layers and data flow.
 - [`docs/selector.md`](./docs/selector.md): Strategy and Hysteresis behavior.
 - [`docs/nftzones-integration.md`](./docs/nftzones-integration.md): firewall integration.
 - [`docs/metrics.md`](./docs/metrics.md): Prometheus catalog and Telegraf usage.
 - [`docs/specs/`](./docs/specs/): daemon-config, daemon-state, failover, probe-algorithm, and prior-art documents.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `petohorvath/nixos-wanwatch`, managed with `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`.
 
 ## Contributions
 
