@@ -1,8 +1,8 @@
 # daemon-config (frozen spec)
 
-The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by `wanwatchd` at startup. Produced by `wanwatch.config.toJSON` in `lib/internal/config.nix`; parsed and structurally re-validated by `daemon/internal/config/config.go`.
+The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd` reads it at startup. `wanwatch.config.toJSON` in `lib/internal/config.nix` produces it; `daemon/internal/config/config.go` parses it and re-validates its structure.
 
-**Schema version**: `1`. Bumped on any backwards-incompatible field change. The daemon refuses to start if its `SupportedSchema` does not match.
+**Schema version**: `1`. Any backwards-incompatible field change bumps it. The daemon refuses to start when `schema` does not match its `SupportedSchema`.
 
 ## Top-level shape
 
@@ -36,11 +36,11 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `statePath` | string | `/run/wanwatch/state.json` | Where the daemon writes the state snapshot atomically. |
-| `hooksDir` | string | `/etc/wanwatch/hooks` | Root of the hook-script tree (`<dir>/{up,down,switch}.d/`). |
-| `metricsSocket` | string | `/run/wanwatch/metrics.sock` | Unix-socket path for the Prometheus endpoint. |
+| `statePath` | string | `/run/wanwatch/state.json` | Path of the atomically written State snapshot. |
+| `hooksDir` | string | `/etc/wanwatch/hooks` | Root of the Hook tree (`<dir>/{up,down,switch}.d/`). |
+| `metricsSocket` | string | `/run/wanwatch/metrics.sock` | Unix-socket path of the Prometheus endpoint. |
 | `logLevel` | string | `info` | One of `debug`, `info`, `warn`, `error`. |
-| `hookTimeoutMs` | int | `5000` | Per-hook execution deadline in milliseconds. Must be `> 0`. |
+| `hookTimeoutMs` | int | `5000` | Per-Hook execution deadline in milliseconds. Must be `> 0`. |
 
 ## `wans.<name>`
 
@@ -57,10 +57,10 @@ The JSON written by the NixOS module to `/etc/wanwatch/config.json` and read by 
 |---|---|---|---|
 | `name` | string | yes | Must match the attribute key. |
 | `interface` | string | yes | Linux interface name (passes `dev_valid_name`). |
-| `pointToPoint` | bool | no (default `false`) | When true the daemon installs `scope link` default routes (PPP / WireGuard / GRE / tun); when false the daemon discovers the gateway via netlink from the kernel's main routing table at runtime. |
+| `pointToPoint` | bool | no (default `false`) | `true` installs `scope link` default routes (PPP, WireGuard, GRE, tun). `false` discovers the Gateway at runtime from the kernel's main routing table via netlink. |
 | `probe` | object | yes | Probe configuration; shape below. |
 
-The families a WAN serves are derived from `probe.targets`: a non-empty `targets.v4` means the WAN serves v4, a non-empty `targets.v6` means it serves v6. There is no separate gateway / family declaration — the daemon learns the next-hop dynamically and surfaces it in [`state.json`](./daemon-state.md) under `wans.<name>.gateways.{v4,v6}`.
+`probe.targets` determines the Families a WAN serves: a non-empty `targets.v4` means v4, and a non-empty `targets.v6` means v6. No separate Gateway or Family declaration exists. The daemon learns each next-hop at runtime and publishes it in [`state.json`](./daemon-state.md) under `wans.<name>.gateways.{v4,v6}`; see [ADR 0004](../adr/0004-runtime-gateway-discovery.md).
 
 ## `wans.<name>.probe`
 
@@ -88,19 +88,19 @@ The families a WAN serves are derived from `probe.targets`: a non-empty `targets
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `method` | string | `"icmp"` | Probe method. v1: `icmp` only. |
-| `targets` | object | required | Per-family target lists: `{ "v4": [...], "v6": [...] }`. At least one of `v4` / `v6` must be non-empty; each item must be an IP literal of its bucket's family. |
+| `targets` | object | required | Per-Family Target lists: `{ "v4": [...], "v6": [...] }`. At least one list must be non-empty, and each item must be an IP literal of its list's Family. |
 | `intervalMs` | int | `1000` | Time between cycles. |
 | `timeoutMs` | int | `1000` | Per-cycle read deadline. |
-| `windowSize` | int | `10` | Sliding-window capacity. |
-| `thresholds.lossPctUp` | int | `10` | Loss% at or below which a flip-to-up is allowed. |
-| `thresholds.lossPctDown` | int | `50` | Loss% at or above which a flip-to-down fires. |
-| `thresholds.rttMsUp` | int | `200` | RTT (ms) at or below which a flip-to-up is allowed. |
-| `thresholds.rttMsDown` | int | `1000` | RTT (ms) at or above which a flip-to-down fires. |
-| `hysteresis.consecutiveUp` | int | `3` | Cycles of healthy observation needed to flip up. |
-| `hysteresis.consecutiveDown` | int | `3` | Cycles of unhealthy observation needed to flip down. |
-| `familyHealthPolicy` | string | `"all"` | `"all"` or `"any"`. See [`docs/wan-monitoring.md`](../wan-monitoring.md). |
+| `windowSize` | int | `10` | Window capacity. |
+| `thresholds.lossPctUp` | int | `10` | Loss% at or below which a flip to up is allowed. |
+| `thresholds.lossPctDown` | int | `50` | Loss% at or above which a flip to down fires. |
+| `thresholds.rttMsUp` | int | `200` | RTT (ms) at or below which a flip to up is allowed. |
+| `thresholds.rttMsDown` | int | `1000` | RTT (ms) at or above which a flip to down fires. |
+| `hysteresis.consecutiveUp` | int | `3` | Healthy cycles needed to flip up. |
+| `hysteresis.consecutiveDown` | int | `3` | Unhealthy cycles needed to flip down. |
+| `familyHealthPolicy` | string | `"all"` | `"all"` or `"any"`. See [`docs/wan-monitoring.md`](../wan-monitoring.md) and [ADR 0005](../adr/0005-family-health-policy-defaults-to-all.md). |
 
-The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDown` so the threshold band is always non-empty.
+The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDown`, so the threshold band is never empty.
 
 ## `groups.<name>`
 
@@ -119,8 +119,10 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 | `name` | string | yes | Must match the attribute key. |
 | `members` | array<object> | yes | Non-empty; no duplicate `wan` references. |
 | `strategy` | string | yes | v1: `"primary-backup"`. |
-| `table` | int | yes | Routing-table id. User-required integer in `[1000, 32767]` (type `wanwatch.types.routingTableId`). |
-| `mark` | int | yes | fwmark. User-required integer in `[1000, 32767]` (type `wanwatch.types.fwmark`). |
+| `table` | int | yes | Routing-table ID. User-declared integer in `[1000, 32767]` (type `wanwatch.types.routingTableId`). |
+| `mark` | int | yes | fwmark. User-declared integer in `[1000, 32767]` (type `wanwatch.types.fwmark`). |
+
+See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and tables are not allocated automatically.
 
 ## `groups.<name>.members[]`
 
@@ -134,26 +136,26 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `wan` | string | yes | References a key in the top-level `wans` map. |
-| `weight` | int | yes | `1..1000`. Reserved for v2's multi-active strategies; ignored under `primary-backup`. |
+| `wan` | string | yes | Key in the top-level `wans` map. |
+| `weight` | int | yes | `1..1000`. Reserved for v2 multi-active Strategies; ignored under `primary-backup`. |
 | `priority` | int | yes | `1..1000`. Lower is preferred under `primary-backup`. |
 
 ## Validation layers
 
-| Layer | What it catches |
+| Layer | Catches |
 |---|---|
-| Option types (`lib/types/`) | Wrong field types, enum mismatch, malformed IP literals (via libnet). |
-| `wanwatch.<type>.tryMake` | Cross-field invariants (family coupling, duplicate members, threshold ordering). |
-| `config.assertUniqueMarksAndTables` | Mark / table duplicates across groups. |
-| `daemon/internal/config/Validate` | Structural sanity after deserialization: name/key agreement, dangling `member.wan` references, empty paths in `global`. |
+| Option types (`lib/types/`) | Wrong field types, enum mismatches, malformed IP literals (via libnet). |
+| `wanwatch.<type>.tryMake` | Cross-field invariants: Family coupling, duplicate Members, threshold ordering. |
+| `config.assertUniqueMarksAndTables` | Marks or tables shared across Groups. |
+| `daemon/internal/config/Validate` | Structural problems after deserialization: name/key disagreement, dangling `member.wan` references, empty paths in `global`. |
 
 ## Compatibility policy
 
-Schema version is bumped only when an existing field changes meaning or a required field is added without a default. Adding an optional field with a backwards-compatible default does not require a bump.
+The schema version is bumped only when an existing field changes meaning or a required field is added without a default. An optional field with a backwards-compatible default needs no bump.
 
 A breaking change requires:
 
 1. Increment `schemaVersion` in `lib/internal/config.nix` and `SupportedSchema` in `daemon/internal/config/config.go`.
 2. Update this spec.
-3. Add a `CHANGELOG.md` entry under the next release with the migration note.
-4. Ship in a major version bump (`0.2.0` → `0.3.0`, etc.).
+3. Add a `CHANGELOG.md` entry with the migration note under the next release.
+4. Ship in a major version bump (`0.2.0` → `0.3.0`, and so on).

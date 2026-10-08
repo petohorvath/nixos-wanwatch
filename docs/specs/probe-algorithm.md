@@ -1,10 +1,10 @@
 # Probe algorithm (frozen spec)
 
-The daemon runs one Pinger goroutine per (WAN, family) tuple. Each cycle sends one ICMP echo to every Target, waits up to `timeoutMs`, and pushes a Sample per Target into a sliding window. After every cycle the pinger emits a `ProbeResult` aggregating the window across all Targets.
+The daemon runs one Pinger goroutine per (WAN, Family). Each cycle sends one ICMP echo to every Target, waits up to `timeoutMs`, and pushes one Sample per Target into that Target's Window. After every cycle, the Pinger emits a `ProbeResult` aggregating the Windows of all Targets. See [ADR 0008](../adr/0008-icmp-only-probing.md) for why v1 probes with ICMP only.
 
 ## Per-cycle pseudocode
 
-```
+```text
 on every tick (intervalMs):
     for each target in Targets:
         seq := next sequence (per-Pinger uint16, monotonic mod 2^16)
@@ -30,27 +30,25 @@ Source: `daemon/internal/probe/pinger.go:cycle`.
 
 ## ICMP identifier allocation
 
-Each Pinger socket gets a stable 16-bit identifier — `AllocateIdents` derives it from `SHA-256(wan + "|" + family.String())[:2]` and resolves hash collisions by linear probe.
+Each Pinger socket gets a stable 16-bit identifier. `AllocateIdents` derives it from `SHA-256(wan + "|" + family.String())[:2]` and resolves hash collisions by linear probing. The allocation is:
 
-Properties:
+- **Stable across restarts**: the same config yields the same identifiers, which keeps `tcpdump` traces comparable.
+- **Fail-fast on exhaustion**: more than 65,536 (WAN, Family) keys return an error instead of reusing an identifier.
+- **Strict on duplicates**: an exact-duplicate `IdentKey` is rejected, not merged.
 
-- **Stable across daemon restarts**: same config → same identifier assignment. Useful for `tcpdump` traces.
-- **Refuses to start on space exhaustion**: more than 65,536 (WAN, family) keys returns an error rather than silently reusing an identifier.
-- **Order-independent of duplicates**: an exact-duplicate `IdentKey` is rejected, not silently merged.
-
-Replies whose `ident` doesn't match the Pinger's are silently dropped — they belong to another (WAN, family) tuple's socket.
+A Pinger silently drops replies whose `ident` does not match its own; they belong to another (WAN, Family) socket.
 
 ## Sequence numbers
 
-Per-Pinger `uint16`, monotonically incrementing across cycles. Wraps at `2^16` (every 65,536 cycles). The Pinger maintains a `sent[seq] → (target, sendTime)` map per cycle and drops replies whose seq isn't currently pending.
+Each Pinger keeps a `uint16` sequence that increments across cycles and wraps at `2^16` (every 65,536 cycles). Per cycle, it maintains a `sent[seq] → (target, sendTime)` map and drops replies whose `seq` is not pending.
 
-A reply that arrives *after* its cycle's deadline is ignored — `seq` isn't in the new cycle's pending map. The Sample for that target was already marked Lost.
+A reply arriving after its cycle's deadline is ignored, because its `seq` is not in the new cycle's pending map. That Target's Sample was already recorded as Lost.
 
 ## Wire format
 
 ICMPv4 (RFC 792):
 
-```
+```text
 +--------+--------+----------------+
 | type=8 | code=0 | checksum       |
 +--------+--------+----------------+
@@ -60,14 +58,14 @@ ICMPv4 (RFC 792):
 +----------------------------------+
 ```
 
-ICMPv6 (RFC 4443) is identical except `type = 128`. Echo replies use `type = 0` (v4) and `type = 129` (v6).
+ICMPv6 (RFC 4443) is identical except that `type = 128`. Echo replies use `type = 0` (v4) and `type = 129` (v6).
 
 `daemon/internal/probe/icmp.go:EchoRequestBytes` builds the request:
 
-| Family | Checksum slot | Notes |
+| Family | Checksum | Notes |
 |---|---|---|
-| v4 | Computed by user (RFC 1071 one's-complement) | Daemon fills in. |
-| v6 | Computed by kernel on send | Daemon leaves zero — the pseudo-header is unavailable from `SOCK_DGRAM`. |
+| v4 | Computed by the daemon (RFC 1071 one's complement) | The daemon fills it in. |
+| v6 | Computed by the kernel on send | The daemon leaves it zero; the pseudo-header is unavailable from `SOCK_DGRAM`. |
 
 ## Socket setup
 
@@ -77,21 +75,21 @@ ipConn := pc.(*net.IPConn)
 unix.SetsockoptString(fd, SOL_SOCKET, SO_BINDTODEVICE, wanIface)
 ```
 
-`SO_BINDTODEVICE` is critical — without it a probe from `backup` could leak via `primary` and report `primary`'s health, defeating the per-WAN test. The bind affects both send (forces egress device) and receive (only accepts packets from that device).
+`SO_BINDTODEVICE` is critical. Without it, a Probe from `backup` could egress via `primary` and report `primary`'s Health. The bind applies to both directions: it forces the egress device and accepts only packets from that device.
 
-Required capability: `CAP_NET_RAW`. The NixOS module grants it via `AmbientCapabilities`. EPERM on the bind surfaces with an explicit "need CAP_NET_RAW" hint.
+The socket requires `CAP_NET_RAW`, which the NixOS module grants through `AmbientCapabilities`. An EPERM on the bind surfaces with an explicit "need CAP_NET_RAW" hint.
 
 ## Window statistics
 
-`WindowStats` is a fixed-capacity ring buffer over `Sample` values. Each Target has its own window.
+`WindowStats` is a fixed-capacity ring buffer of `Sample` values, one per Target.
 
-| Stat | Computation | Boundary cases |
+| Stat | Computation | Boundary case |
 |---|---|---|
-| `LossRatio` | `lost / total` | `0` when window empty. |
-| `MeanRTT` | mean over non-Lost samples | `0` when no non-Lost samples. |
-| `JitterMicros` | population stddev over non-Lost samples | `0` when fewer than two non-Lost samples. |
+| `LossRatio` | `lost / total` | `0` when the Window is empty. |
+| `MeanRTT` | Mean over non-Lost Samples | `0` with no non-Lost Samples. |
+| `JitterMicros` | Population stddev over non-Lost Samples | `0` with fewer than two non-Lost Samples. |
 
-The window is per-Target, not per-(WAN, family). Aggregation across Targets happens in `Aggregate(targets) → FamilyStats` via an unweighted mean:
+`Aggregate(targets) → FamilyStats` combines the per-Target Windows with an unweighted mean:
 
 ```go
 FamilyStats{
@@ -103,19 +101,21 @@ FamilyStats{
 }
 ```
 
-Targets with empty windows still appear in `PerTarget` (as zeros) so the Prometheus label set stays stable through daemon startup — Prometheus dislikes labels that appear and disappear.
+Targets with empty Windows still appear in `PerTarget`, as zeros, so the Prometheus label set stays stable through startup.
 
-`WindowFilled` is the signal the daemon's cold-start gate keys on (PLAN §8): hysteresis only seeds once *every* per-target window is full, so a Lost first Sample (the probe loop fires before the route to the target has converged) doesn't drag the seed verdict unhealthy and produce a spurious down→up Decision pair when probes catch up.
+The daemon's cold-start gate keys on `WindowFilled`: Hysteresis seeds only once every per-Target Window is full. Otherwise a Lost first Sample, sent before the route to the Target has converged, would seed the verdict unhealthy and cause a spurious down→up Decision pair once Probes catch up. See [Cold-start invariant](./failover.md#cold-start-invariant).
 
-## What this is NOT
+## Non-features
 
-- **Not a TCP probe.** v1 ships ICMP only. PLAN §12 OQ #2 reserves the `method` enum for `tcp` / `http` in a later version.
-- **Not adaptive.** Interval and timeout are fixed per-WAN. No backoff on loss.
-- **Not jitter-stabilized.** Probes fire on the configured `intervalMs` tick; no phase randomization across Pingers. Two WANs with the same interval will probe in lockstep.
-- **Not a circuit breaker.** A WAN that's been unhealthy for hours still gets probed every cycle.
+v1 deliberately omits these:
 
-These are intentional simplifications for v1. The probe loop is bounded work per cycle (one packet out, one in, per target) and the cost of "wasted" probes is one ICMP packet per `intervalMs` per WAN per family.
+- **TCP probes.** v1 ships ICMP only; the `method` enum is reserved for `tcp` and `http` later.
+- **Adaptivity.** Interval and timeout are fixed per WAN, with no backoff on loss.
+- **Phase randomization.** Probes fire on the `intervalMs` tick, so two WANs with the same interval probe in lockstep.
+- **Circuit breaking.** A WAN unhealthy for hours is still probed every cycle.
+
+Per cycle, the probe loop does bounded work: one packet out and one in per Target. A wasted Probe costs one ICMP packet per `intervalMs` per WAN per Family.
 
 ## Threshold layer
 
-The probe layer produces stats; the threshold + hysteresis layer turns them into a Healthy boolean. See [`docs/selector.md`](../selector.md) for that mapping.
+The probe layer produces statistics; the threshold and Hysteresis layer turns them into Health. See [`docs/selector.md`](../selector.md).
