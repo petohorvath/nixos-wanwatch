@@ -9,7 +9,7 @@ The daemon publishes this JSON snapshot to `services.wanwatch.global.statePath` 
 The daemon republishes on every observable state transition, not only on Selection changes:
 
 - **Bootstrap**: once at startup, before any event is processed, so early consumers see the configured WANs and Groups before the first Sample.
-- **Decision commit**: when a Group's `active` Member changes and its routes have converged in the kernel. Hooks fire immediately after.
+- **Decision commit**: when a Group's `active` Member changes and every route write has succeeded, except for Families skipped because no Gateway is known yet. Hooks fire immediately after.
 - **Per-Family Health transition**: when a (WAN, Family) flips its `healthy` verdict. Without this trigger, a flip that leaves the WAN aggregate unchanged (for example, v4 drops while v6 holds under `familyHealthPolicy = "any"`) would never reach `state.json`.
 - **Carrier or operstate change**: any rtnetlink LinkEvent that changes `wans.<name>.carrier` or `wans.<name>.operstate`.
 - **Gateway change**: a current default-route observation on a watched interface that changes `wans.<name>.gateways.{v4,v6}`. Route notifications trigger fresh kernel reads, so a superseded notification never overwrites a newer Gateway or clears a replacement.
@@ -100,7 +100,7 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 
 ## Hook env-var contract
 
-Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these env vars. `daemon/internal/state/hooks.go` exports the names as `state.Env*` constants. Like `state.json`, Hooks run only after a Decision's routes have landed in the kernel, so neither reports a switch the kernel has not made.
+Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these env vars. `daemon/internal/state/hooks.go` exports the names as `state.Env*` constants. Like `state.json`, Hooks run only after Apply succeeds; a hard route-write failure holds them back. A Family whose Gateway is not yet known is skipped rather than failed, so a switch Hook does not prove that every Family already routes through the new WAN; that Family's route follows when its Gateway appears.
 
 | Variable | Value (always set) |
 |---|---|

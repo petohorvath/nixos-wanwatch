@@ -89,14 +89,14 @@ The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd
 |---|---|---|---|
 | `method` | string | `"icmp"` | Probe method. v1: `icmp` only. |
 | `targets` | object | required | Per-Family Target lists: `{ "v4": [...], "v6": [...] }`. At least one list must be non-empty, and each item must be an IP literal of its list's Family. |
-| `intervalMs` | int | `1000` | Time between cycles. |
+| `intervalMs` | int | `500` | Time between cycles. |
 | `timeoutMs` | int | `1000` | Per-cycle read deadline. |
 | `windowSize` | int | `10` | Window capacity. |
 | `thresholds.lossPctUp` | int | `10` | Loss% at or below which a flip to up is allowed. |
-| `thresholds.lossPctDown` | int | `50` | Loss% at or above which a flip to down fires. |
-| `thresholds.rttMsUp` | int | `200` | RTT (ms) at or below which a flip to up is allowed. |
-| `thresholds.rttMsDown` | int | `1000` | RTT (ms) at or above which a flip to down fires. |
-| `hysteresis.consecutiveUp` | int | `3` | Healthy cycles needed to flip up. |
+| `thresholds.lossPctDown` | int | `30` | Loss% at or above which a flip to down fires. |
+| `thresholds.rttMsUp` | int | `250` | RTT (ms) at or below which a flip to up is allowed. |
+| `thresholds.rttMsDown` | int | `500` | RTT (ms) at or above which a flip to down fires. |
+| `hysteresis.consecutiveUp` | int | `5` | Healthy cycles needed to flip up. |
 | `hysteresis.consecutiveDown` | int | `3` | Unhealthy cycles needed to flip down. |
 | `familyHealthPolicy` | string | `"all"` | `"all"` or `"any"`. See [`docs/wan-monitoring.md`](../wan-monitoring.md) and [ADR 0005](../adr/0005-family-health-policy-defaults-to-all.md). |
 

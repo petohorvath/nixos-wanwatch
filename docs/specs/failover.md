@@ -74,7 +74,7 @@ t=10     carrier returns on wan0
          Decision fires; routes rewritten; hooks run.
 ```
 
-After a Probe-driven failure (rather than a carrier loss), `wan.healthy` stays `false` until `consecutiveUp` Samples accumulate. Steady-state recovery latency is `intervalMs × consecutiveUp`: 500 ms × 5 = 2.5 s with the defaults.
+After a Probe-driven failure (rather than a carrier loss), the WAN stays unhealthy until `consecutiveUp` consecutive Window verdicts pass the up thresholds. Old losses must first leave the sliding Window: with the defaults, a fully lost Window needs 9 successful cycles to reach `lossPctUp = 10`, and the ramp completes 4 cycles later, about 13 × 500 ms = 6.5 s with prompt replies. Once the Window already passes, the ramp alone takes `intervalMs × consecutiveUp` (2.5 s). Cycles that wait for `timeoutMs` stretch both figures.
 
 ## Single-active invariant
 
