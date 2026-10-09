@@ -1,79 +1,30 @@
-# Unit tests for each option type exported by `lib/types/member.nix`.
-{ helpers, wanwatch, ... }:
+/*
+  Tests for `lib/types/member.nix`. `skeleton.nix` checks that the
+  `member` submodule evaluates inputs to what `member.make` builds.
+*/
+{
+  fixtures,
+  helpers,
+  wanwatch,
+  ...
+}:
 let
-  inherit (helpers) evalType evalTypeFails;
+  inherit (fixtures) cases;
+  inherit (fixtures.inputs.member) minimal;
+  inherit (helpers) typeTests;
   inherit (wanwatch) types;
 in
 {
-  # ===== leaf types =====
+  memberWan = typeTests types.memberWan cases.identifiers;
+  memberWeight = typeTests types.memberWeight cases.positiveInts;
+  memberPriority = typeTests types.memberPriority cases.positiveInts;
 
-  testMemberWanAcceptsIdentifier = {
-    expr = evalType types.memberWan "primary";
-    expected = "primary";
-  };
-
-  testMemberWanRejectsLeadingDigit = {
-    expr = evalTypeFails types.memberWan "1bad";
-    expected = true;
-  };
-
-  testMemberWeightAcceptsPositive = {
-    expr = evalType types.memberWeight 50;
-    expected = 50;
-  };
-
-  testMemberWeightRejectsZero = {
-    expr = evalTypeFails types.memberWeight 0;
-    expected = true;
-  };
-
-  testMemberPriorityAcceptsPositive = {
-    expr = evalType types.memberPriority 2;
-    expected = 2;
-  };
-
-  # ===== top-level submodule — defaults =====
-
-  testMemberMinimalFillsDefaults = {
-    expr = evalType types.member { wan = "primary"; };
-    expected = {
-      wan = "primary";
-      weight = 100;
-      priority = 1;
-    };
-  };
-
-  testMemberPreservesFullSpec = {
-    expr = evalType types.member {
-      wan = "backup";
-      weight = 50;
-      priority = 2;
-    };
-    expected = {
-      wan = "backup";
-      weight = 50;
-      priority = 2;
-    };
-  };
-
-  testMemberRejectsBadWan = {
-    expr = evalTypeFails types.member { wan = "1bad"; };
-    expected = true;
-  };
-
-  testMemberRejectsZeroWeight = {
-    expr = evalTypeFails types.member {
-      wan = "primary";
-      weight = 0;
-    };
-    expected = true;
-  };
-
-  testMemberRejectsZeroPriority = {
-    expr = evalTypeFails types.member {
-      wan = "primary";
-      priority = 0;
-    };
-    expected = true;
+  member = typeTests types.member {
+    invalid = [
+      { }
+      (minimal // { wan = "1bad"; })
+      (minimal // { weight = 0; })
+      (minimal // { priority = 0; })
+    ];
   };
 }

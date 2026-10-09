@@ -219,11 +219,48 @@
             ${script}
             touch $out
           '';
+
+      /*
+        A check that runs the nix-unit tests at `tests.<attrPath>`, as
+        nix-unit documents for flakes. The sandbox cannot fetch, so the
+        inputs the tests evaluate are overridden with their store paths.
+      */
+      runNixUnit =
+        pkgs: attrPath:
+        pkgs.runCommand "wanwatch-nix-unit-${attrPath}" { nativeBuildInputs = [ pkgs.nix-unit ]; } ''
+          export HOME=$TMPDIR
+          nix-unit \
+            --eval-store "$HOME" \
+            --gc-roots-dir "$HOME/gc-roots" \
+            --extra-experimental-features flakes \
+            --override-input nixpkgs path:${nixpkgs} \
+            --override-input libnet path:${libnet} \
+            --flake path:${self}#tests.${attrPath}
+          touch $out
+        '';
     in
     {
       lib = import ./lib {
         inherit (nixpkgs) lib;
         libnet = libnet.lib.withLib nixpkgs.lib;
+      };
+
+      # nix-unit tests: `nix-unit --flake .#tests`. The `unit` and
+      # `integration` checks run them in the sandbox.
+      tests = {
+        unit = import ./tests/unit {
+          inherit (nixpkgs) lib;
+          libnet = libnet.lib.withLib nixpkgs.lib;
+          wanwatch = self.lib;
+        };
+        integration = nixpkgs.lib.genAttrs (builtins.filter (nixpkgs.lib.hasSuffix "-linux") systems) (
+          system:
+          import ./tests/integration {
+            inherit system;
+            inherit (nixpkgs.lib) nixosSystem;
+            inherit (self) nixosModules;
+          }
+        );
       };
 
       nixosModules = {
@@ -253,10 +290,7 @@
         pkgs:
         {
           format = (treefmtFor pkgs).config.build.check self;
-          unit = import ./tests/unit {
-            inherit pkgs;
-            libnet = libnet.lib.withLib pkgs.lib;
-          };
+          unit = runNixUnit pkgs "unit";
           # Tests the VM observation helpers without booting a VM.
           observation = pkgs.runCommand "wanwatch-observation-tests" { } ''
             ${pkgs.python3}/bin/python3 -B -m unittest discover \
@@ -350,11 +384,7 @@
           # the fileset, in `nix flake check`.
           package = self.packages.${pkgs.stdenv.hostPlatform.system}.wanwatchd;
 
-          integration = import ./tests/integration {
-            inherit pkgs;
-            nixosModule = self.nixosModules.default;
-            telegrafModule = self.nixosModules.telegraf;
-          };
+          integration = runNixUnit pkgs "integration.${pkgs.stdenv.hostPlatform.system}";
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
           /*
@@ -377,6 +407,7 @@
             pkgs.nixfmt
             pkgs.go
             pkgs.gopls
+            pkgs.nix-unit
             pkgs.gotools
             pkgs.golangci-lint
             pkgs.gofumpt

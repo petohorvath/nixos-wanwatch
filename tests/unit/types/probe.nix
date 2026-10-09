@@ -1,223 +1,70 @@
-# Unit tests for each option type exported by `lib/types/probe.nix`.
-{ helpers, wanwatch, ... }:
+/*
+  Tests for `lib/types/probe.nix`. `skeleton.nix` checks that the
+  `probe` submodule evaluates inputs to what `probe.make` builds.
+*/
+{
+  fixtures,
+  helpers,
+  wanwatch,
+  ...
+}:
 let
-  inherit (helpers) evalType evalTypeFails;
-  inherit (wanwatch) types;
-
-  # Minimum valid probe input — only `targets` is required.
-  minimalProbe = {
-    targets.v4 = [ "1.1.1.1" ];
-  };
+  inherit (fixtures) cases;
+  inherit (fixtures.inputs.probe) minimal;
+  inherit (helpers) evalType typeTests;
+  inherit (wanwatch) probe types;
 in
 {
-  # ===== probeMethod =====
+  probeMethod = typeTests types.probeMethod cases.methods;
+  probeFamilyHealthPolicy = typeTests types.probeFamilyHealthPolicy cases.familyHealthPolicies;
 
-  testProbeMethodAcceptsIcmp = {
-    expr = evalType types.probeMethod "icmp";
-    expected = "icmp";
+  probeTarget = typeTests types.probeTarget {
+    valid = [
+      "1.1.1.1"
+      "2606:4700:4700::1111"
+    ];
+    invalid = [
+      "not-an-ip"
+      "1.1.1.1/32"
+    ];
   };
 
-  testProbeMethodRejectsTcp = {
-    expr = evalTypeFails types.probeMethod "tcp";
-    expected = true;
-  };
-
-  testProbeMethodRejectsHttp = {
-    expr = evalTypeFails types.probeMethod "http";
-    expected = true;
-  };
-
-  # ===== probeFamilyHealthPolicy =====
-
-  testProbeFamilyPolicyAcceptsAll = {
-    expr = evalType types.probeFamilyHealthPolicy "all";
-    expected = "all";
-  };
-
-  testProbeFamilyPolicyAcceptsAny = {
-    expr = evalType types.probeFamilyHealthPolicy "any";
-    expected = "any";
-  };
-
-  testProbeFamilyPolicyRejectsMajority = {
-    expr = evalTypeFails types.probeFamilyHealthPolicy "majority";
-    expected = true;
-  };
-
-  # ===== probeTarget =====
-
-  testProbeTargetAcceptsV4 = {
-    expr = evalType types.probeTarget "1.1.1.1";
-    expected = "1.1.1.1";
-  };
-
-  testProbeTargetAcceptsV6 = {
-    expr = evalType types.probeTarget "2606:4700:4700::1111";
-    expected = "2606:4700:4700::1111";
-  };
-
-  testProbeTargetRejectsNonIp = {
-    expr = evalTypeFails types.probeTarget "not-an-ip";
-    expected = true;
-  };
-
-  # ===== probeThresholds — defaults =====
-
-  testProbeThresholdsAllDefaults = {
-    expr = evalType types.probeThresholds { };
-    expected = {
-      lossPctDown = 30;
-      lossPctUp = 10;
-      rttMsDown = 500;
-      rttMsUp = 250;
-    };
-  };
-
-  testProbeThresholdsPartialOverride = {
-    expr = evalType types.probeThresholds {
-      lossPctDown = 50;
-    };
-    expected = {
-      lossPctDown = 50;
-      lossPctUp = 10;
-      rttMsDown = 500;
-      rttMsUp = 250;
-    };
-  };
-
-  testProbeThresholdsRejectsBadLossPct = {
-    expr = evalTypeFails types.probeThresholds {
-      lossPctDown = 150;
-    };
-    expected = true;
-  };
-
-  testProbeThresholdsRejectsBadRtt = {
-    expr = evalTypeFails types.probeThresholds {
-      rttMsDown = 0;
-    };
-    expected = true;
-  };
-
-  # ===== probeHysteresis — defaults =====
-
-  testProbeHysteresisAllDefaults = {
-    expr = evalType types.probeHysteresis { };
-    expected = {
-      consecutiveDown = 3;
-      consecutiveUp = 5;
-    };
-  };
-
-  testProbeHysteresisRejectsZero = {
-    expr = evalTypeFails types.probeHysteresis {
-      consecutiveDown = 0;
-    };
-    expected = true;
-  };
-
-  # ===== probe — top-level submodule =====
-
-  testProbeMinimalFillsDefaults = {
-    expr = evalType types.probe minimalProbe;
-    expected = {
-      method = "icmp";
-      targets = {
-        v4 = [ "1.1.1.1" ];
-        v6 = [ ];
+  probeThresholds = {
+    testFillsDefaults = {
+      expr = evalType types.probeThresholds { lossPctDown = 50; };
+      expected = probe.defaults.thresholds // {
+        lossPctDown = 50;
       };
-      intervalMs = 500;
-      timeoutMs = 1000;
-      windowSize = 10;
-      thresholds = {
-        lossPctDown = 30;
-        lossPctUp = 10;
-        rttMsDown = 500;
-        rttMsUp = 250;
-      };
-      hysteresis = {
-        consecutiveDown = 3;
-        consecutiveUp = 5;
-      };
-      familyHealthPolicy = "all";
     };
+  }
+  // typeTests types.probeThresholds {
+    invalid = [
+      { lossPctDown = 150; }
+      { rttMsDown = 0; }
+    ];
   };
 
-  testProbeAcceptsBothFamilies = {
-    expr =
-      (evalType types.probe {
-        targets = {
-          v4 = [ "1.1.1.1" ];
-          v6 = [ "2606:4700:4700::1111" ];
-        };
-      }).targets;
-    expected = {
-      v4 = [ "1.1.1.1" ];
-      v6 = [ "2606:4700:4700::1111" ];
+  probeHysteresis = {
+    testFillsDefaults = {
+      expr = evalType types.probeHysteresis { consecutiveUp = 8; };
+      expected = probe.defaults.hysteresis // {
+        consecutiveUp = 8;
+      };
     };
+  }
+  // typeTests types.probeHysteresis {
+    invalid = [
+      { consecutiveDown = 0; }
+    ];
   };
 
-  testProbeRejectsBadMethod = {
-    expr = evalTypeFails types.probe (minimalProbe // { method = "tcp"; });
-    expected = true;
-  };
-
-  testProbeRejectsBadTarget = {
-    expr = evalTypeFails types.probe { targets.v4 = [ "not-an-ip" ]; };
-    expected = true;
-  };
-
-  testProbeRejectsLegacyListTargets = {
-    # The former flat-list shape fails; per-family buckets are
-    # mandatory.
-    expr = evalTypeFails types.probe { targets = [ "1.1.1.1" ]; };
-    expected = true;
-  };
-
-  testProbeRejectsNegativeInterval = {
-    expr = evalTypeFails types.probe (minimalProbe // { intervalMs = -1; });
-    expected = true;
-  };
-
-  testProbePreservesFullSpec = {
-    expr = evalType types.probe {
-      method = "icmp";
-      targets.v4 = [ "8.8.8.8" ];
-      intervalMs = 250;
-      timeoutMs = 500;
-      windowSize = 20;
-      thresholds = {
-        lossPctDown = 25;
-        lossPctUp = 5;
-        rttMsDown = 400;
-        rttMsUp = 150;
-      };
-      hysteresis = {
-        consecutiveDown = 2;
-        consecutiveUp = 4;
-      };
-      familyHealthPolicy = "any";
-    };
-    expected = {
-      method = "icmp";
-      targets = {
-        v4 = [ "8.8.8.8" ];
-        v6 = [ ];
-      };
-      intervalMs = 250;
-      timeoutMs = 500;
-      windowSize = 20;
-      thresholds = {
-        lossPctDown = 25;
-        lossPctUp = 5;
-        rttMsDown = 400;
-        rttMsUp = 150;
-      };
-      hysteresis = {
-        consecutiveDown = 2;
-        consecutiveUp = 4;
-      };
-      familyHealthPolicy = "any";
-    };
+  probe = typeTests types.probe {
+    invalid = [
+      (minimal // { method = "tcp"; })
+      (minimal // { intervalMs = -1; })
+      { targets.v4 = [ "not-an-ip" ]; }
+      # The former flat-list shape; per-family buckets are mandatory.
+      { targets = [ "1.1.1.1" ]; }
+    ];
   };
 }

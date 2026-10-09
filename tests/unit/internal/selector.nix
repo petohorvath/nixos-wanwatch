@@ -1,112 +1,78 @@
 /*
-  Unit tests for `lib/internal/selector.nix`, exposed as
+  Tests for `lib/internal/selector.nix`, exposed as
   `wanwatch.selector`. The scenarios mirror
   `daemon/internal/selector/primarybackup_test.go`; compare the two
   by hand to catch cross-language drift.
 */
-{
-  pkgs,
-  wanwatch,
-  ...
-}:
+{ lib, wanwatch, ... }:
 let
-  inherit (pkgs) lib;
   inherit (wanwatch) group selector;
 
-  # Members default to their 1-based list position as priority, so
-  # list order is priority order. Mark and table are arbitrary.
+  # Members take their 1-based list position as priority unless they
+  # set one, so list order is priority order by default.
   makeGroup =
-    memberSpecs:
+    members:
     group.make {
       name = "home";
-      members = lib.imap1 (
-        position: memberSpec:
-        {
-          priority = position;
-          weight = 100;
-        }
-        // memberSpec
-      ) memberSpecs;
+      members = lib.imap1 (position: member: { priority = position; } // member) members;
       mark = 1000;
       table = 1000;
     };
+
+  selectActive = members: memberHealth: (selector.compute (makeGroup members) memberHealth).active;
+
+  primaryAndBackup = [
+    { wan = "primary"; }
+    { wan = "backup"; }
+  ];
 in
 {
-  # ===== compute — empty members =====
+  compute = {
+    testSingleHealthyMember = {
+      expr = selectActive [ { wan = "primary"; } ] { primary = true; };
+      expected = "primary";
+    };
 
-  testEmptyMembersAllUnhealthy = {
-    expr = (selector.compute (makeGroup [ { wan = "only"; } ]) { only = false; }).active;
-    expected = null;
-  };
+    testSingleUnhealthyMember = {
+      expr = selectActive [ { wan = "primary"; } ] { primary = false; };
+      expected = null;
+    };
 
-  # ===== compute — single healthy =====
-
-  testSingleHealthyMember = {
-    expr = (selector.compute (makeGroup [ { wan = "primary"; } ]) { primary = true; }).active;
-    expected = "primary";
-  };
-
-  # ===== compute — fail-over =====
-
-  testFailoverToBackup = {
-    expr =
-      let
-        homeGroup = makeGroup [
-          { wan = "primary"; }
-          { wan = "backup"; }
-        ];
-      in
-      (selector.compute homeGroup {
-        primary = false;
-        backup = true;
-      }).active;
-    expected = "backup";
-  };
-
-  # ===== compute — primary preferred when both healthy =====
-
-  testPrimaryWinsWhenBothHealthy = {
-    expr =
-      let
-        homeGroup = makeGroup [
-          { wan = "primary"; }
-          { wan = "backup"; }
-        ];
-      in
-      (selector.compute homeGroup {
+    testPrimaryWinsWhenBothHealthy = {
+      expr = selectActive primaryAndBackup {
         primary = true;
         backup = true;
-      }).active;
-    expected = "primary";
-  };
+      };
+      expected = "primary";
+    };
 
-  # ===== compute — all unhealthy =====
+    testFailsOverToBackup = {
+      expr = selectActive primaryAndBackup {
+        primary = false;
+        backup = true;
+      };
+      expected = "backup";
+    };
 
-  testAllUnhealthyYieldsNull = {
-    expr =
-      let
-        homeGroup = makeGroup [
-          { wan = "a"; }
-          { wan = "b"; }
-        ];
-      in
-      (selector.compute homeGroup {
-        a = false;
-        b = false;
-      }).active;
-    expected = null;
-  };
+    testAllUnhealthyYieldsNull = {
+      expr = selectActive primaryAndBackup {
+        primary = false;
+        backup = false;
+      };
+      expected = null;
+    };
 
-  # ===== compute — priority order respected regardless of list order =====
+    # A WAN absent from `memberHealth` counts as unhealthy, matching
+    # Go's zero value for a `map[string]bool` lookup.
+    testMissingHealthCountsAsUnhealthy = {
+      expr = selectActive primaryAndBackup { backup = true; };
+      expected = "backup";
+    };
 
-  testPriorityRespectedOutOfListOrder = {
-    expr =
-      let
-        # `makeGroup` derives priority from list order, so set
-        # explicit priorities here.
-        homeGroup = group.make {
-          name = "home";
-          members = [
+    testPriorityOutranksListOrder = {
+      expr =
+        selectActive
+          [
             {
               wan = "backup";
               priority = 5;
@@ -119,164 +85,91 @@ in
               wan = "middle";
               priority = 3;
             }
-          ];
-          mark = 1000;
-          table = 1000;
-        };
-      in
-      (selector.compute homeGroup {
-        primary = true;
-        middle = true;
-        backup = true;
-      }).active;
-    expected = "primary";
-  };
+          ]
+          {
+            primary = true;
+            middle = true;
+            backup = true;
+          };
+      expected = "primary";
+    };
 
-  # ===== compute — tie broken by wan name =====
-
-  testEqualPrioritiesBrokenByWanName = {
-    expr =
-      let
-        homeGroup = group.make {
-          name = "home";
-          members = [
-            {
-              wan = "zzz";
+    testEqualPrioritiesBrokenByWanName = {
+      expr =
+        selectActive
+          (map
+            (wan: {
+              inherit wan;
               priority = 1;
-            }
-            {
-              wan = "aaa";
-              priority = 1;
-            }
-            {
-              wan = "mmm";
-              priority = 1;
-            }
-          ];
-          mark = 1000;
-          table = 1000;
-        };
-      in
-      (selector.compute homeGroup {
-        aaa = true;
-        mmm = true;
-        zzz = true;
-      }).active;
-    expected = "aaa";
-  };
+            })
+            [
+              "zzz"
+              "aaa"
+              "mmm"
+            ]
+          )
+          {
+            aaa = true;
+            mmm = true;
+            zzz = true;
+          };
+      expected = "aaa";
+    };
 
-  # ===== compute — missing health entry defaults to unhealthy =====
-
-  testMissingHealthEntryUnhealthy = {
-    # A WAN absent from `memberHealth` counts as unhealthy, matching
-    # Go's zero value for a `map[string]bool` lookup.
-    expr =
-      let
-        homeGroup = makeGroup [
-          { wan = "primary"; }
-          { wan = "backup"; }
-        ];
-      in
-      (selector.compute homeGroup { backup = true; }).active;
-    expected = "backup";
-  };
-
-  # ===== compute — weight is ignored =====
-
-  testWeightIgnored = {
     # Despite `backup`'s far larger weight, primary-backup picks the
-    # lower-priority member.
-    expr =
-      let
-        homeGroup = group.make {
-          name = "home";
-          members = [
+    # Member with the lowest priority.
+    testIgnoresWeight = {
+      expr =
+        selectActive
+          [
             {
               wan = "primary";
-              priority = 1;
               weight = 1;
             }
             {
               wan = "backup";
-              priority = 2;
               weight = 1000;
             }
-          ];
-          mark = 1000;
-          table = 1000;
-        };
-      in
-      (selector.compute homeGroup {
-        primary = true;
-        backup = true;
-      }).active;
-    expected = "primary";
+          ]
+          {
+            primary = true;
+            backup = true;
+          };
+      expected = "primary";
+    };
+
+    testReportsGroupName = {
+      expr = (selector.compute (makeGroup primaryAndBackup) { primary = true; }).group;
+      expected = "home";
+    };
+
+    testComputeDeterministic = {
+      expr =
+        let
+          memberHealth = {
+            a = true;
+            b = true;
+            c = true;
+          };
+          members = map (wan: { inherit wan; }) (builtins.attrNames memberHealth);
+        in
+        lib.unique (builtins.genList (_: selectActive members memberHealth) 50);
+      expected = [ "a" ];
+    };
   };
 
-  # ===== compute — group name passed through =====
+  strategies = {
+    testRegistry = {
+      expr = builtins.attrNames selector.strategies;
+      expected = [ "primary-backup" ];
+    };
 
-  testGroupNamePassedThrough = {
-    expr =
-      let
-        homeGroup = group.make {
-          name = "home-uplink";
-          members = [
-            {
-              wan = "primary";
-              priority = 1;
-            }
-          ];
-          mark = 1000;
-          table = 1000;
-        };
-      in
-      (selector.compute homeGroup { primary = true; }).group;
-    expected = "home-uplink";
-  };
-
-  # ===== strategies registry =====
-
-  testStrategiesRegistryHasPrimaryBackup = {
-    expr = selector.strategies ? "primary-backup";
-    expected = true;
-  };
-
-  testStrategiesRegistrySingleEntryInV1 = {
-    expr = builtins.attrNames selector.strategies;
-    expected = [ "primary-backup" ];
-  };
-
-  testStrategiesMatchGroupValidStrategies = {
-    # Every strategy `group.make` accepts must have a selector
-    # implementation, and vice versa; otherwise a valid group would
+    # Every Strategy `group.make` accepts needs a selector
+    # implementation, and vice versa; otherwise a valid Group would
     # throw on its first `selector.compute` call.
-    expr =
-      let
-        sortStrings = lib.sort lib.lessThan;
-      in
-      sortStrings (builtins.attrNames selector.strategies) == sortStrings group.validStrategies;
-    expected = true;
-  };
-
-  # ===== compute — determinism =====
-
-  testComputeDeterministic = {
-    # Same inputs yield the same output across many calls.
-    expr =
-      let
-        homeGroup = makeGroup [
-          { wan = "a"; }
-          { wan = "b"; }
-          { wan = "c"; }
-        ];
-        memberHealth = {
-          a = true;
-          b = true;
-          c = true;
-        };
-        results = builtins.genList (_: (selector.compute homeGroup memberHealth).active) 50;
-      in
-      builtins.all (active: active == builtins.head results) results;
-    expected = true;
+    testStrategiesMatchGroupValidStrategies = {
+      expr = builtins.attrNames selector.strategies;
+      expected = lib.sort lib.lessThan group.validStrategies;
+    };
   };
 }

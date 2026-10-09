@@ -1,632 +1,240 @@
 /*
-  Unit tests for `lib/internal/probe.nix`, exposed as `wanwatch.probe`.
-  Per AGENTS.md, each public function is exercised on positive and
-  negative inputs, each error kind is triggered alone and in an
-  aggregated case, and the §5.1 API skeleton is covered.
+  Tests for `lib/internal/probe.nix`, exposed as `wanwatch.probe`.
+  `skeleton.nix` covers the `make` / `tryMake` / `toJSONValue`
+  contract; this suite covers defaults, target parsing, and every
+  error kind.
 */
 {
+  fixtures,
   helpers,
   libnet,
   wanwatch,
   ...
 }:
 let
-  inherit (helpers) errorMatches evalThrows;
+  inherit (fixtures) cases;
+  inherit (fixtures.inputs.probe) minimal;
+  inherit (helpers) getErrorKinds;
   inherit (wanwatch) probe;
 
-  tryError = helpers.tryError probe;
-
-  # Forces the whole result, so a malformed field must surface as an
-  # error kind rather than an evaluation failure.
-  tryMakeRejectsWithoutThrowing =
-    kind: input:
-    let
-      result = probe.tryMake input;
-      evaluated = builtins.tryEval (builtins.deepSeq result result);
-    in
-    evaluated.success && !evaluated.value.success && errorMatches kind evaluated.value.error;
-
-  minimalInput = {
-    targets.v4 = [ "1.1.1.1" ];
+  probeFieldTests = helpers.fieldTests {
+    inherit (probe) tryMake;
+    input = minimal;
   };
 
-  fullInput = {
-    method = "icmp";
-    targets = {
-      v4 = [ "1.1.1.1" ];
-      v6 = [ "2606:4700:4700::1111" ];
-    };
-    intervalMs = 250;
-    timeoutMs = 200;
-    windowSize = 20;
-    thresholds = {
-      lossPctDown = 25;
-      lossPctUp = 5;
-      rttMsDown = 400;
-      rttMsUp = 150;
-    };
-    hysteresis = {
-      consecutiveDown = 2;
-      consecutiveUp = 4;
-    };
-    familyHealthPolicy = "any";
-  };
+  withThresholds = thresholds: minimal // { inherit thresholds; };
 in
 {
-  # ===== Happy path — minimal input =====
-
-  testProbeMakeMinimalReturnsValue = {
-    expr = builtins.isAttrs (probe.make minimalInput);
-    expected = true;
-  };
-
-  testMakeMinimalUsesDefaultMethod = {
-    expr = (probe.make minimalInput).method;
-    expected = "icmp";
-  };
-
-  testMakeMinimalUsesDefaultInterval = {
-    expr = (probe.make minimalInput).intervalMs;
-    expected = 500;
-  };
-
-  testMakeMinimalUsesDefaultTimeout = {
-    expr = (probe.make minimalInput).timeoutMs;
-    expected = 1000;
-  };
-
-  testMakeMinimalUsesDefaultWindowSize = {
-    expr = (probe.make minimalInput).windowSize;
-    expected = 10;
-  };
-
-  testMakeMinimalUsesDefaultThresholds = {
-    expr = (probe.make minimalInput).thresholds;
-    expected = {
-      lossPctDown = 30;
-      lossPctUp = 10;
-      rttMsDown = 500;
-      rttMsUp = 250;
-    };
-  };
-
-  testMakeMinimalUsesDefaultHysteresis = {
-    expr = (probe.make minimalInput).hysteresis;
-    expected = {
-      consecutiveDown = 3;
-      consecutiveUp = 5;
-    };
-  };
-
-  testMakeMinimalUsesDefaultFamilyPolicy = {
-    expr = (probe.make minimalInput).familyHealthPolicy;
-    expected = "all";
-  };
-
-  # ===== Happy path — full input =====
-
-  testMakeFullPreservesMethod = {
-    expr = (probe.make fullInput).method;
-    expected = "icmp";
-  };
-
-  testMakeFullPreservesIntervalMs = {
-    expr = (probe.make fullInput).intervalMs;
-    expected = 250;
-  };
-
-  testMakeFullPreservesThresholds = {
-    expr = (probe.make fullInput).thresholds;
-    expected = {
-      lossPctDown = 25;
-      lossPctUp = 5;
-      rttMsDown = 400;
-      rttMsUp = 150;
-    };
-  };
-
-  testMakeFullPreservesHysteresis = {
-    expr = (probe.make fullInput).hysteresis;
-    expected = {
-      consecutiveDown = 2;
-      consecutiveUp = 4;
-    };
-  };
-
-  testMakeFullPreservesFamilyPolicy = {
-    expr = (probe.make fullInput).familyHealthPolicy;
-    expected = "any";
-  };
-
-  # ===== Target parsing =====
-
-  testTargetsParsedToLibnetValues = {
-    # Each target becomes a libnet IP value of its bucket's family.
-    expr =
-      let
-        inherit (probe.make fullInput) targets;
-      in
-      {
-        v4 = builtins.all libnet.ip.isIpv4 targets.v4;
-        v6 = builtins.all libnet.ip.isIpv6 targets.v6;
+  defaults = {
+    testValues = {
+      expr = probe.defaults;
+      expected = {
+        method = "icmp";
+        intervalMs = 500;
+        timeoutMs = 1000;
+        windowSize = 10;
+        thresholds = {
+          lossPctDown = 30;
+          lossPctUp = 10;
+          rttMsDown = 500;
+          rttMsUp = 250;
+        };
+        hysteresis = {
+          consecutiveDown = 3;
+          consecutiveUp = 5;
+        };
+        familyHealthPolicy = "all";
       };
-    expected = {
-      v4 = true;
-      v6 = true;
     };
-  };
 
-  testV4OnlyTargets = {
-    expr = probe.families (
-      probe.make {
-        targets.v4 = [
-          "1.1.1.1"
-          "8.8.8.8"
-        ];
-      }
-    );
-    expected = {
-      v4 = true;
-      v6 = false;
-    };
-  };
-
-  testV6OnlyTargets = {
-    expr = probe.families (
-      probe.make {
-        targets.v6 = [
-          "2606:4700:4700::1111"
-          "2001:4860:4860::8888"
-        ];
-      }
-    );
-    expected = {
-      v4 = false;
-      v6 = true;
-    };
-  };
-
-  testMixedFamilyTargets = {
-    expr = probe.families (
-      probe.make {
+    testFillMinimalInput = {
+      expr = probe.toJSONValue (probe.make minimal);
+      expected = probe.defaults // {
         targets = {
           v4 = [ "1.1.1.1" ];
-          v6 = [ "2606:4700:4700::1111" ];
+          v6 = [ ];
         };
-      }
-    );
-    expected = {
-      v4 = true;
-      v6 = true;
+      };
     };
-  };
 
-  # ===== Partial thresholds overlay =====
-
-  testPartialThresholdsMergeWithDefaults = {
-    # Setting only lossPctDown leaves the other three at their
-    # defaults.
-    expr =
-      (probe.make {
-        targets.v4 = [ "1.1.1.1" ];
-        thresholds = {
+    testMergeUnderPartialThresholds = {
+      expr =
+        (probe.make (withThresholds {
           lossPctDown = 50;
+        })).thresholds;
+      expected = probe.defaults.thresholds // {
+        lossPctDown = 50;
+      };
+    };
+
+    testMergeUnderPartialHysteresis = {
+      expr = (probe.make (minimal // { hysteresis.consecutiveUp = 8; })).hysteresis;
+      expected = probe.defaults.hysteresis // {
+        consecutiveUp = 8;
+      };
+    };
+  };
+
+  targets = {
+    testParsedToLibnetValues = {
+      expr =
+        let
+          inherit (probe.make fixtures.inputs.probe.full) targets;
+        in
+        {
+          v4 = builtins.all libnet.ip.isIpv4 targets.v4;
+          v6 = builtins.all libnet.ip.isIpv6 targets.v6;
         };
-      }).thresholds;
-    expected = {
-      lossPctDown = 50;
-      lossPctUp = 10;
-      rttMsDown = 500;
-      rttMsUp = 250;
+      expected = {
+        v4 = true;
+        v6 = true;
+      };
     };
   };
 
-  testPartialHysteresisMergeWithDefaults = {
-    expr =
-      (probe.make {
-        targets.v4 = [ "1.1.1.1" ];
-        hysteresis = {
-          consecutiveUp = 8;
-        };
-      }).hysteresis;
-    expected = {
-      consecutiveDown = 3;
-      consecutiveUp = 8;
+  families = {
+    testV4Only = {
+      expr = probe.families (probe.make minimal);
+      expected = {
+        v4 = true;
+        v6 = false;
+      };
+    };
+
+    testV6Only = {
+      expr = probe.families (probe.make { targets.v6 = [ "2606:4700:4700::1111" ]; });
+      expected = {
+        v4 = false;
+        v6 = true;
+      };
+    };
+
+    testDualStack = {
+      expr = probe.families (probe.make fixtures.inputs.probe.full);
+      expected = {
+        v4 = true;
+        v6 = true;
+      };
     };
   };
 
-  # ===== toJSONValue =====
-
-  testToJSONValueStringifiesTargets = {
-    # Targets render as per-family string lists, not libnet values.
-    expr = (probe.toJSONValue (probe.make { targets.v4 = [ "1.1.1.1" ]; })).targets;
-    expected = {
-      v4 = [ "1.1.1.1" ];
-      v6 = [ ];
-    };
+  accepts = helpers.predicateTests (input: (probe.tryMake input).success) {
+    valid = [
+      # Samples may overlap, dpinger-style, so `timeoutMs` may reach or
+      # exceed `intervalMs`.
+      (minimal // { timeoutMs = probe.defaults.intervalMs; })
+      (minimal // { timeoutMs = 2 * probe.defaults.intervalMs; })
+      # Loss thresholds span the whole percentage range.
+      (withThresholds {
+        lossPctDown = 100;
+        lossPctUp = 0;
+      })
+    ];
   };
 
-  # ===== Error: probeNoTargets =====
-
-  testRejectsBothBucketsEmpty = {
-    expr = errorMatches "probeNoTargets" (tryError {
-      targets = { };
-    });
-    expected = true;
+  fields = {
+    method = probeFieldTests "method" "probeInvalidMethod" cases.methods;
+    intervalMs = probeFieldTests "intervalMs" "probeNonPositiveInterval" cases.positiveInts;
+    timeoutMs = probeFieldTests "timeoutMs" "probeNonPositiveTimeout" cases.positiveInts;
+    windowSize = probeFieldTests "windowSize" "probeNonPositiveWindow" cases.positiveInts;
+    consecutiveDown =
+      probeFieldTests "hysteresis.consecutiveDown" "probeNonPositiveHysteresis"
+        cases.positiveInts;
+    consecutiveUp =
+      probeFieldTests "hysteresis.consecutiveUp" "probeNonPositiveHysteresis"
+        cases.positiveInts;
+    familyHealthPolicy =
+      probeFieldTests "familyHealthPolicy" "probeInvalidFamilyPolicy"
+        cases.familyHealthPolicies;
   };
 
-  testRejectsExplicitEmptyBuckets = {
-    expr = errorMatches "probeNoTargets" (tryError {
-      targets = {
+  rejections = helpers.rejectionTests probe.tryMake {
+    probeNoTargets = {
+      omittedBuckets.targets = { };
+      emptyBuckets.targets = {
         v4 = [ ];
         v6 = [ ];
       };
-    });
-    expected = true;
-  };
+    };
 
-  testMakeThrowsOnEmptyTargets = {
-    expr = evalThrows (probe.make { targets = { }; });
-    expected = true;
-  };
-
-  # ===== Error: probeInvalidTarget =====
-
-  testRejectsInvalidTarget = {
-    expr = errorMatches "probeInvalidTarget" (tryError {
-      targets.v4 = [ "not-an-ip" ];
-    });
-    expected = true;
-  };
-
-  testRejectsPartiallyInvalidTargets = {
-    expr = errorMatches "probeInvalidTarget" (tryError {
-      targets.v4 = [
+    probeInvalidTarget = {
+      notAnIp.targets.v4 = [ "not-an-ip" ];
+      oneOfSeveral.targets.v4 = [
         "1.1.1.1"
         "not-an-ip"
       ];
-    });
-    expected = true;
-  };
-
-  # ===== Error: malformed nested field shapes =====
-
-  testTryMakeRejectsNonAttrTargetsWithoutThrowing = {
-    expr = tryMakeRejectsWithoutThrowing "probeInvalidTarget" {
-      targets = "1.1.1.1";
+      # Malformed shapes surface as error kinds rather than evaluation
+      # failures.
+      targetsNotAnAttrset.targets = "1.1.1.1";
+      bucketNotAList.targets.v4 = "1.1.1.1";
     };
-    expected = true;
-  };
 
-  testTryMakeRejectsNonListTargetBucketWithoutThrowing = {
-    expr = tryMakeRejectsWithoutThrowing "probeInvalidTarget" {
-      targets.v4 = "1.1.1.1";
+    probeTargetFamilyMismatch = {
+      v6InV4Bucket.targets.v4 = [ "2001:db8::1" ];
+      v4InV6Bucket.targets.v6 = [ "192.0.2.1" ];
     };
-    expected = true;
-  };
 
-  testTryMakeRejectsNonAttrThresholdsWithoutThrowing = {
-    expr = tryMakeRejectsWithoutThrowing "probeInvalidThresholds" {
-      targets.v4 = [ "1.1.1.1" ];
-      thresholds = 5;
+    probeInvalidThresholds = {
+      thresholdsNotAnAttrset = minimal // {
+        thresholds = 5;
+      };
     };
-    expected = true;
-  };
 
-  testTryMakeRejectsNonAttrHysteresisWithoutThrowing = {
-    expr = tryMakeRejectsWithoutThrowing "probeInvalidHysteresis" {
-      targets.v4 = [ "1.1.1.1" ];
-      hysteresis = [ 1 ];
+    probeInvalidHysteresis = {
+      hysteresisNotAnAttrset = minimal // {
+        hysteresis = [ 1 ];
+      };
     };
-    expected = true;
+
+    probeLossPctOutOfRange = {
+      negativeDown = withThresholds {
+        lossPctDown = -1;
+        lossPctUp = 0;
+      };
+      downAbove100 = withThresholds { lossPctDown = 101; };
+      upNotAnInt = withThresholds { lossPctUp = "5"; };
+    };
+
+    probeLossThresholdsInverted = {
+      upAboveDown = withThresholds {
+        lossPctDown = 10;
+        lossPctUp = 30;
+      };
+      upEqualsDown = withThresholds {
+        lossPctDown = 20;
+        lossPctUp = 20;
+      };
+    };
+
+    probeNonPositiveRTT = {
+      zeroDown = withThresholds { rttMsDown = 0; };
+      zeroUp = withThresholds { rttMsUp = 0; };
+    };
+
+    probeRTTThresholdsInverted = {
+      upAboveDown = withThresholds {
+        rttMsDown = 100;
+        rttMsUp = 200;
+      };
+      upEqualsDown = withThresholds {
+        rttMsDown = 250;
+        rttMsUp = 250;
+      };
+    };
   };
 
-  # ===== Error: probeTargetFamilyMismatch =====
-
-  testRejectsV6InV4Bucket = {
-    expr = errorMatches "probeTargetFamilyMismatch" (tryError {
-      targets.v4 = [ "2001:db8::1" ];
-    });
-    expected = true;
-  };
-
-  testRejectsV4InV6Bucket = {
-    expr = errorMatches "probeTargetFamilyMismatch" (tryError {
-      targets.v6 = [ "192.0.2.1" ];
-    });
-    expected = true;
-  };
-
-  # ===== Error: probeInvalidMethod =====
-
-  testRejectsInvalidMethod = {
-    expr = errorMatches "probeInvalidMethod" (tryError (minimalInput // { method = "tcp"; }));
-    expected = true;
-  };
-
-  testRejectsHttpMethod = {
-    expr = errorMatches "probeInvalidMethod" (tryError (minimalInput // { method = "http"; }));
-    expected = true;
-  };
-
-  # ===== Error: probeNonPositiveInterval =====
-
-  testRejectsZeroInterval = {
-    expr = errorMatches "probeNonPositiveInterval" (tryError (minimalInput // { intervalMs = 0; }));
-    expected = true;
-  };
-
-  testRejectsNegativeInterval = {
-    expr = errorMatches "probeNonPositiveInterval" (tryError (minimalInput // { intervalMs = -1; }));
-    expected = true;
-  };
-
-  # ===== Error: probeNonPositiveTimeout =====
-
-  testRejectsZeroTimeout = {
-    expr = errorMatches "probeNonPositiveTimeout" (tryError (minimalInput // { timeoutMs = 0; }));
-    expected = true;
-  };
-
-  # ===== Error: probeNonPositiveWindow =====
-
-  testRejectsZeroWindowSize = {
-    expr = errorMatches "probeNonPositiveWindow" (tryError (minimalInput // { windowSize = 0; }));
-    expected = true;
-  };
-
-  # ===== Timeout and interval are independent =====
-
-  testAcceptsTimeoutExceedingInterval = {
-    # Probes can overlap, dpinger-style: send every 500ms but wait up
-    # to 1000ms before declaring a probe lost.
-    expr =
-      (probe.tryMake (
-        minimalInput
-        // {
-          intervalMs = 500;
-          timeoutMs = 1000;
-        }
-      )).success;
-    expected = true;
-  };
-
-  testAcceptsTimeoutEqualToInterval = {
-    expr =
-      (probe.tryMake (
-        minimalInput
-        // {
-          intervalMs = 500;
-          timeoutMs = 500;
-        }
-      )).success;
-    expected = true;
-  };
-
-  # ===== Error: probeLossPctOutOfRange =====
-
-  testRejectsNegativeLossPctDown = {
-    expr = errorMatches "probeLossPctOutOfRange" (
-      tryError (
-        minimalInput
-        // {
-          thresholds = {
-            lossPctDown = -1;
-            lossPctUp = 0;
-            rttMsDown = 500;
-            rttMsUp = 250;
-          };
-        }
-      )
+  testReportsEveryViolation = {
+    expr = getErrorKinds (
+      probe.tryMake {
+        targets = { };
+        method = "tcp";
+        intervalMs = 0;
+      }
     );
-    expected = true;
-  };
-
-  testRejectsLossPctOver100 = {
-    expr = errorMatches "probeLossPctOutOfRange" (
-      tryError (
-        minimalInput
-        // {
-          thresholds = {
-            lossPctDown = 101;
-            lossPctUp = 50;
-            rttMsDown = 500;
-            rttMsUp = 250;
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Error: probeLossThresholdsInverted =====
-
-  testRejectsLossThresholdsInverted = {
-    expr = errorMatches "probeLossThresholdsInverted" (
-      tryError (
-        minimalInput
-        // {
-          thresholds = {
-            lossPctDown = 10;
-            lossPctUp = 30;
-            rttMsDown = 500;
-            rttMsUp = 250;
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  testRejectsLossThresholdsEqual = {
-    expr = errorMatches "probeLossThresholdsInverted" (
-      tryError (
-        minimalInput
-        // {
-          thresholds = {
-            lossPctDown = 20;
-            lossPctUp = 20;
-            rttMsDown = 500;
-            rttMsUp = 250;
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Error: probeNonPositiveRTT =====
-
-  testRejectsZeroRttDown = {
-    expr = errorMatches "probeNonPositiveRTT" (
-      tryError (
-        minimalInput
-        // {
-          thresholds = {
-            lossPctDown = 30;
-            lossPctUp = 10;
-            rttMsDown = 0;
-            rttMsUp = 250;
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Error: probeRTTThresholdsInverted =====
-
-  testRejectsRttThresholdsInverted = {
-    expr = errorMatches "probeRTTThresholdsInverted" (
-      tryError (
-        minimalInput
-        // {
-          thresholds = {
-            lossPctDown = 30;
-            lossPctUp = 10;
-            rttMsDown = 100;
-            rttMsUp = 200;
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Error: probeNonPositiveHysteresis =====
-
-  testRejectsZeroConsecutiveDown = {
-    expr = errorMatches "probeNonPositiveHysteresis" (
-      tryError (
-        minimalInput
-        // {
-          hysteresis = {
-            consecutiveDown = 0;
-            consecutiveUp = 5;
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  testRejectsZeroConsecutiveUp = {
-    expr = errorMatches "probeNonPositiveHysteresis" (
-      tryError (
-        minimalInput
-        // {
-          hysteresis = {
-            consecutiveDown = 3;
-            consecutiveUp = 0;
-          };
-        }
-      )
-    );
-    expected = true;
-  };
-
-  # ===== Error: probeInvalidFamilyPolicy =====
-
-  testRejectsInvalidFamilyPolicy = {
-    expr = errorMatches "probeInvalidFamilyPolicy" (
-      tryError (minimalInput // { familyHealthPolicy = "majority"; })
-    );
-    expected = true;
-  };
-
-  testAcceptsAnyAsFamilyPolicy = {
-    expr = (probe.tryMake (minimalInput // { familyHealthPolicy = "any"; })).success;
-    expected = true;
-  };
-
-  # ===== Aggregated error reporting =====
-
-  testProbeMultipleErrorsAggregated = {
-    # Every violation in one input appears in the error message.
-    expr =
-      let
-        error = tryError {
-          targets = { };
-          method = "tcp";
-          intervalMs = 0;
-        };
-        kinds = [
-          "probeNoTargets"
-          "probeInvalidMethod"
-          "probeNonPositiveInterval"
-        ];
-      in
-      builtins.all (kind: errorMatches kind error) kinds;
-    expected = true;
-  };
-
-  # ===== tryMake contract =====
-
-  testProbeTryMakeOkOnValid = {
-    expr = (probe.tryMake minimalInput).success;
-    expected = true;
-  };
-
-  testTryMakeReturnsValue = {
-    expr = builtins.isAttrs (probe.tryMake minimalInput).value;
-    expected = true;
-  };
-
-  testProbeTryMakeErrOnInvalid = {
-    expr = (probe.tryMake { targets = { }; }).success;
-    expected = false;
-  };
-
-  testProbeTryMakeErrorNullOnSuccess = {
-    expr = (probe.tryMake minimalInput).error;
-    expected = null;
-  };
-
-  testProbeTryMakeValueNullOnFailure = {
-    expr = (probe.tryMake { targets = { }; }).value;
-    expected = null;
-  };
-
-  # ===== Defaults exposed =====
-
-  testProbeDefaultsExposed = {
-    # The option types read their defaults from probe.defaults.
-    expr = probe.defaults.intervalMs;
-    expected = 500;
-  };
-
-  # ===== Round-trip =====
-
-  testProbeRoundTrip = {
-    # AGENTS.md (5): `toJSONValue` output is itself a valid `make`
-    # input, and re-emitting it after a second `make` is
-    # byte-identical to the first.
-    expr =
-      let
-        firstJSON = probe.toJSONValue (probe.make fullInput);
-        secondJSON = probe.toJSONValue (probe.make firstJSON);
-      in
-      firstJSON == secondJSON;
-    expected = true;
+    expected = [
+      "probeInvalidMethod"
+      "probeNoTargets"
+      "probeNonPositiveInterval"
+    ];
   };
 }

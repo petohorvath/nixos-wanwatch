@@ -1,58 +1,39 @@
 /*
-  Unit-test entry point for the wanwatch pure-Nix library.
-
-  Builds the library and the shared helpers once, passes them to every
-  suite as one test context, and runs the merged `testFoo = { expr;
-  expected; }` attrsets through `runner.nix`. Test names must be unique
-  across suites.
+  nix-unit tests for the wanwatch library, exposed as the flake's
+  `tests.unit`. Each suite receives one test context and returns nested
+  `testFoo = { expr; expected; }` attrsets, which nix-unit walks.
 */
-{ pkgs, libnet }:
+{
+  lib,
+  libnet,
+  wanwatch,
+}:
 let
-  inherit (pkgs) lib;
-
-  runner = import ./runner.nix { inherit pkgs; };
-
   testContext = {
-    inherit libnet pkgs;
-    helpers = import ./helpers.nix { inherit pkgs; };
-    wanwatch = import ../../lib { inherit lib libnet; };
+    inherit lib libnet wanwatch;
+    fixtures = import ./fixtures.nix;
+    helpers = import ./helpers.nix { inherit lib; };
+  };
+in
+{
+  composition = import ./composition.nix testContext;
+  skeleton = import ./skeleton.nix testContext;
+
+  internal = {
+    config = import ./internal/config.nix testContext;
+    group = import ./internal/group.nix testContext;
+    member = import ./internal/member.nix testContext;
+    primitives = import ./internal/primitives.nix testContext;
+    probe = import ./internal/probe.nix testContext;
+    selector = import ./internal/selector.nix testContext;
+    wan = import ./internal/wan.nix testContext;
   };
 
-  # `//` would let a later suite silently replace an equally named test.
-  mergeSuites =
-    suites:
-    let
-      duplicateNames = lib.pipe suites [
-        (lib.concatMap builtins.attrNames)
-        (lib.groupBy lib.id)
-        (lib.filterAttrs (_: occurrences: builtins.length occurrences > 1))
-        builtins.attrNames
-      ];
-    in
-    if duplicateNames == [ ] then
-      lib.mergeAttrsList suites
-    else
-      throw "wanwatch unit tests: duplicate test names: ${lib.concatStringsSep ", " duplicateNames}";
-in
-lib.pipe
-  [
-    ./internal/primitives.nix
-    ./internal/probe.nix
-    ./internal/member.nix
-    ./internal/wan.nix
-    ./internal/group.nix
-    ./internal/selector.nix
-    ./internal/config.nix
-    ./types/primitives.nix
-    ./types/probe.nix
-    ./types/member.nix
-    ./types/wan.nix
-    ./types/group.nix
-    ./composition.nix
-    ./skeleton.nix
-  ]
-  [
-    (map (suitePath: import suitePath testContext))
-    mergeSuites
-    runner.runTests
-  ]
+  types = {
+    group = import ./types/group.nix testContext;
+    member = import ./types/member.nix testContext;
+    primitives = import ./types/primitives.nix testContext;
+    probe = import ./types/probe.nix testContext;
+    wan = import ./types/wan.nix testContext;
+  };
+}

@@ -77,9 +77,10 @@ Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides whic
 
 ```sh
 nix flake check       # unit + integration + VM tier (VM needs /dev/kvm)
+nix develop --command nix-unit --flake .#tests  # Nix unit + integration tests
 nix fmt               # nixfmt + gofumpt + goimports
 nix build .#wanwatchd # build the daemon binary
-nix develop           # devshell with go, gopls, golangci-lint
+nix develop           # devshell with go, gopls, golangci-lint, nix-unit
 ```
 
 For executable reviews in a minimal Linux sandbox, use `bash tooling/review-env.sh COMMAND [ARG...]`. It provides the locked Go toolchain and GCC with vendored dependencies. See [review environment setup](.greptile/rules.md) for the optional upstream Nix bootstrap and focused validation commands.
