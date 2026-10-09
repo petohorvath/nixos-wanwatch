@@ -43,15 +43,27 @@ in
     ];
   };
 
-  # A WAN serves the Families its Probe Targets cover.
-  testFamiliesFollowProbe = {
+  # A WAN serves the Families its Probe Targets cover, so a WAN with
+  # only v6 Targets is valid.
+  testFamiliesFollowProbeTargets = {
     expr = map (input: wan.families (wan.make input)) [
       minimal
+      (minimal // { probe.targets.v6 = [ "2606:4700:4700::1111" ]; })
       full
     ];
-    expected = map (input: probe.families (probe.make input.probe)) [
-      minimal
-      full
+    expected = [
+      {
+        v4 = true;
+        v6 = false;
+      }
+      {
+        v4 = false;
+        v6 = true;
+      }
+      {
+        v4 = true;
+        v6 = true;
+      }
     ];
   };
 
