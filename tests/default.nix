@@ -1,7 +1,7 @@
 /*
   The flake's checks for one system, apart from the formatter check that
-  `dev/checks.nix` adds. The daemon, package,
-  integration, and VM checks exist only on Linux.
+  `dev/checks.nix` adds. The Go, package, integration, and VM checks
+  exist only on Linux.
 
   `inputs`: the flake inputs, including `self`.
   `packages`: the flake's packages for this system.

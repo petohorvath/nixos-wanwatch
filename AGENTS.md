@@ -86,7 +86,7 @@ cd daemon && go test -race -timeout 120s ./...
 
 `nix flake check` on Linux runs every check, including the full VM matrix. It is resource-intensive; report it as passed only when it actually ran.
 
-CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, daemon, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux against both nixpkgs branches.
+CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, vet, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux against both nixpkgs branches.
 
 ## Conventions
 

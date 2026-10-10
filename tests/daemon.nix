@@ -3,7 +3,7 @@
 { pkgs }:
 let
   /*
-    A sandboxed `go test` run over `daemon/`. The vendored modules and
+    A sandboxed Go command run over `daemon/`. The vendored modules and
     disabled proxy make any network access fail. Go refuses a go.mod
     directly in the build's temporary root, so the script copies the
     source into a subdirectory first.
@@ -14,7 +14,7 @@ let
 
     Returns a derivation that builds when `script` succeeds.
   */
-  runGoTests =
+  runGoCheck =
     {
       name,
       cgo ? false,
@@ -43,7 +43,7 @@ let
       '';
 in
 {
-  daemon = runGoTests {
+  daemon = runGoCheck {
     name = "wanwatch-daemon-tests";
     script = "go test -v ./...";
   };
@@ -54,7 +54,7 @@ in
     coverage: raise them as coverage improves, and lower one only
     with a comment explaining the regression.
   */
-  coverage = runGoTests {
+  coverage = runGoCheck {
     name = "wanwatch-daemon-coverage";
     script = ''
       cat > coverage.thresholds <<'EOF'
@@ -117,12 +117,12 @@ in
     '';
   };
 
-  vet = runGoTests {
+  vet = runGoCheck {
     name = "wanwatch-daemon-vet";
     script = "go vet ./...";
   };
 
-  race = runGoTests {
+  race = runGoCheck {
     name = "wanwatch-daemon-race";
     cgo = true;
     script = "go test -race -timeout 120s ./...";

@@ -2,12 +2,15 @@
 {
   deadnix,
   formatter,
+  git,
   go,
   gofumpt,
   golangci-lint,
   gopls,
   gotools,
   mkShell,
+  nil,
+  nix,
   nix-unit,
   nixfmt,
   statix,
@@ -24,5 +27,8 @@ mkShell {
     gofumpt
     statix
     deadnix
+    nix
+    git
+    nil
   ];
 }
