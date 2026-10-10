@@ -184,7 +184,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 // orderly, signal-driven stop. Any other non-nil cause means a
 // background subsystem died and cancelled the daemon context to
 // force a non-zero exit, so systemd's Restart=on-failure brings the
-// whole process back — see modules/wanwatch.nix.
+// whole process back — see nixos/module.nix.
 var errShutdown = errors.New("shutdown signal received")
 
 // isCleanShutdown reports whether `cause` (context.Cause of the

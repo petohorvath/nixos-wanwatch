@@ -18,7 +18,7 @@ This repo has a single context:
 ├── GLOSSARY.md
 ├── docs/adr/
 ├── lib/
-├── modules/
+├── nixos/
 └── daemon/
 ```
 

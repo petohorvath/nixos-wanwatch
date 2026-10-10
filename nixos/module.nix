@@ -35,7 +35,7 @@
 let
   cfg = config.services.wanwatch;
 
-  defaultPackage = pkgs.callPackage ../pkgs/wanwatchd.nix {
+  defaultPackage = pkgs.callPackage ../packages/wanwatchd/package.nix {
     inherit (wanwatch) version;
   };
 
@@ -113,7 +113,7 @@ in
     package = lib.mkOption {
       type = lib.types.package;
       default = defaultPackage;
-      defaultText = lib.literalExpression "pkgs.callPackage ../pkgs/wanwatchd.nix { }";
+      defaultText = lib.literalExpression "pkgs.callPackage ../packages/wanwatchd/package.nix { }";
       description = "The wanwatchd derivation to run.";
     };
 
