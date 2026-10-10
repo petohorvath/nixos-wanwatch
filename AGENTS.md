@@ -37,7 +37,7 @@ Use the [`GLOSSARY.md`](./GLOSSARY.md) terms exactly in code, comments, commit m
 
 ## Development environment
 
-The flake is the only entry point. `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper, and installs the pre-commit and pre-push hooks. The daemon and Linux-specific checks exist only on Linux systems.
+The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, formatter, and nix-unit `tests` output, and `tests/default.nix` assembles the check implementations ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The daemon and Linux-specific checks exist only on Linux systems.
 
 Override sibling flakes with absolute paths:
 
@@ -64,11 +64,14 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 
 | Check | Covers |
 |---|---|
+| `format` | treefmt formatting drift |
+| `lint` | statix and deadnix over the repository |
 | `unit` | Pure-Nix library tests, including the value-type skeleton tests |
 | `integration` | Module evaluation, rendered config, Telegraf wiring, and expected rejections |
 | `daemon` | All Go tests in a hermetic, network-disabled build |
-| `coverage` | Per-package Go coverage floors defined in `flake.nix` |
+| `coverage` | Per-package Go coverage floors defined in `tests/daemon.nix` |
 | `race` | All Go tests with the race detector |
+| `vet` | `go vet` over the daemon |
 | `package` | The production daemon derivation |
 | `vm-<scenario>`, `vm-unstable-<scenario>` | NixOS VM scenarios on stable and unstable nixpkgs (Linux with KVM) |
 
@@ -83,7 +86,7 @@ cd daemon && go test -race -timeout 120s ./...
 
 `nix flake check` on Linux runs every check, including the full VM matrix. It is resource-intensive; report it as passed only when it actually ran.
 
-CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, daemon, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux against both nixpkgs channels. The pre-push hook runs golangci-lint when `daemon/**/*.go` changed and, on Linux, the unit, integration, race, and coverage checks, but no VM scenarios.
+CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, daemon, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux against both nixpkgs branches.
 
 ## Conventions
 
@@ -145,4 +148,4 @@ Single-context: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`
 
 Keep each commit to one logical change, with its tests and documentation. Use an imperative subject of at most 72 characters in the form `scope: Summary`; scopes are `lib`, `internal`, `types`, `modules`, `daemon`, `tests`, `docs`, `ci`, `deps`, and `flake`. Explain why in the body when the diff does not show it.
 
-Hooks and signing stay on; `--no-verify` and `--no-gpg-sign` need explicit authorization for that commit and an explanation. Before handoff, inspect the final diff, list exactly which checks ran, distinguish focused checks from the full flake and VM matrix, and report every failure or skipped gate.
+Signing stays on; `--no-gpg-sign` needs explicit authorization for that commit and an explanation. Before handoff, inspect the final diff, list exactly which checks ran, distinguish focused checks from the full flake and VM matrix, and report every failure or skipped gate.

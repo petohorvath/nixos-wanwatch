@@ -199,7 +199,7 @@ jobs:
   #
   # Scenarios are enumerated dynamically from the flake's own
   # `checks.<system>` attrs — adding a new VM scenario to
-  # `makeVmChecks` in flake.nix picks it up here automatically, no
+  # `tests/vm/default.nix` picks it up here automatically, no
   # CI edit required. All scenarios still build in one
   # `nix build` invocation so the NixOS-test machinery and shared
   # store paths are realized once, not 15+ times. `--keep-going`
