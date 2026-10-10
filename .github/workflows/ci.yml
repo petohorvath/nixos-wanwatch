@@ -156,8 +156,8 @@ jobs:
         run: nix build --print-build-logs .#checks.${{ matrix.system }}.coverage
       - name: Race detector
         run: nix build --print-build-logs .#checks.${{ matrix.system }}.race
-      - name: go vet
-        run: nix build --print-build-logs .#checks.${{ matrix.system }}.vet
+      - name: golangci-lint
+        run: nix build --print-build-logs .#checks.${{ matrix.system }}.golangci-lint
 
   integration:
     name: integration tests (${{ matrix.system }})

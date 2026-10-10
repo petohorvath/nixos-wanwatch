@@ -71,7 +71,7 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 | `daemon` | All Go tests in a hermetic, network-disabled build |
 | `coverage` | Per-package Go coverage floors defined in `tests/daemon.nix` |
 | `race` | All Go tests with the race detector |
-| `vet` | `go vet` over the daemon |
+| `golangci-lint` | The `.golangci.yml` linters over the daemon |
 | `package` | The production daemon derivation |
 | `vm-<scenario>`, `vm-unstable-<scenario>` | NixOS VM scenarios on stable and unstable nixpkgs (Linux with KVM) |
 
@@ -86,7 +86,7 @@ cd daemon && go test -race -timeout 120s ./...
 
 `nix flake check` on Linux runs every check, including the full VM matrix. It is resource-intensive; report it as passed only when it actually ran.
 
-CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, vet, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux against both nixpkgs branches.
+CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, golangci-lint, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux against both nixpkgs branches.
 
 ## Conventions
 

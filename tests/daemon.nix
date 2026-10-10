@@ -1,5 +1,5 @@
-# The daemon's Go tests, coverage floors, race detector, and `go vet`,
-# run hermetically against the vendored modules.
+# The daemon's Go tests, coverage floors, race detector, and
+# golangci-lint, run hermetically against the vendored modules.
 { pkgs }:
 let
   /*
@@ -117,9 +117,15 @@ in
     '';
   };
 
-  vet = runGoCheck {
-    name = "wanwatch-daemon-vet";
-    script = "go vet ./...";
+  # The `.golangci.yml` linters, govet included. The config lives at
+  # the repository root, outside the copied `daemon/` source.
+  golangci-lint = runGoCheck {
+    name = "wanwatch-daemon-lint";
+    script = ''
+      export GOLANGCI_LINT_CACHE=$TMPDIR/golangci-lint
+      ${pkgs.lib.getExe pkgs.golangci-lint} run \
+        --config ${../.golangci.yml} ./...
+    '';
   };
 
   race = runGoCheck {
