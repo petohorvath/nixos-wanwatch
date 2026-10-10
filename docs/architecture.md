@@ -18,7 +18,7 @@ Three layers, bottom-up: pure-Nix library, NixOS module, Go daemon. The library 
                    │ rendered config.json
                    ▼
 ┌────────────────────────────────────────────────────────────┐
-│ modules/wanwatch.nix — NixOS module                        │
+│ nixos/module.nix — NixOS module                            │
 │   environment.etc."wanwatch/config.json"                   │
 │   systemd.services.wanwatch (hardened unit)                │
 │   users.users.wanwatch / users.groups.wanwatch             │
@@ -61,9 +61,9 @@ lib/internal/
 
 `lib/types/<name>.nix` exposes a NixOS option type for each value type, flattened as `wanwatch.types.<name>`. `wanwatch.types.fwmark` and `routingTableId` restrict the integers each Group declares to `[1000, 32767]`.
 
-## `modules/`
+## `nixos/`
 
-`wanwatch.nix` declares `services.wanwatch.*`, passes user input through `wanwatch.<type>.make`, runs `config.assertUniqueMarksAndTables` so no two Groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json`.
+`module.nix` declares `services.wanwatch.*`, passes user input through `wanwatch.<type>.make`, runs `config.assertUniqueMarksAndTables` so no two Groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json`.
 
 It also publishes two read-only outputs that downstream consumers such as nftzones reference by name:
 

@@ -9,8 +9,8 @@ Contributor instructions for people and automated agents working in this reposit
 It has three layers, with dependencies pointing bottom-up only:
 
 - `lib/`: a pure-Nix library of validated WAN, Probe, Member, and Group values, option types, the selector mirror, and daemon-config rendering. It never depends on the module or the daemon.
-- `modules/`: the thin `services.wanwatch` NixOS module and the optional Telegraf integration.
-- `daemon/`: the Linux-only Go `wanwatchd`. Its packages under `daemon/internal/` stay private, and `daemon/vendor/` is vendored code that is never edited or reformatted by hand.
+- `nixos/`: the thin `services.wanwatch` NixOS module and the optional Telegraf integration.
+- `daemon/`: the Linux-only Go `wanwatchd`, packaged by `packages/wanwatchd/package.nix`. Its packages under `daemon/internal/` stay private, and `daemon/vendor/` is vendored code that is never edited or reformatted by hand.
 
 The runtime path is: NixOS configuration → `lib` validation and rendering → `/etc/wanwatch/config.json` → `wanwatchd` consumes Probe and rtnetlink events → `decision` computes Selections with the pure selector → `apply` mutates routes, rules, and conntrack → State, Hooks, and metrics publish the result.
 
@@ -22,7 +22,7 @@ Before changing a contract, read its sources and documentation together:
 
 | Contract | Sources and documentation |
 |---|---|
-| Nix options and outputs | `lib/types/`, `modules/`, `README.md` |
+| Nix options and outputs | `lib/types/`, `nixos/`, `README.md` |
 | Daemon config JSON | `lib/internal/config.nix`, `daemon/internal/config/`, `docs/specs/daemon-config.md` |
 | State and Hooks | `daemon/internal/state/`, `docs/specs/daemon-state.md` |
 | Selection and failover | the Nix and Go selectors, `docs/selector.md`, `docs/specs/failover.md` |

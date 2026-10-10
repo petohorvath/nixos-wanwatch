@@ -264,25 +264,19 @@
       };
 
       nixosModules = {
-        default = import ./modules/wanwatch.nix { wanwatch = self.lib; };
+        default = import ./nixos/module.nix { wanwatch = self.lib; };
         wanwatch = self.nixosModules.default;
-        telegraf = import ./modules/telegraf.nix;
+        telegraf = import ./nixos/telegraf.nix;
       };
 
       formatter = forAllSystems (pkgs: (treefmtFor pkgs).config.build.wrapper);
 
       packages = forAllSystems (
         pkgs:
-        let
+        import ./packages {
+          inherit pkgs;
           # The version comes from `lib/default.nix`, its single source.
-          wanwatchd = pkgs.callPackage ./pkgs/wanwatchd.nix {
-            inherit (self.lib) version;
-            revision = "unknown";
-          };
-        in
-        nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          inherit wanwatchd;
-          default = wanwatchd;
+          inherit (self.lib) version;
         }
       );
 

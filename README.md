@@ -65,7 +65,7 @@ Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides whic
 | Layer | Where | Role |
 |---|---|---|
 | Pure-Nix library | `lib/` | Typed values (`wan`, `probe`, `group`, `member`), validation, typed fwmark/routing-table-id primitives, pure selector. |
-| NixOS module | `modules/` | `services.wanwatch.*` option surface, JSON renderer, hardened systemd unit. |
+| NixOS module | `nixos/` | `services.wanwatch.*` option surface, JSON renderer, hardened systemd unit. |
 | Go daemon | `daemon/` | `wanwatchd` — probe goroutines, rtnl subscriber, selector + hysteresis, netlink apply, state writer, hook runner, Prometheus endpoint. |
 
 ## Composition with sibling projects

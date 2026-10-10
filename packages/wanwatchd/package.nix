@@ -2,7 +2,7 @@
   wanwatchd, the Go daemon that probes WANs, follows rtnetlink events,
   applies routing state, and serves Prometheus metrics (docs/specs/failover.md).
 
-    pkgs.callPackage ./wanwatchd.nix {
+    pkgs.callPackage ./package.nix {
       version = "0.1.0";
       revision = "abcdef0";
     }
@@ -27,13 +27,13 @@ buildGoModule {
   inherit version;
 
   src = lib.fileset.toSource {
-    root = ../daemon;
+    root = ../../daemon;
     fileset = lib.fileset.unions [
-      ../daemon/cmd
-      ../daemon/internal
-      ../daemon/vendor
-      ../daemon/go.mod
-      ../daemon/go.sum
+      ../../daemon/cmd
+      ../../daemon/internal
+      ../../daemon/vendor
+      ../../daemon/go.mod
+      ../../daemon/go.sum
     ];
   };
 
