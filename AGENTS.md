@@ -118,7 +118,7 @@ Coverage floors, lint rules, security hardening, and CI gates stay at their curr
 | Audit | Cadence | Mechanism |
 |---|---|---|
 | Vulnerabilities | None (paused) | No workflow runs `govulncheck` or `vulnix`; [`TODO.md`](./TODO.md) tracks restoring the audit |
-| Primary nixpkgs | Monthly | Dependabot opens a review-only PR for the `nixpkgs` input; merge after reviewing the lock delta and CI |
+| Primary nixpkgs | Monthly | Manual `nix flake update nixpkgs` on the pinned stable branch; merge after reviewing the lock delta and CI |
 | Other dependencies | Monthly | Manual review of `go.mod` and other `flake.lock` deltas |
 | Public API, glossary, and convention drift | Each minor version | Manual review of `lib/default.nix`, daemon exports, `GLOSSARY.md`, and this file against the code |
 
