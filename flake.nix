@@ -2,15 +2,13 @@
   description = "nixos-wanwatch — multi-WAN monitoring and failover for NixOS";
 
   inputs = {
-    # The stable release branch. Every output except the `vm-unstable-*`
-    # checks and the audit shell builds against it, and the other inputs
-    # follow it so their `lib` outputs match.
+    /*
+      The stable release branch, the only nixpkgs input. The other
+      inputs follow it so their `lib` outputs match. CI runs the `vm-*`
+      checks against nixos-unstable by overriding this input
+      (ADR-0012).
+    */
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-
-    # The nixos-unstable branch, for the `vm-unstable-*` checks that
-    # surface kernel, networkd, and iproute2 changes before stable gets
-    # them, and for the audit shell's scanners.
-    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     flake-parts = {
       url = "github:hercules-ci/flake-parts";

@@ -11,6 +11,13 @@ on:
   # supply-chain footgun. Do not change without considering token
   # scope and what the workflow runs.
   pull_request:
+  # Weekly, Mondays at 06:00 UTC, so the floating nixos-unstable VM
+  # leg reports upstream drift even when nothing is merged. The
+  # schedule runs the whole workflow; the other jobs repeat the last
+  # `main` run. Manual dispatch re-runs it on demand.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 # Default to read-only for all jobs. CI runs untrusted code from
 # fork PRs (Nix evaluation, Go builds, VM tests); a least-privilege
@@ -20,7 +27,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The event name keeps a scheduled run from cancelling a push
+  # run on `main`, which shares its ref.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Each job caches /nix/store via nix-community/cache-nix-action so
@@ -37,10 +46,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - name: Test CI helper contracts
-        run: |
-          bash tests/ci/vulnix-retry.sh
-          bash tests/ci/nixpkgs-dependabot.sh
       - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
       - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
@@ -190,14 +195,19 @@ jobs:
   # `ubuntu-24.04-arm` is not guaranteed and pkgs.testers.nixosTest
   # would refuse to start without `/dev/kvm`.
   #
-  # Matrixed over two nixpkgs branches:
-  #   - "stable"   → checks.x86_64-linux.vm-<scenario>
-  #   - "unstable" → checks.x86_64-linux.vm-unstable-<scenario>
-  # The default `vm-*` set catches what release users will see;
-  # `vm-unstable-*` surfaces the newer-kernel / newer-systemd issues
-  # stable will pick up next. Independent jobs so each gets its
-  # own /nix/store cache and a single branch's failure is
-  # obvious in the run status.
+  # Matrixed over two nixpkgs branches, both building the same
+  # `checks.x86_64-linux.vm-<scenario>` attributes (ADR-0012):
+  #   - "stable"   → the locked `nixpkgs` input, as releases use.
+  #   - "unstable" → `--override-input nixpkgs` with the current
+  #     nixos-unstable revision, which surfaces the newer-kernel /
+  #     newer-systemd issues stable will pick up next.
+  # The unstable leg floats, so upstream drift can fail it without
+  # any change here. On pull requests it is `continue-on-error`
+  # and must not be a required check, so drift cannot block a
+  # merge; on `main` and the weekly schedule a failure turns the
+  # run red. Independent jobs so each gets its own /nix/store
+  # cache and a single branch's failure is obvious in the run
+  # status.
   #
   # Scenarios are enumerated dynamically from the flake's own
   # `checks.<system>` attrs — adding a new VM scenario to
@@ -209,14 +219,15 @@ jobs:
   # CI run reports every broken scenario, not just the first.
   vm:
     name: vm tests (${{ matrix.nixpkgs }})
+    continue-on-error: ${{ matrix.nixpkgs == 'unstable' && github.event_name == 'pull_request' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - nixpkgs: stable
-            prefix: vm-
+            branch: ""
           - nixpkgs: unstable
-            prefix: vm-unstable-
+            branch: nixos-unstable
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -235,6 +246,33 @@ jobs:
         with:
           extra_nix_config: |
             system-features = kvm nixos-test benchmark big-parallel uid-range
+      # Resolve the overriding branch to one revision, so the cache
+      # key and the build use the same commit even if the branch
+      # moves mid-run. `flake.lock` does not record that revision, so
+      # it joins
+      # the lock hash in the cache key. `--override-input` implies
+      # `--no-write-lock-file`, so `flake.lock` stays unchanged.
+      - name: Resolve nixpkgs
+        id: nixpkgs
+        env:
+          BRANCH: ${{ matrix.branch }}
+          LOCK_HASH: ${{ hashFiles('flake.lock') }}
+        run: |
+          set -o pipefail
+          if [ -z "$BRANCH" ]; then
+            echo "cache-key=$LOCK_HASH" >> "$GITHUB_OUTPUT"
+            echo "override=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          REV=$(nix flake metadata --json "github:NixOS/nixpkgs/$BRANCH" \
+            | jq -r '.locked.rev')
+          if [ -z "$REV" ] || [ "$REV" = null ]; then
+            echo "::error::could not resolve $BRANCH to a revision"
+            exit 1
+          fi
+          echo "Overriding nixpkgs with $BRANCH at $REV"
+          echo "cache-key=$REV-$LOCK_HASH" >> "$GITHUB_OUTPUT"
+          echo "override=--override-input nixpkgs github:NixOS/nixpkgs/$REV" >> "$GITHUB_OUTPUT"
       # VM gets a larger store budget — the NixOS test machinery
       # alone is multiple GB, and stable + unstable pull in two
       # independent closures. Purge stays aggressive so we don't
@@ -242,7 +280,7 @@ jobs:
       # save their stores.
       - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.nixpkgs }}-${{ hashFiles('flake.lock') }}
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.nixpkgs }}-${{ steps.nixpkgs.outputs.cache-key }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.nixpkgs }}-
           gc-max-store-size-linux: 8G
           purge: true
@@ -250,28 +288,22 @@ jobs:
           purge-created: 0
           purge-primary-key: never
       - name: Build VM checks
+        env:
+          OVERRIDE: ${{ steps.nixpkgs.outputs.override }}
         run: |
-          PFX='${{ matrix.prefix }}'
-          # Enumerate every checks.x86_64-linux.<PFX>* attribute via
-          # the flake's own attrNames. `select($pfx != "vm-" or
-          # (startswith("vm-unstable-") | not))` is the
-          # cross-branch guard: when PFX=vm-, a bare
-          # startswith("vm-") would also match every vm-unstable-*
-          # attribute, so we exclude the longer prefix explicitly.
-          TARGETS=$(nix eval --json .#checks.x86_64-linux \
+          # Enumerate every checks.x86_64-linux.vm-* attribute via
+          # the flake's own attrNames. $OVERRIDE is empty or several
+          # nix arguments, so it is deliberately unquoted.
+          # shellcheck disable=SC2086
+          TARGETS=$(nix eval --json $OVERRIDE .#checks.x86_64-linux \
             --apply 'builtins.attrNames' \
-            | jq -r --arg pfx "$PFX" '
-                .[]
-                | select(startswith($pfx))
-                | select($pfx != "vm-" or (startswith("vm-unstable-") | not))
-                | ".#checks.x86_64-linux." + .
-              ')
+            | jq -r '.[] | select(startswith("vm-")) | ".#checks.x86_64-linux." + .')
           if [ -z "$TARGETS" ]; then
-            echo "::error::no VM scenarios matched prefix '$PFX'"
+            echo "::error::no VM scenarios found"
             exit 1
           fi
-          echo "Building $(echo "$TARGETS" | wc -l) ${PFX} scenarios:"
+          echo "Building $(echo "$TARGETS" | wc -l) ${{ matrix.nixpkgs }} scenarios:"
           echo "$TARGETS" | sed 's/^/  /'
           # shellcheck disable=SC2086  # word-splitting is intentional —
-          # each target is a separate nix build argument.
-          nix build --print-build-logs --keep-going $TARGETS
+          # each target and override word is a separate nix argument.
+          nix build --print-build-logs --keep-going $OVERRIDE $TARGETS

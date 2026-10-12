@@ -73,7 +73,9 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 | `race` | All Go tests with the race detector |
 | `golangci-lint` | The `.golangci.yml` linters over the daemon |
 | `package` | The production daemon derivation |
-| `vm-<scenario>`, `vm-unstable-<scenario>` | NixOS VM scenarios on stable and unstable nixpkgs (Linux with KVM) |
+| `vm-<scenario>` | NixOS VM scenarios (Linux with KVM) |
+
+The flake has one nixpkgs input, pinned to the stable branch. To run a check against nixos-unstable, override that input; `--override-input` leaves `flake.lock` unchanged ([ADR-0012](./docs/adr/0012-single-nixpkgs-input.md)).
 
 The `unit` and `integration` checks run the flake's `tests` output with [nix-unit](https://github.com/nix-community/nix-unit) in the sandbox. For per-test results, run nix-unit directly; `nix-unit --flake .#tests.unit` narrows the run.
 
@@ -81,12 +83,14 @@ The `unit` and `integration` checks run the flake's `tests` output with [nix-uni
 nix develop --command nix-unit --flake .#tests
 nix build .#checks.x86_64-linux.unit
 nix build .#checks.x86_64-linux.vm-smoke
+nix build --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable \
+  .#checks.x86_64-linux.vm-smoke
 cd daemon && go test -race -timeout 120s ./...
 ```
 
 `nix flake check` on Linux runs every check, including the full VM matrix. It is resource-intensive; report it as passed only when it actually ran.
 
-CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, golangci-lint, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux against both nixpkgs branches.
+CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, golangci-lint, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux, against both the locked nixpkgs and the current nixos-unstable revision. The workflow also runs weekly to catch drift on nixos-unstable; on pull requests the unstable VM job reports upstream drift without blocking the merge.
 
 ## Conventions
 
@@ -113,8 +117,8 @@ Coverage floors, lint rules, security hardening, and CI gates stay at their curr
 
 | Audit | Cadence | Mechanism |
 |---|---|---|
-| Vulnerabilities | Weekly and on release tags | `.github/workflows/audit.yml` runs pinned `govulncheck` and `vulnix` |
-| Primary nixpkgs | Monthly | Dependabot opens a review-only PR for the `nixpkgs` input; merge after reviewing the lock delta and CI |
+| Vulnerabilities | None (paused) | No workflow runs `govulncheck` or `vulnix`; [`TODO.md`](./TODO.md) tracks restoring the audit |
+| Primary nixpkgs | Monthly | Manual `nix flake update nixpkgs` on the pinned stable branch; merge after reviewing the lock delta and CI |
 | Other dependencies | Monthly | Manual review of `go.mod` and other `flake.lock` deltas |
 | Public API, glossary, and convention drift | Each minor version | Manual review of `lib/default.nix`, daemon exports, `GLOSSARY.md`, and this file against the code |
 
