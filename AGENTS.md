@@ -90,7 +90,7 @@ cd daemon && go test -race -timeout 120s ./...
 
 `nix flake check` on Linux runs every check, including the full VM matrix. It is resource-intensive; report it as passed only when it actually ran.
 
-CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, golangci-lint, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux, against both the locked nixpkgs and the current nixos-unstable rev. The unstable VM job also runs weekly; on pull requests it reports upstream drift without blocking the merge.
+CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, golangci-lint, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux, against both the locked nixpkgs and the current nixos-unstable revision. The workflow also runs weekly to catch drift on nixos-unstable; on pull requests the unstable VM job reports upstream drift without blocking the merge.
 
 ## Conventions
 
@@ -117,7 +117,7 @@ Coverage floors, lint rules, security hardening, and CI gates stay at their curr
 
 | Audit | Cadence | Mechanism |
 |---|---|---|
-| Vulnerabilities | Paused | No workflow runs `govulncheck` or `vulnix`; [`TODO.md`](./TODO.md) tracks restoring the audit |
+| Vulnerabilities | None (paused) | No workflow runs `govulncheck` or `vulnix`; [`TODO.md`](./TODO.md) tracks restoring the audit |
 | Primary nixpkgs | Monthly | Dependabot opens a review-only PR for the `nixpkgs` input; merge after reviewing the lock delta and CI |
 | Other dependencies | Monthly | Manual review of `go.mod` and other `flake.lock` deltas |
 | Public API, glossary, and convention drift | Each minor version | Manual review of `lib/default.nix`, daemon exports, `GLOSSARY.md`, and this file against the code |

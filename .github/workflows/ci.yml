@@ -12,7 +12,9 @@ on:
   # scope and what the workflow runs.
   pull_request:
   # Weekly, Mondays at 06:00 UTC, so the floating nixos-unstable VM
-  # leg reports upstream drift even when nothing is merged.
+  # leg reports upstream drift even when nothing is merged. The
+  # schedule runs the whole workflow; the other jobs repeat the last
+  # `main` run. Manual dispatch re-runs it on demand.
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -200,7 +202,7 @@ jobs:
   # `checks.x86_64-linux.vm-<scenario>` attributes (ADR-0012):
   #   - "stable"   → the locked `nixpkgs` input, as releases use.
   #   - "unstable" → `--override-input nixpkgs` with the current
-  #     nixos-unstable rev, which surfaces the newer-kernel /
+  #     nixos-unstable revision, which surfaces the newer-kernel /
   #     newer-systemd issues stable will pick up next.
   # The unstable leg floats, so upstream drift can fail it without
   # any change here. On pull requests it is `continue-on-error`
@@ -220,7 +222,7 @@ jobs:
   # CI run reports every broken scenario, not just the first.
   vm:
     name: vm tests (${{ matrix.nixpkgs }})
-    continue-on-error: ${{ matrix.branch != '' && github.event_name == 'pull_request' }}
+    continue-on-error: ${{ matrix.nixpkgs == 'unstable' && github.event_name == 'pull_request' }}
     strategy:
       fail-fast: false
       matrix:
@@ -247,9 +249,10 @@ jobs:
         with:
           extra_nix_config: |
             system-features = kvm nixos-test benchmark big-parallel uid-range
-      # Resolve the overriding branch to one rev, so the cache key
-      # and the build use the same commit even if the branch moves
-      # mid-run. `flake.lock` does not record that rev, so it joins
+      # Resolve the overriding branch to one revision, so the cache
+      # key and the build use the same commit even if the branch
+      # moves mid-run. `flake.lock` does not record that revision, so
+      # it joins
       # the lock hash in the cache key. `--override-input` implies
       # `--no-write-lock-file`, so `flake.lock` stays unchanged.
       - name: Resolve nixpkgs
@@ -258,6 +261,7 @@ jobs:
           BRANCH: ${{ matrix.branch }}
           LOCK_HASH: ${{ hashFiles('flake.lock') }}
         run: |
+          set -o pipefail
           if [ -z "$BRANCH" ]; then
             echo "cache-key=$LOCK_HASH" >> "$GITHUB_OUTPUT"
             echo "override=" >> "$GITHUB_OUTPUT"
@@ -265,6 +269,10 @@ jobs:
           fi
           REV=$(nix flake metadata --json "github:NixOS/nixpkgs/$BRANCH" \
             | jq -r '.locked.rev')
+          if [ -z "$REV" ] || [ "$REV" = null ]; then
+            echo "::error::could not resolve $BRANCH to a revision"
+            exit 1
+          fi
           echo "Overriding nixpkgs with $BRANCH at $REV"
           echo "cache-key=$REV-$LOCK_HASH" >> "$GITHUB_OUTPUT"
           echo "override=--override-input nixpkgs github:NixOS/nixpkgs/$REV" >> "$GITHUB_OUTPUT"
