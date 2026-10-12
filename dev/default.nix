@@ -38,16 +38,12 @@
     }:
     let
       treefmt = inputs.treefmt-nix.lib.evalModule pkgs ./formatter.nix;
-      unstablePkgs = inputs.nixpkgs-unstable.legacyPackages.${system};
     in
     {
       formatter = treefmt.config.build.wrapper;
 
       devShells = {
         default = pkgs.callPackage ./shell.nix { inherit (config) formatter; };
-        audit = pkgs.callPackage ./audit-shell.nix {
-          inherit (unstablePkgs) govulncheck vulnix;
-        };
       }
       // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         review = pkgs.callPackage ./review-shell.nix { };

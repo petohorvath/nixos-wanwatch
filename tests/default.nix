@@ -20,15 +20,13 @@ let
 
   runNixUnit = import ./nix-unit.nix { inherit inputs pkgs; };
 
-  vmChecksFor =
-    vmPkgs:
+  vmChecks = mapAttrs' (name: nameValuePair "vm-${name}") (
     import ./vm {
       inherit (inputs) nftzones;
       inherit (inputs.self) nixosModules;
-      pkgs = vmPkgs;
-    };
-
-  prefixNames = prefix: mapAttrs' (name: value: nameValuePair "${prefix}${name}" value);
+      inherit pkgs;
+    }
+  );
 in
 {
   unit = runNixUnit "unit";
@@ -62,8 +60,7 @@ in
     package = packages.wanwatchd;
     integration = runNixUnit "integration.${system}";
   }
-  # `vm-*` uses stable nixpkgs, as releases do; `vm-unstable-*` previews
-  # the kernel and systemd that stable will get next.
-  // prefixNames "vm-" (vmChecksFor pkgs)
-  // prefixNames "vm-unstable-" (vmChecksFor inputs.nixpkgs-unstable.legacyPackages.${system})
+  # CI also builds these against nixos-unstable through
+  # `--override-input nixpkgs` (ADR-0012).
+  // vmChecks
 )

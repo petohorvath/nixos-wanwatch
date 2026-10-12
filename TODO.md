@@ -150,6 +150,25 @@ implementation is mechanical.
 
 ---
 
+## infra — CI / tooling debt
+
+### Restore the vulnerability audit
+
+ADR-0012 removed `.github/workflows/audit.yml`, which ran
+`govulncheck` against the daemon binary and `vulnix` against its
+runtime derivers weekly and on release tags. Its `audit`
+development shell took both scanners from the removed
+`nixpkgs-unstable` input. Restoring the audit needs a new scanner
+source: either stable `pkgs`, or the nixos-unstable override
+applied to the audit shell but not to the daemon build. The
+workflow, the `dev/audit-shell.nix` shell, the fail-closed
+`.github/scripts/retry-vulnix.sh` wrapper, and its
+`tests/ci/vulnix-retry.sh` contract test are recoverable from
+commit a6612d7. Until then, `AGENTS.md` lists the vulnerability
+audit as paused.
+
+---
+
 ## cleanup — internal refactors
 
 Captured during reviews; deemed not worth blocking the original

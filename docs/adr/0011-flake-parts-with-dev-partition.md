@@ -4,4 +4,4 @@ The flake is assembled with flake-parts, following the shared flake-parts projec
 
 ## Considered options
 
-The development inputs (`treefmt-nix`, `nftzones`, `nixpkgs-unstable`) stay in the root `flake.nix` rather than moving to a separate `dev/flake.nix` through `partitions.dev.extraInputsFlake`. A separate development flake would keep them out of consumers' lock files, but it needs its own lock file, cannot `follows` the root `nixpkgs`, and would move the inputs out of reach of the Dependabot `nixpkgs` updates and the root lock review.
+The development inputs (`treefmt-nix`, `nftzones`, and formerly `nixpkgs-unstable`) stay in the root `flake.nix` rather than moving to a separate `dev/flake.nix` through `partitions.dev.extraInputsFlake`. A separate development flake would keep them out of consumers' lock files, but it needs its own lock file, cannot `follows` the root `nixpkgs`, and would move the inputs out of reach of the Dependabot `nixpkgs` updates and the root lock review. [ADR-0012](./0012-single-nixpkgs-input.md) removes `nixpkgs-unstable`; CI overrides `nixpkgs` instead.
