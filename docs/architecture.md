@@ -127,6 +127,8 @@ RouteEvent → Gateway cache → Group.GatewayChanged ────┘        │
                                                conntrack → State → Hook
 ```
 
+Link monitoring opens the live link subscription before listing existing links, so a carrier change during startup cannot fall between the snapshot and the subscription. Snapshot events queue before the event loop starts. Each notification on a watched interface triggers a fresh read of that link, and the subscriber emits a LinkEvent only when the carrier or operstate differs from the last one it emitted. Buffered history therefore cannot replay a stale carrier loss into Selection. A failed read terminates the subscriber through the subsystem restart path.
+
 The decision package owns pending and committed Selections, Decision counts, active-Member gauges, and commit timestamps. The daemon forwards events and publishes returned commits; `Snapshot` supplies each Group's State. Strategies stay pure in `internal/selector`.
 
 A hard Apply failure leaves the target Selection pending, and State and Hooks stay on the committed Selection. Probe cycles and Gateway changes retry every Family for the pending target, and a newer Selection supersedes it.
