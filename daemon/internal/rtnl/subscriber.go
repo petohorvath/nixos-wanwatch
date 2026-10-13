@@ -12,7 +12,7 @@ import (
 )
 
 // LinkSubscriber owns a netlink RTNLGRP_LINK subscription. Concurrent
-// calls to Run are not supported.
+// subscriptions on the same LinkSubscriber are not supported.
 type LinkSubscriber struct {
 	// Interfaces restricts emission to the named set. A nil map
 	// means "emit for every interface".
@@ -22,7 +22,8 @@ type LinkSubscriber struct {
 // updateChanBuffer is the netlink-update channel capacity. Sized
 // to absorb a flap burst — many links transitioning at once when an
 // uplink renegotiates — without the library's receive goroutine
-// blocking. The startup dump goes through Prime, not this channel.
+// blocking. Notifications queue here during the startup snapshot and
+// trigger current-link reads afterward.
 const updateChanBuffer = 256
 
 // errSubscriptionClosed is returned by runLoop when the netlink
@@ -58,48 +59,83 @@ func translateSubClose(err error, subErr *atomic.Pointer[error], label string) e
 	return err
 }
 
-// Prime walks the kernel's current links and pushes a LinkEvent
-// onto `out` for every watched interface. Callers should invoke
-// this synchronously before starting the event loop, so each WAN's
-// carrier/operstate is known on the event loop's first iteration.
-// Without it the daemon starts every WAN at carrier-unknown — which
-// it treats as down — so a probe result arriving before the
-// subscription's first transition would leave an up WAN unselected
-// until that transition lands.
+// Start subscribes to RTNLGRP_LINK before taking the initial link
+// snapshot, queues one LinkEvent per watched interface on out, then
+// reconciles live notifications. Subscribing first means a carrier
+// change during startup cannot fall between the dump and the
+// subscription. Each matching notification triggers a current-link
+// read: a notification queued before the snapshot may describe
+// history the snapshot already supersedes, and replaying it would
+// show the selector a transient flap. Both phases share one state
+// map, so a read that matches the last emitted state emits nothing.
 //
-// `out`'s buffer must hold at least one event per watched
-// interface; the daemon sizes it at 64, far above any realistic
-// WAN count.
-func (s *LinkSubscriber) Prime(ctx context.Context, out chan<- LinkEvent) error {
-	return s.primeVia(ctx, netlink.LinkList, out)
+// Start returns after queuing the snapshot, so each WAN's carrier
+// and operstate is known on the event loop's first iteration.
+// Without it the daemon starts every WAN at carrier-unknown — which
+// it treats as down — so a probe result arriving before the first
+// transition would leave an up WAN unselected. Unless a consumer is
+// already reading, out must have room for every watched interface.
+// The returned channel receives one terminal error and closes when
+// ctx is cancelled or the subscription fails. Start does not close
+// out.
+func (s *LinkSubscriber) Start(ctx context.Context, out chan<- LinkEvent) (<-chan error, error) {
+	return s.StartWith(ctx, netlink.LinkSubscribeWithOptions, netlink.LinkList, netlink.LinkByName, out)
 }
 
-// linkListFn matches netlink.LinkList and is the seam
-// LinkSubscriber.primeVia exposes for tests — production uses the
-// netlink call; tests inject a stub returning synthetic links.
+// StartWith runs Start with supplied netlink operations. The
+// subscription must close its update channel when done closes, just
+// like LinkSubscribeWithOptions, and getFn must report a missing
+// link with netlink.LinkNotFoundError, just like LinkByName.
+func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeFn, listFn linkListFn, getFn linkByNameFn, out chan<- LinkEvent) (<-chan error, error) {
+	updates := make(chan netlink.LinkUpdate, updateChanBuffer)
+	done := make(chan struct{})
+	// subErr captures the netlink library's fatal error from its
+	// receive goroutine; translateSubClose reads it after the close.
+	var subErr atomic.Pointer[error]
+	opts := netlink.LinkSubscribeOptions{
+		// ListExisting is omitted: the snapshot comes from LinkList
+		// after subscribing, so it is queued before Start returns.
+		ReceiveBufferSize: netlinkRcvBufBytes,
+		ErrorCallback:     func(err error) { subErr.Store(&err) },
+	}
+	if err := subscribe(updates, done, opts); err != nil {
+		close(done)
+		return nil, fmt.Errorf("rtnl: LinkSubscribe: %w", err)
+	}
+	stop := func() { closeAndDrain(done, updates) }
+	state := make(map[string]LinkState)
+	if err := s.primeVia(ctx, listFn, state, out); err != nil {
+		stop()
+		return nil, err
+	}
+	exited := make(chan error, 1)
+	go func() {
+		defer close(exited)
+		err := translateSubClose(s.runLoop(ctx, updates, getFn, state, out), &subErr, "link")
+		stop()
+		exited <- err
+	}()
+	return exited, nil
+}
+
+// linkSubscribeFn matches netlink.LinkSubscribeWithOptions.
+type linkSubscribeFn func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, opts netlink.LinkSubscribeOptions) error
+
+// linkListFn matches netlink.LinkList.
 type linkListFn func() ([]netlink.Link, error)
 
-// primeVia is Prime parameterized on the link enumerator. Tests
-// drive synthetic links through it to exercise the existing-link
-// filtering + emission paths without a netlink socket.
-//
-// LinkList carries the IFF_* flags in each link's Attrs().RawFlags,
-// whereas the subscription path delivers them in the netlink
-// message header — so the synthetic LinkUpdate copies RawFlags into
-// the IfInfomsg field handleUpdate reads.
-func (s *LinkSubscriber) primeVia(ctx context.Context, listFn linkListFn, out chan<- LinkEvent) error {
+// linkByNameFn matches netlink.LinkByName.
+type linkByNameFn func(name string) (netlink.Link, error)
+
+// primeVia queues snapshot events before the subscription is
+// drained, recording each watched link in state.
+func (s *LinkSubscriber) primeVia(ctx context.Context, listFn linkListFn, state map[string]LinkState, out chan<- LinkEvent) error {
 	links, err := listFn()
 	if err != nil {
 		return fmt.Errorf("rtnl: LinkList: %w", err)
 	}
-	state := make(map[string]LinkState)
 	for _, link := range links {
-		upd := netlink.LinkUpdate{
-			Header: unix.NlMsghdr{Type: unix.RTM_NEWLINK},
-			Link:   link,
-		}
-		upd.Flags = link.Attrs().RawFlags
-		ev, emit := s.handleUpdate(state, upd)
+		ev, emit := s.handleUpdate(state, linkUpdateFromLink(link))
 		if !emit {
 			continue
 		}
@@ -112,55 +148,11 @@ func (s *LinkSubscriber) primeVia(ctx context.Context, listFn linkListFn, out ch
 	return nil
 }
 
-// Run subscribes to RTNLGRP_LINK and pushes one LinkEvent onto
-// `out` for every real carrier/operstate change on a watched
-// interface. Returns when ctx is cancelled or the netlink
-// subscription fails. Pair with Prime for the existing-links case —
-// Run itself does not dump.
-//
-// `out` is *not* closed on return; callers can retry Run with a
-// fresh goroutine and reuse the same channel after a transient
-// failure.
-func (s *LinkSubscriber) Run(ctx context.Context, out chan<- LinkEvent) error {
-	return s.runVia(ctx, netlink.LinkSubscribeWithOptions, out)
-}
-
-// linkSubscribeFn matches netlink.LinkSubscribeWithOptions and is
-// the seam LinkSubscriber.runVia exposes for tests: real production
-// uses the netlink call; tests inject a stub that either errors
-// or fills the `updates` channel with synthetic LinkUpdates.
-type linkSubscribeFn func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, opts netlink.LinkSubscribeOptions) error
-
-// runVia is Run parameterized on the subscription function — the
-// only piece of Run that needs a netlink socket. Tests drive this
-// directly to cover the error wrapping and the runLoop wire-up.
-func (s *LinkSubscriber) runVia(ctx context.Context, subscribe linkSubscribeFn, out chan<- LinkEvent) error {
-	updates := make(chan netlink.LinkUpdate, updateChanBuffer)
-	done := make(chan struct{})
-	defer close(done)
-
-	// subErr captures the netlink library's fatal error from its
-	// receive goroutine; translateSubClose reads it after the close.
-	var subErr atomic.Pointer[error]
-	opts := netlink.LinkSubscribeOptions{
-		// ListExisting is omitted: Prime does the existing-link dump
-		// synchronously before the event loop starts, so Run only
-		// carries subsequent transitions.
-		ReceiveBufferSize: netlinkRcvBufBytes,
-		ErrorCallback:     func(err error) { subErr.Store(&err) },
-	}
-	if err := subscribe(updates, done, opts); err != nil {
-		return fmt.Errorf("rtnl: LinkSubscribe: %w", err)
-	}
-	return translateSubClose(s.runLoop(ctx, updates, out), &subErr, "link")
-}
-
-// runLoop drains `updates`, folds each via handleUpdate, and pushes
-// resulting events to `out`. Exits on ctx cancellation or when
-// `updates` closes. Split from Run so tests can drive it without a
-// netlink socket.
-func (s *LinkSubscriber) runLoop(ctx context.Context, updates <-chan netlink.LinkUpdate, out chan<- LinkEvent) error {
-	state := make(map[string]LinkState)
+// runLoop treats each update on a watched interface as an
+// invalidation, reads that link's current state, and queues a
+// LinkEvent when it differs from state. It exits on cancellation, a
+// failed link read, or subscription closure.
+func (s *LinkSubscriber) runLoop(ctx context.Context, updates <-chan netlink.LinkUpdate, getFn linkByNameFn, state map[string]LinkState, out chan<- LinkEvent) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -169,7 +161,15 @@ func (s *LinkSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Lin
 			if !ok {
 				return errSubscriptionClosed
 			}
-			ev, emit := s.handleUpdate(state, upd)
+			name := upd.Attrs().Name
+			if !s.watches(name) {
+				continue
+			}
+			current, err := reconcileVia(ctx, getFn, name)
+			if err != nil {
+				return err
+			}
+			ev, emit := s.handleUpdate(state, current)
 			if !emit {
 				continue
 			}
@@ -182,6 +182,65 @@ func (s *LinkSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Lin
 	}
 }
 
+// reconcileVia reads the named link's current state as a LinkUpdate.
+// A link that no longer exists reads as RTM_DELLINK, so a stale
+// delete cannot hide a re-created link and a stale add cannot revive
+// a deleted one.
+func reconcileVia(ctx context.Context, getFn linkByNameFn, name string) (netlink.LinkUpdate, error) {
+	if err := ctx.Err(); err != nil {
+		return netlink.LinkUpdate{}, err
+	}
+	link, err := getFn(name)
+	var notFound netlink.LinkNotFoundError
+	if errors.As(err, &notFound) {
+		return netlink.LinkUpdate{
+			Header: unix.NlMsghdr{Type: unix.RTM_DELLINK},
+			Link:   &netlink.Device{LinkAttrs: netlink.LinkAttrs{Name: name}},
+		}, nil
+	}
+	if err != nil {
+		return netlink.LinkUpdate{}, fmt.Errorf("rtnl: LinkByName %s: %w", name, err)
+	}
+	return linkUpdateFromLink(link), nil
+}
+
+// linkUpdateFromLink wraps a link read from LinkList or LinkByName as
+// an RTM_NEWLINK update. Those reads carry the IFF_* flags in
+// Attrs().RawFlags, whereas the subscription delivers them in the
+// message header, so copy RawFlags into the IfInfomsg field
+// handleUpdate reads.
+func linkUpdateFromLink(link netlink.Link) netlink.LinkUpdate {
+	upd := netlink.LinkUpdate{
+		Header: unix.NlMsghdr{Type: unix.RTM_NEWLINK},
+		Link:   link,
+	}
+	upd.Flags = link.Attrs().RawFlags
+	return upd
+}
+
+// watches reports whether name is in the watched set; a nil set
+// watches every interface.
+func (s *LinkSubscriber) watches(name string) bool {
+	if s.Interfaces == nil {
+		return true
+	}
+	_, ok := s.Interfaces[name]
+	return ok
+}
+
+// closeAndDrain stops a netlink subscription by closing done, then
+// drains updates until the library closes it. The library sends
+// decoded messages without selecting on done, so a full buffer would
+// otherwise leave its receiver blocked after the socket is closed.
+func closeAndDrain[T any](done chan<- struct{}, updates <-chan T) {
+	close(done)
+	for {
+		if _, ok := <-updates; !ok {
+			return
+		}
+	}
+}
+
 // handleUpdate folds one netlink update into `state` and returns
 // the LinkEvent to emit, if any.
 //
@@ -189,11 +248,14 @@ func (s *LinkSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Lin
 // rather than dropped silently — a vanished WAN must drive the
 // selector out of that member, not leave a stale snapshot. The
 // state entry is removed either way so the map stays bounded as
-// transient interfaces (veth, dummy, …) come and go.
+// transient interfaces (veth, dummy, …) come and go. A delete for an
+// interface absent from `state` emits nothing: it was never sighted,
+// or its removal was already reported, and runLoop reads a link that
+// stays deleted as RTM_DELLINK on every later notification.
 func (s *LinkSubscriber) handleUpdate(state map[string]LinkState, upd netlink.LinkUpdate) (LinkEvent, bool) {
 	attrs := upd.Attrs()
 	name := attrs.Name
-	if _, watch := s.Interfaces[name]; s.Interfaces != nil && !watch {
+	if !s.watches(name) {
 		return LinkEvent{}, false
 	}
 
@@ -207,6 +269,9 @@ func (s *LinkSubscriber) handleUpdate(state map[string]LinkState, upd netlink.Li
 
 	prev, seen := state[name]
 	unchanged := seen && prev.Carrier == carrier && prev.Operstate == operstate
+	if deleted && !seen {
+		return LinkEvent{}, false
+	}
 	if deleted {
 		delete(state, name)
 	} else if !unchanged {

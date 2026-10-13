@@ -77,17 +77,7 @@ func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscrib
 		close(done)
 		return nil, fmt.Errorf("rtnl: RouteSubscribe: %w", err)
 	}
-	stop := func() {
-		close(done)
-		// The library sends decoded messages without selecting on
-		// done. Drain until it closes updates so a full buffer cannot
-		// leave its receiver blocked after the socket is closed.
-		for {
-			if _, ok := <-updates; !ok {
-				return
-			}
-		}
-	}
+	stop := func() { closeAndDrain(done, updates) }
 	if err := s.primeVia(ctx, listFn, out); err != nil {
 		stop()
 		return nil, err

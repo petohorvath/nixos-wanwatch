@@ -15,23 +15,22 @@ import (
 // cancellation calls `cancel` with the cause, taking the daemon down
 // for a systemd restart rather than running on blind.
 //
-// Prime runs synchronously before the subscriber goroutine spawns so
-// each WAN's carrier/operstate is on the channel before the event
-// loop's first iteration — see rtnl.LinkSubscriber.Prime for why a
-// probe result racing the link dump would otherwise leave an up WAN
-// unselected.
+// Start establishes the live subscription before queuing the initial
+// link snapshot synchronously, so each WAN's carrier/operstate is on
+// the channel before the event loop's first iteration and a carrier
+// change during startup cannot be missed — see rtnl.LinkSubscriber.Start.
 func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.LinkEvent, error) {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.LinkSubscriber{Interfaces: watched}
 	events := make(chan rtnl.LinkEvent, 64)
-	if err := s.Prime(ctx, events); err != nil {
-		return nil, fmt.Errorf("rtnl link subscriber prime: %w", err)
+	exited, err := s.Start(ctx, events)
+	if err != nil {
+		return nil, fmt.Errorf("rtnl link subscriber start: %w", err)
 	}
 	go func() {
-		err := s.Run(ctx, events)
-		onSubsystemExit(cancel, logger, "link subscriber", err)
+		onSubsystemExit(cancel, logger, "link subscriber", <-exited)
 	}()
-	logger.Info("rtnl link subscriber started", "interfaces", len(watched), "primed", len(events))
+	logger.Info("rtnl link subscriber started", "interfaces", len(watched), "queued", len(events))
 	return events, nil
 }
 

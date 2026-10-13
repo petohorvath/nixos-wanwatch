@@ -3,6 +3,7 @@ package rtnl
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -165,6 +166,25 @@ func TestHandleUpdateDeleteBoundsStateOnNoChange(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateDeleteSuppressesUnseen(t *testing.T) {
+	t.Parallel()
+	// A link that stays deleted reads as RTM_DELLINK on every later
+	// notification. Only the first delete after a sighting may emit,
+	// and a link never sighted has nothing to withdraw.
+	s := &LinkSubscriber{}
+	state := map[string]LinkState{}
+	s.handleUpdate(state, mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp))
+	if _, ok := s.handleUpdate(state, mkDelete("eth0")); !ok {
+		t.Fatal("first RTM_DELLINK after a sighting did not emit")
+	}
+	if _, ok := s.handleUpdate(state, mkDelete("eth0")); ok {
+		t.Error("repeated RTM_DELLINK emitted; want suppressed")
+	}
+	if _, ok := s.handleUpdate(state, mkDelete("eth1")); ok {
+		t.Error("RTM_DELLINK on never-sighted iface emitted; want suppressed")
+	}
+}
+
 func TestHandleUpdateNilInterfaceSetMatchesAll(t *testing.T) {
 	t.Parallel()
 	s := &LinkSubscriber{}
@@ -183,9 +203,14 @@ func TestRunLoopForwardsEvent(t *testing.T) {
 	defer cancel()
 
 	updates <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
+	getFn := func(string) (netlink.Link, error) {
+		return mkLink("eth0", unix.IFF_LOWER_UP, netlink.OperUp), nil
+	}
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- (&LinkSubscriber{}).runLoop(ctx, updates, out) }()
+	go func() {
+		errCh <- (&LinkSubscriber{}).runLoop(ctx, updates, getFn, map[string]LinkState{}, out)
+	}()
 
 	select {
 	case ev := <-out:
@@ -205,13 +230,13 @@ func TestRunLoopForwardsEvent(t *testing.T) {
 func TestRunLoopReturnsOnUpdatesClosed(t *testing.T) {
 	t.Parallel()
 	// A closed subscription channel must surface as the
-	// errSubscriptionClosed sentinel so runVia can translate it
+	// errSubscriptionClosed sentinel so StartWith can translate it
 	// into the ErrorCallback's captured cause.
 	updates := make(chan netlink.LinkUpdate)
 	out := make(chan LinkEvent, 1)
 	close(updates)
 
-	err := (&LinkSubscriber{}).runLoop(context.Background(), updates, out)
+	err := (&LinkSubscriber{}).runLoop(context.Background(), updates, unexpectedLinkByName(t), map[string]LinkState{}, out)
 	if !errors.Is(err, errSubscriptionClosed) {
 		t.Fatalf("runLoop on closed channel = %v, want errSubscriptionClosed", err)
 	}
@@ -224,57 +249,78 @@ func TestRunLoopCancelsBetweenUpdates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := (&LinkSubscriber{}).runLoop(ctx, updates, out)
+	err := (&LinkSubscriber{}).runLoop(ctx, updates, unexpectedLinkByName(t), map[string]LinkState{}, out)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 
-// TestLinkSubscriberRunViaWrapsSubscribeError: a netlink subscribe
+// TestRunLoopSkipsUnwatchedWithoutReading: an update on an
+// interface outside the watched set must not cost a link read.
+func TestRunLoopSkipsUnwatchedWithoutReading(t *testing.T) {
+	t.Parallel()
+	updates := make(chan netlink.LinkUpdate, 1)
+	updates <- mkUpdate("wwan0", unix.IFF_LOWER_UP, netlink.OperUp)
+	close(updates)
+	s := &LinkSubscriber{Interfaces: map[string]struct{}{"eth0": {}}}
+	out := make(chan LinkEvent, 1)
+
+	err := s.runLoop(context.Background(), updates, unexpectedLinkByName(t), map[string]LinkState{}, out)
+	if !errors.Is(err, errSubscriptionClosed) {
+		t.Fatalf("runLoop = %v, want errSubscriptionClosed", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("unwatched update emitted %+v", <-out)
+	}
+}
+
+// TestLinkSubscriberStartWrapsSubscribeError: a netlink subscribe
 // failure must be wrapped with the `rtnl: LinkSubscribe:` prefix
-// so logs name the layer responsible.
-func TestLinkSubscriberRunViaWrapsSubscribeError(t *testing.T) {
+// so logs name the layer responsible, and no snapshot is taken.
+func TestLinkSubscriberStartWrapsSubscribeError(t *testing.T) {
 	t.Parallel()
 	want := errors.New("netlink: subscribe denied")
 	subscribe := func(chan<- netlink.LinkUpdate, <-chan struct{}, netlink.LinkSubscribeOptions) error {
 		return want
 	}
-	err := (&LinkSubscriber{}).runVia(context.Background(), subscribe, make(chan LinkEvent, 1))
-	if !errors.Is(err, want) {
-		t.Errorf("err = %v, want subscribe-error chained via %%w", err)
+	listFn := func() ([]netlink.Link, error) {
+		t.Error("LinkList called after subscribe failed")
+		return nil, nil
+	}
+	exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent, 1))
+	if !errors.Is(err, want) || exited != nil {
+		t.Fatalf("Start = %v, %v; want no worker and subscribe-error chained via %%w", exited, err)
 	}
 	if !strings.Contains(err.Error(), "rtnl: LinkSubscribe") {
 		t.Errorf("err = %q, want 'rtnl: LinkSubscribe' prefix", err.Error())
 	}
 }
 
-// TestLinkSubscriberRunViaWiresSubscribeToRunLoop: a successful
+// TestLinkSubscriberStartWiresSubscribeToRunLoop: a successful
 // subscribe hands the `updates` channel through to runLoop — a
 // LinkUpdate written by the stub must surface as a LinkEvent on
 // `out`, proving the wire-up isn't dropped on the floor.
-func TestLinkSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
+func TestLinkSubscriberStartWiresSubscribeToRunLoop(t *testing.T) {
 	t.Parallel()
-	// `subscribe` writes synthetic updates to the channel runVia
-	// hands it, then signals readiness via `subscribed`. Writing
-	// from the runVia goroutine itself avoids racing the producer
-	// against an external sender that doesn't know when ch is
-	// non-nil.
-	subscribed := make(chan struct{})
-	subscribe := func(ch chan<- netlink.LinkUpdate, _ <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+	subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, opts netlink.LinkSubscribeOptions) error {
+		if opts.ListExisting {
+			t.Error("ListExisting enabled; the snapshot comes from LinkList")
+		}
 		ch <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
-		close(subscribed)
+		closeLinkUpdatesOnStop(ch, done)
 		return nil
+	}
+	getFn := func(string) (netlink.Link, error) {
+		return mkLink("eth0", unix.IFF_LOWER_UP, netlink.OperUp), nil
 	}
 	out := make(chan LinkEvent, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done := make(chan error, 1)
-	go func() {
-		done <- (&LinkSubscriber{}).runVia(ctx, subscribe, out)
-	}()
-
-	<-subscribed
+	exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, emptyLinkList, getFn, out)
+	if err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case ev := <-out:
 		if ev.Name != "eth0" || ev.Carrier != CarrierUp {
@@ -285,16 +331,20 @@ func TestLinkSubscriberRunViaWiresSubscribeToRunLoop(t *testing.T) {
 	}
 
 	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Errorf("runVia returned %v, want context.Canceled after cancel", err)
+	if err := <-exited; !errors.Is(err, context.Canceled) {
+		t.Errorf("subscriber returned %v, want context.Canceled after cancel", err)
+	}
+	if _, ok := <-exited; ok {
+		t.Error("terminal error channel did not close")
 	}
 }
 
-// TestLinkSubscriberRunViaSurfacesErrorCallbackCause: when the
+// TestLinkSubscriberStartSurfacesErrorCallbackCause: when the
 // netlink receive goroutine dies it reports the cause through
-// ErrorCallback and closes the update channel. runVia must surface
-// that concrete cause, %w-chained — not a bare "channel closed".
-func TestLinkSubscriberRunViaSurfacesErrorCallbackCause(t *testing.T) {
+// ErrorCallback and closes the update channel. The subscriber must
+// surface that concrete cause, %w-chained — not a bare "channel
+// closed".
+func TestLinkSubscriberStartSurfacesErrorCallbackCause(t *testing.T) {
 	t.Parallel()
 	want := errors.New("netlink: receive failed: ENOBUFS")
 	subscribe := func(ch chan<- netlink.LinkUpdate, _ <-chan struct{}, opts netlink.LinkSubscribeOptions) error {
@@ -304,7 +354,11 @@ func TestLinkSubscriberRunViaSurfacesErrorCallbackCause(t *testing.T) {
 		close(ch)
 		return nil
 	}
-	err := (&LinkSubscriber{}).runVia(context.Background(), subscribe, make(chan LinkEvent, 1))
+	exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, emptyLinkList, unexpectedLinkByName(t), make(chan LinkEvent, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = <-exited
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want ErrorCallback cause chained via %%w", err)
 	}
@@ -321,7 +375,7 @@ func TestLinkSubscriberPrimeViaWrapsListError(t *testing.T) {
 	want := errors.New("netlink: link list denied")
 	listFn := func() ([]netlink.Link, error) { return nil, want }
 
-	err := (&LinkSubscriber{}).primeVia(context.Background(), listFn, make(chan LinkEvent, 1))
+	err := (&LinkSubscriber{}).primeVia(context.Background(), listFn, map[string]LinkState{}, make(chan LinkEvent, 1))
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want list-error chained via %%w", err)
 	}
@@ -344,7 +398,7 @@ func TestLinkSubscriberPrimeViaEmitsWatchedLinks(t *testing.T) {
 	}
 	s := &LinkSubscriber{Interfaces: map[string]struct{}{"eth0": {}}}
 	out := make(chan LinkEvent, 4)
-	if err := s.primeVia(context.Background(), listFn, out); err != nil {
+	if err := s.primeVia(context.Background(), listFn, map[string]LinkState{}, out); err != nil {
 		t.Fatalf("primeVia = %v, want nil", err)
 	}
 	if got := len(out); got != 1 {
@@ -353,6 +407,17 @@ func TestLinkSubscriberPrimeViaEmitsWatchedLinks(t *testing.T) {
 	ev := <-out
 	if ev.Name != "eth0" || ev.Carrier != CarrierUp || ev.Operstate != OperstateUp {
 		t.Errorf("event = %+v, want eth0/up/up", ev)
+	}
+}
+
+func emptyLinkList() ([]netlink.Link, error) { return nil, nil }
+
+// unexpectedLinkByName fails the test if the subscriber reads a link.
+func unexpectedLinkByName(t testing.TB) linkByNameFn {
+	t.Helper()
+	return func(name string) (netlink.Link, error) {
+		t.Errorf("unexpected LinkByName(%q)", name)
+		return nil, errors.New("unexpected LinkByName")
 	}
 }
 
@@ -380,5 +445,349 @@ func TestTranslateSubClose(t *testing.T) {
 	other := errors.New("some other error")
 	if got := translateSubClose(other, withCause(), "route"); !errors.Is(got, other) {
 		t.Errorf("non-sentinel: got %v, want %v", got, other)
+	}
+}
+
+// TestLinkSubscriberStartCapturesCarrierDuringSnapshot: a carrier
+// change that lands just after the link dump must still reach out.
+// Only a subscription opened before the dump catches it.
+func TestLinkSubscriberStartCapturesCarrierDuringSnapshot(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	var updates chan<- netlink.LinkUpdate
+	subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+		updates = ch
+		closeLinkUpdatesOnStop(ch, done)
+		return nil
+	}
+	current := mkLink("wan1", 0, netlink.OperDown)
+	listFn := func() ([]netlink.Link, error) {
+		snapshot := []netlink.Link{current}
+		// wan1 gains carrier just after the dump reads it as down.
+		current = mkLink("wan1", unix.IFF_LOWER_UP, netlink.OperUp)
+		if updates != nil {
+			updates <- mkUpdate("wan1", unix.IFF_LOWER_UP, netlink.OperUp)
+		}
+		return snapshot, nil
+	}
+	getFn := func(string) (netlink.Link, error) { return current, nil }
+	s := &LinkSubscriber{Interfaces: map[string]struct{}{"wan1": {}}}
+	out := make(chan LinkEvent, 2)
+	exited, err := s.StartWith(ctx, subscribe, listFn, getFn, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-exited:
+		case <-time.After(time.Second):
+			t.Error("subscriber did not stop after cancellation")
+		}
+	})
+	for _, want := range []Carrier{CarrierDown, CarrierUp} {
+		select {
+		case ev := <-out:
+			if ev.Name != "wan1" || ev.Carrier != want {
+				t.Errorf("event = %+v, want wan1/%v", ev, want)
+			}
+		case <-ctx.Done():
+			t.Fatalf("no wan1/%v event: carrier change during subscriber startup was missed", want)
+		}
+	}
+}
+
+// Model the library's channel closure when its subscription socket closes.
+func closeLinkUpdatesOnStop(ch chan<- netlink.LinkUpdate, done <-chan struct{}) {
+	go func() {
+		<-done
+		close(ch)
+	}()
+}
+
+// TestLinkSubscriberStartReconcilesQueuedChanges: notifications
+// queued before the snapshot describe history it may already
+// include. Each must be read as the link's current state and
+// deduplicated against the snapshot, so stale history never reaches
+// out as a transient flap.
+func TestLinkSubscriberStartReconcilesQueuedChanges(t *testing.T) {
+	t.Parallel()
+	up := mkLink("wan0", unix.IFF_LOWER_UP, netlink.OperUp)
+	down := mkLink("wan0", 0, netlink.OperDown)
+	for _, tc := range []struct {
+		name     string
+		snapshot []netlink.Link
+		current  netlink.Link // nil: the link no longer exists
+		queued   []netlink.LinkUpdate
+		want     []string
+	}{
+		{
+			name:     "flap before snapshot",
+			snapshot: []netlink.Link{up},
+			current:  up,
+			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			want:     []string{"up/up"},
+		},
+		{
+			name:     "carrier lost after snapshot",
+			snapshot: []netlink.Link{up},
+			current:  down,
+			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown)},
+			want:     []string{"up/up", "down/down"},
+		},
+		{
+			name:     "carrier gained after snapshot",
+			snapshot: []netlink.Link{down},
+			current:  up,
+			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			want:     []string{"down/down", "up/up"},
+		},
+		{
+			name:     "re-created before snapshot",
+			snapshot: []netlink.Link{up},
+			current:  up,
+			queued:   []netlink.LinkUpdate{mkDelete("wan0"), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			want:     []string{"up/up"},
+		},
+		{
+			name:     "deleted after snapshot",
+			snapshot: []netlink.Link{up},
+			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkDelete("wan0")},
+			want:     []string{"up/up", "down/notpresent"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			var updates chan<- netlink.LinkUpdate
+			subscribe := func(ch chan<- netlink.LinkUpdate, _ <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+				updates = ch
+				return nil
+			}
+			listFn := func() ([]netlink.Link, error) {
+				for _, upd := range tc.queued {
+					updates <- upd
+				}
+				close(updates)
+				return tc.snapshot, nil
+			}
+			getFn := func(name string) (netlink.Link, error) {
+				if name != "wan0" {
+					t.Errorf("LinkByName(%q), want wan0", name)
+				}
+				if tc.current == nil {
+					return nil, netlink.LinkNotFoundError{}
+				}
+				return tc.current, nil
+			}
+			s := &LinkSubscriber{Interfaces: map[string]struct{}{"wan0": {}}}
+			out := make(chan LinkEvent, len(tc.queued)+len(tc.snapshot))
+			exited, err := s.StartWith(ctx, subscribe, listFn, getFn, out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// No consumer runs during Start, so snapshot events must be
+			// available synchronously without waiting for the live loop.
+			if len(out) < len(tc.snapshot) {
+				t.Fatal("Start returned before queuing the link snapshot")
+			}
+			select {
+			case err := <-exited:
+				if !errors.Is(err, errSubscriptionClosed) {
+					t.Fatalf("subscriber = %v, want subscription closed", err)
+				}
+			case <-ctx.Done():
+				t.Fatal("subscriber did not finish draining queued changes")
+			}
+			var got []string
+			for len(out) > 0 {
+				ev := <-out
+				got = append(got, ev.Carrier.String()+"/"+ev.Operstate.String())
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("events = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLinkSubscriberStartClosesSubscriptionOnSnapshotFailure(t *testing.T) {
+	t.Parallel()
+	want := errors.New("link snapshot failed")
+	var stopped <-chan struct{}
+	subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+		stopped = done
+		closeLinkUpdatesOnStop(ch, done)
+		return nil
+	}
+	listFn := func() ([]netlink.Link, error) { return nil, want }
+	exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent, 1))
+	if !errors.Is(err, want) || exited != nil {
+		t.Fatalf("Start = %v, %v; want no worker and wrapped snapshot failure", exited, err)
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Error("subscription left open after snapshot failure")
+	}
+}
+
+func TestLinkSubscriberStartCancelsBlockedDelivery(t *testing.T) {
+	t.Parallel()
+	for _, phase := range []string{"snapshot", "live"} {
+		t.Run(phase, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			link := mkLink("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
+			var stopped <-chan struct{}
+			subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+				stopped = done
+				ch <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
+				closeLinkUpdatesOnStop(ch, done)
+				return nil
+			}
+			listFn := func() ([]netlink.Link, error) {
+				if phase == "snapshot" {
+					cancel()
+					return []netlink.Link{link}, nil
+				}
+				return nil, nil
+			}
+			getFn := func(string) (netlink.Link, error) { return link, nil }
+			out := make(chan LinkEvent) // No consumer: every event send blocks.
+			exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, listFn, getFn, out)
+			if phase == "snapshot" {
+				if !errors.Is(err, context.Canceled) || exited != nil {
+					t.Fatalf("Start = %v, %v; want no worker and context.Canceled", exited, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				cancel()
+				select {
+				case err := <-exited:
+					if !errors.Is(err, context.Canceled) {
+						t.Errorf("subscriber = %v, want context.Canceled", err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("subscriber did not cancel while delivery was blocked")
+				}
+			}
+			select {
+			case <-stopped:
+			default:
+				t.Error("subscription left open after cancellation")
+			}
+			select {
+			case <-out:
+				t.Error("caller-owned event channel closed")
+			default:
+			}
+		})
+	}
+}
+
+func TestLinkSubscriberStartSnapshotFailureUnblocksReceiver(t *testing.T) {
+	t.Parallel()
+	for _, failure := range []string{"list error", "cancellation"} {
+		t.Run(failure, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			want := errors.New("link snapshot failed")
+			if failure == "cancellation" {
+				want = context.Canceled
+			}
+			finished := make(chan struct{})
+			release := make(chan struct{})
+			defer close(release)
+			subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+				for range cap(ch) {
+					ch <- mkUpdate("eth0", 0, netlink.OperDown)
+				}
+				go func() {
+					defer close(finished)
+					defer close(ch)
+					// The vendored receiver cannot check done while sending
+					// a batch of messages to a full update channel.
+					select {
+					case ch <- mkUpdate("eth0", 0, netlink.OperDown):
+					case <-release: // Release the fake receiver if this test fails.
+					}
+					<-done
+				}()
+				return nil
+			}
+			listFn := func() ([]netlink.Link, error) {
+				if failure == "cancellation" {
+					cancel()
+					return []netlink.Link{mkLink("eth0", unix.IFF_LOWER_UP, netlink.OperUp)}, nil
+				}
+				return nil, want
+			}
+			_, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent))
+			if !errors.Is(err, want) {
+				t.Fatalf("Start = %v, want %v", err, want)
+			}
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("netlink receiver stayed blocked after snapshot failure")
+			}
+		})
+	}
+}
+
+func TestLinkSubscriberReadFailureUnblocksReceiver(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	want := errors.New("link read failed")
+	finished := make(chan struct{})
+	subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+		for range cap(ch) {
+			ch <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
+		}
+		go func() {
+			defer close(finished)
+			defer close(ch)
+			// Two sends keep the receiver blocked after runLoop takes
+			// the first update and the current-link read fails.
+			for range 2 {
+				select {
+				case ch <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp):
+				case <-ctx.Done():
+					return
+				}
+			}
+			<-done
+		}()
+		return nil
+	}
+	getFn := func(string) (netlink.Link, error) { return nil, want }
+	out := make(chan LinkEvent, 1)
+	exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, emptyLinkList, getFn, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-exited:
+		if !errors.Is(err, want) || !strings.Contains(err.Error(), "rtnl: LinkByName eth0") {
+			t.Errorf("subscriber = %v; want wrapped %v", err, want)
+		}
+	case <-ctx.Done():
+		t.Fatal("subscriber stayed blocked after link read failure")
+	}
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("netlink receiver stayed blocked after link read failure")
+	}
+	if len(out) != 0 {
+		t.Error("failed link read emitted a LinkEvent")
 	}
 }
