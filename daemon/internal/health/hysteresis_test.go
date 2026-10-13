@@ -1,4 +1,4 @@
-package selector
+package health
 
 import (
 	"math/rand"
@@ -7,9 +7,9 @@ import (
 
 func TestHysteresisStartsUnhealthy(t *testing.T) {
 	t.Parallel()
-	h := NewHysteresisState(3, 3)
-	if h.Healthy() {
-		t.Error("fresh HysteresisState reports healthy; want !healthy")
+	h := newHysteresis(3, 3)
+	if h.healthy {
+		t.Error("fresh hysteresis reports healthy; want !healthy")
 	}
 }
 
@@ -37,10 +37,10 @@ func TestHysteresisFlipsUpAfterConsecutiveUp(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := NewHysteresisState(up, down)
+			h := newHysteresis(up, down)
 			var got bool
 			for _, o := range tc.observations {
-				got = h.Observe(o)
+				got = h.observe(o)
 			}
 			if got != tc.wantFinal {
 				t.Errorf("after %v: got healthy=%v, want %v", tc.observations, got, tc.wantFinal)
@@ -62,16 +62,16 @@ func TestHysteresisFlipsDownAfterConsecutiveDown(t *testing.T) {
 	// Helper: flip a fresh state up via `up` observations, then run
 	// the scenario's down observations.
 	runFromHealthy := func(downObs []bool) bool {
-		h := NewHysteresisState(up, down)
+		h := newHysteresis(up, down)
 		for i := 0; i < up; i++ {
-			h.Observe(true)
+			h.observe(true)
 		}
-		if !h.Healthy() {
+		if !h.healthy {
 			t.Fatal("setup: state not healthy after consecutive-up observations")
 		}
 		var last bool
 		for _, o := range downObs {
-			last = h.Observe(o)
+			last = h.observe(o)
 		}
 		return last
 	}
@@ -103,30 +103,30 @@ func TestHysteresisFlipsDownAfterConsecutiveDown(t *testing.T) {
 // must not push the verdict past either threshold.
 func TestHysteresisFlapSuppression(t *testing.T) {
 	t.Parallel()
-	h := NewHysteresisState(3, 3)
+	h := newHysteresis(3, 3)
 	// 20 alternating observations starting with healthy.
 	for i := 0; i < 20; i++ {
-		h.Observe(i%2 == 0)
+		h.observe(i%2 == 0)
 	}
-	if h.Healthy() {
+	if h.healthy {
 		t.Error("alternating observations should never reach consecutive-up threshold; healthy=true")
 	}
 }
 
 func TestHysteresisObserveReturnsCurrentVerdict(t *testing.T) {
 	t.Parallel()
-	h := NewHysteresisState(2, 2)
+	h := newHysteresis(2, 2)
 	// Single healthy doesn't flip.
-	if v := h.Observe(true); v {
+	if v := h.observe(true); v {
 		t.Errorf("after 1 healthy obs: verdict=%v, want false", v)
 	}
 	// Second healthy flips.
-	if v := h.Observe(true); !v {
+	if v := h.observe(true); !v {
 		t.Errorf("after 2 healthy obs: verdict=%v, want true", v)
 	}
-	// Healthy() and Observe agree.
-	if !h.Healthy() {
-		t.Errorf("Healthy() = false, want true")
+	// The stored verdict and observe agree.
+	if !h.healthy {
+		t.Errorf("healthy = false, want true")
 	}
 }
 
@@ -135,11 +135,11 @@ func TestHysteresisObserveReturnsCurrentVerdict(t *testing.T) {
 // This is the most aggressive setting; useful baseline.
 func TestHysteresisThresholdsOfOneFlipImmediately(t *testing.T) {
 	t.Parallel()
-	h := NewHysteresisState(1, 1)
-	if v := h.Observe(true); !v {
+	h := newHysteresis(1, 1)
+	if v := h.observe(true); !v {
 		t.Errorf("threshold=1: first healthy obs did not flip; verdict=%v", v)
 	}
-	if v := h.Observe(false); v {
+	if v := h.observe(false); v {
 		t.Errorf("threshold=1: first unhealthy obs after up did not flip; verdict=%v", v)
 	}
 }
@@ -149,16 +149,16 @@ func TestHysteresisThresholdsOfOneFlipImmediately(t *testing.T) {
 // but a hand-edited config could slip a 0 through.
 func TestHysteresisClampsNonPositiveThresholds(t *testing.T) {
 	t.Parallel()
-	h := NewHysteresisState(0, -5)
-	if v := h.Observe(true); !v {
+	h := newHysteresis(0, -5)
+	if v := h.observe(true); !v {
 		t.Errorf("ctor-clamp: first healthy obs should flip; verdict=%v", v)
 	}
-	if v := h.Observe(false); v {
+	if v := h.observe(false); v {
 		t.Errorf("ctor-clamp: first unhealthy obs should flip back; verdict=%v", v)
 	}
 }
 
-// TestHysteresisDeterminismProperty: a HysteresisState is a pure
+// TestHysteresisDeterminismProperty: a hysteresis is a pure
 // function over (consecutiveUp, consecutiveDown, observation
 // sequence). Two fresh states fed identical inputs must produce
 // identical verdict trajectories — every step, not just the
@@ -174,11 +174,11 @@ func TestHysteresisDeterminismProperty(t *testing.T) {
 			seq[i] = rng.Intn(2) == 0
 		}
 
-		a := NewHysteresisState(up, down)
-		b := NewHysteresisState(up, down)
+		a := newHysteresis(up, down)
+		b := newHysteresis(up, down)
 		for i, obs := range seq {
-			va := a.Observe(obs)
-			vb := b.Observe(obs)
+			va := a.observe(obs)
+			vb := b.observe(obs)
 			if va != vb {
 				t.Fatalf("trial %d step %d: A=%v B=%v (up=%d down=%d, seq=%v)",
 					trial, i, va, vb, up, down, seq[:i+1])
@@ -199,11 +199,11 @@ func TestHysteresisFlipRateBound(t *testing.T) {
 	)
 	rng := rand.New(rand.NewSource(0xBEEF))
 	const n = 200
-	h := NewHysteresisState(up, down)
-	prev := h.Healthy()
+	h := newHysteresis(up, down)
+	prev := h.healthy
 	flips := 0
 	for i := 0; i < n; i++ {
-		verdict := h.Observe(rng.Intn(2) == 0)
+		verdict := h.observe(rng.Intn(2) == 0)
 		if verdict != prev {
 			flips++
 			prev = verdict
@@ -233,10 +233,10 @@ func TestHysteresisFlipsOnlyAfterRequiredRun(t *testing.T) {
 			seq[i] = rng.Intn(2) == 0
 		}
 
-		h := NewHysteresisState(up, down)
-		prev := h.Healthy()
+		h := newHysteresis(up, down)
+		prev := h.healthy
 		for i, obs := range seq {
-			verdict := h.Observe(obs)
+			verdict := h.observe(obs)
 			if verdict == prev {
 				continue
 			}
@@ -266,10 +266,10 @@ func TestHysteresisFlipsOnlyAfterRequiredRun(t *testing.T) {
 	}
 }
 
-// TestHysteresisSeedBypassesRamp: Seed sets the verdict directly
+// TestHysteresisSeedBypassesRamp: seed sets the verdict directly
 // from the first observation — no consecutive-cycle ramp. A state
 // with consecutiveUp=3 seeded healthy is healthy at once, where
-// Observe would need three healthy observations. This is the
+// observe would need three healthy observations. This is the
 // cold-start handoff (docs/specs/failover.md) that keeps a healthy WAN from flapping
 // during warm-up.
 func TestHysteresisSeedBypassesRamp(t *testing.T) {
@@ -284,18 +284,18 @@ func TestHysteresisSeedBypassesRamp(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := NewHysteresisState(3, 3)
-			if got := h.Seed(tc.seed); got != tc.seed {
-				t.Errorf("Seed(%v) = %v, want %v", tc.seed, got, tc.seed)
+			h := newHysteresis(3, 3)
+			if got := h.seed(tc.seed); got != tc.seed {
+				t.Errorf("seed(%v) = %v, want %v", tc.seed, got, tc.seed)
 			}
-			if h.Healthy() != tc.seed {
-				t.Errorf("after Seed(%v): Healthy() = %v, want %v", tc.seed, h.Healthy(), tc.seed)
+			if h.healthy != tc.seed {
+				t.Errorf("after seed(%v): healthy = %v, want %v", tc.seed, h.healthy, tc.seed)
 			}
 		})
 	}
 }
 
-// TestHysteresisSeedThenObserveRampsNormally: Seed sets the verdict
+// TestHysteresisSeedThenObserveRampsNormally: seed sets the verdict
 // but must leave the counters clean, so the next flip still needs a
 // full consecutive run — a seeded-healthy state takes a whole
 // `consecutiveDown` run to flip down, a seeded-unhealthy one a whole
@@ -305,31 +305,31 @@ func TestHysteresisSeedThenObserveRampsNormally(t *testing.T) {
 
 	t.Run("seeded healthy needs full down-ramp", func(t *testing.T) {
 		t.Parallel()
-		h := NewHysteresisState(2, 3)
-		h.Seed(true)
-		if v := h.Observe(false); !v {
-			t.Errorf("1 unhealthy after Seed(true): verdict=%v, want true", v)
+		h := newHysteresis(2, 3)
+		h.seed(true)
+		if v := h.observe(false); !v {
+			t.Errorf("1 unhealthy after seed(true): verdict=%v, want true", v)
 		}
-		if v := h.Observe(false); !v {
-			t.Errorf("2 unhealthy after Seed(true): verdict=%v, want true", v)
+		if v := h.observe(false); !v {
+			t.Errorf("2 unhealthy after seed(true): verdict=%v, want true", v)
 		}
-		if v := h.Observe(false); v {
-			t.Errorf("3 unhealthy after Seed(true): verdict=%v, want false (flipped down)", v)
+		if v := h.observe(false); v {
+			t.Errorf("3 unhealthy after seed(true): verdict=%v, want false (flipped down)", v)
 		}
 	})
 
 	t.Run("seeded unhealthy needs full up-ramp", func(t *testing.T) {
 		t.Parallel()
-		h := NewHysteresisState(3, 2)
-		h.Seed(false)
-		if v := h.Observe(true); v {
-			t.Errorf("1 healthy after Seed(false): verdict=%v, want false", v)
+		h := newHysteresis(3, 2)
+		h.seed(false)
+		if v := h.observe(true); v {
+			t.Errorf("1 healthy after seed(false): verdict=%v, want false", v)
 		}
-		if v := h.Observe(true); v {
-			t.Errorf("2 healthy after Seed(false): verdict=%v, want false", v)
+		if v := h.observe(true); v {
+			t.Errorf("2 healthy after seed(false): verdict=%v, want false", v)
 		}
-		if v := h.Observe(true); !v {
-			t.Errorf("3 healthy after Seed(false): verdict=%v, want true (flipped up)", v)
+		if v := h.observe(true); !v {
+			t.Errorf("3 healthy after seed(false): verdict=%v, want true (flipped up)", v)
 		}
 	})
 }

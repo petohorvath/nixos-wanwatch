@@ -5,82 +5,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/decision"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/health"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 )
-
-// familyState is the per-(WAN, family) slice of runtime state. One
-// per Pinger goroutine; updated when a ProbeResult arrives.
-//
-// `cooked` flips to true on the first ProbeResult whose sliding
-// window is filled — until then, docs/specs/failover.md cold-start grants the
-// family healthy-via-carrier (handled in combineFamilies). Without
-// this an interface that boots before its first probe cycle would
-// be unhealthy and the daemon would publish no Selection even when
-// carrier is fine, and a partial-window verdict (e.g. the first
-// sample landed Lost because the route hadn't converged) would
-// seed the hysteresis unhealthy and flap the WAN once probes catch
-// up.
-type familyState struct {
-	family  probe.Family
-	stats   probe.FamilyStats
-	hyst    *selector.HysteresisState
-	healthy bool
-	cooked  bool
-}
-
-// wanState is the per-WAN slice — carrier/operstate (from rtnl)
-// plus the per-family probe verdicts. Effective Health is computed
-// on demand by healthy(), never stored.
-type wanState struct {
-	name      string
-	cfg       config.Wan
-	carrier   rtnl.Carrier
-	operstate rtnl.Operstate
-	families  map[probe.Family]*familyState
-}
-
-// carrierUp returns whether the WAN's interface is currently
-// operationally up at the link layer — gates everything downstream.
-//
-// Carrier and operstate are OR'd, not AND'd: either signal saying
-// "up" is enough to count the link as ready. Dummy / loopback /
-// some tunnel drivers leave operstate at "unknown" forever (RFC
-// 2863 explicitly allows this for virtual interfaces) yet drive
-// carrier via IFF_LOWER_UP; conversely some hardware drivers
-// drive operstate before carrier propagates. We additionally
-// reject the explicit "down-ish" operstates so an admin-down
-// link isn't selected just because the cable happens to be live.
-func (w *wanState) carrierUp() bool {
-	if w.carrier == rtnl.CarrierDown {
-		return false
-	}
-	switch w.operstate {
-	case rtnl.OperstateDown, rtnl.OperstateLowerLayerDown, rtnl.OperstateNotPresent:
-		return false
-	}
-	return w.carrier == rtnl.CarrierUp || w.operstate == rtnl.OperstateUp
-}
-
-// healthy is the WAN's effective Health: carrier up AND the
-// per-family probe verdicts agreeing under the configured policy.
-// Computed, never stored — it derives from two independent event
-// streams (carrier from rtnl, probes from the pinger loop), and a
-// stored field would inevitably go stale when one updated without
-// the other. combineFamilies counts an uncooked family as healthy,
-// so before the first probe Window this reduces to carrierUp() —
-// the docs/specs/failover.md cold-start rule.
-func (w *wanState) healthy() bool {
-	return w.carrierUp() && combineFamilies(w.families, w.cfg.Probe.FamilyHealthPolicy)
-}
 
 // daemon bundles the runtime state and subsystem handles. Wired
 // once in run(), then driven by eventLoop's dispatch.
@@ -90,7 +27,7 @@ type daemon struct {
 	stateW   *state.Writer
 	hooks    *state.HookNotifier
 	logger   *slog.Logger
-	wans     map[string]*wanState
+	health   *health.Wans
 	groups   map[string]*decision.Group
 	gateways *gatewayCache
 
@@ -105,9 +42,9 @@ type daemon struct {
 	flushConntrack func(ctx context.Context, family probe.Family, ip net.IP) (uint, error)
 }
 
-// newDaemon constructs the runtime state from `cfg` — the per-WAN
-// and per-group slices plus a fresh hysteresis state machine per
-// (WAN, family). It performs no I/O and starts no goroutines.
+// newDaemon constructs the runtime state from `cfg` — cold WAN
+// Health and one Group Decision module per Group. It performs no I/O
+// and starts no goroutines.
 func newDaemon(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
 		cfg:     cfg,
@@ -116,37 +53,13 @@ func newDaemon(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, 
 		hooks: state.NewHookNotifier(ctx, cfg.Global.HooksDir,
 			time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger),
 		logger:         logger,
-		wans:           make(map[string]*wanState, len(cfg.Wans)),
+		health:         health.New(cfg.Wans, mreg),
 		groups:         make(map[string]*decision.Group, len(cfg.Groups)),
 		gateways:       newGatewayCache(),
 		ifindexOf:      interfaceIndex,
 		writeRoute:     apply.WriteDefault,
 		interfaceAddrs: interfaceAddrs,
 		flushConntrack: apply.FlushBySource,
-	}
-	for name, wan := range cfg.Wans {
-		ws := &wanState{
-			name:      name,
-			cfg:       wan,
-			carrier:   rtnl.CarrierUnknown,
-			operstate: rtnl.OperstateUnknown,
-			families:  make(map[probe.Family]*familyState, 2),
-		}
-		fams := familiesFromTargets(wan.Probe.Targets)
-		hyst := wan.Probe.Hysteresis
-		if fams.v4 {
-			ws.families[probe.FamilyV4] = &familyState{
-				family: probe.FamilyV4,
-				hyst:   selector.NewHysteresisState(hyst.ConsecutiveUp, hyst.ConsecutiveDown),
-			}
-		}
-		if fams.v6 {
-			ws.families[probe.FamilyV6] = &familyState{
-				family: probe.FamilyV6,
-				hyst:   selector.NewHysteresisState(hyst.ConsecutiveUp, hyst.ConsecutiveDown),
-			}
-		}
-		d.wans[name] = ws
 	}
 	for name, g := range cfg.Groups {
 		d.groups[name] = decision.New(g, func(ctx context.Context, wan string, families ...probe.Family) error {
@@ -183,129 +96,33 @@ func (d *daemon) bootstrap(ctx context.Context) error {
 	return nil
 }
 
-// handleProbeResult folds a per-cycle result into the daemon's
-// runtime state. If the (WAN, family) Healthy verdict changes, it
-// recomputes every group containing the WAN.
+// handleProbeResult forwards a per-cycle result to WAN Health. Every
+// result also retries r.Wan's pending Decisions, including during
+// cold start: a probe result means the WAN is reachable.
 func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
-	ws, ok := d.wans[r.Wan]
-	if !ok {
-		return
-	}
-	fs, ok := ws.families[r.Family]
-	if !ok {
-		return
-	}
-	fs.stats = r.Stats
-
-	// Cold-start gate: defer hysteresis seed until the first probe
-	// Window is *full*. Until then, the family stays `cooked=false`
-	// and combineFamilies treats it as healthy via carrier alone
-	// (docs/specs/failover.md). Without this gate, a Lost first Sample — common on
-	// loaded CI runners, where the probe loop fires before the
-	// route to the target has converged — seeds the hysteresis
-	// unhealthy and produces a spurious down→up Decision pair once
-	// probes catch up. The per-target windows agree on Filled via
-	// FamilyStats.WindowFilled from probe.Aggregate.
-	//
-	// Metrics and the apply retry still fire on every cycle —
-	// operators want live RTT/loss in Prometheus from the first
-	// Sample, and a Decision pending its kernel apply needs a kick
-	// regardless of cold-start state.
-	if !fs.cooked && !r.Stats.WindowFilled {
-		d.recordProbeMetrics(r, false)
-		d.retryGroupDecisions(ctx, r.Wan)
-		return
-	}
-
-	probeCfg := ws.cfg.Probe
-	raw := evaluateThresholds(fs.healthy, r.Stats, probeCfg.Thresholds)
-	// Capture effective Health before any family-state mutation —
-	// fs.cooked and fs.healthy below both feed ws.healthy().
-	prevHealthy := ws.healthy()
-
-	// First *full* Window for a (WAN, family) seeds the hysteresis
-	// from the measured Health (docs/specs/failover.md cold-start handoff); every
-	// Window after ramps through Observe's consecutive-cycle logic.
-	prevCooked := fs.cooked
-	fs.cooked = true
-	var stable bool
-	if prevCooked {
-		stable = fs.hyst.Observe(raw)
-	} else {
-		stable = fs.hyst.Seed(raw)
-	}
-
-	d.recordProbeMetrics(r, stable)
-
-	// A probe result means r.Wan is reachable — retry any of its
-	// Decisions whose apply hasn't landed yet.
+	change := d.health.Probe(r)
 	d.retryGroupDecisions(ctx, r.Wan)
-
-	if prevCooked && stable == fs.healthy {
-		return
-	}
-	fs.healthy = stable
-	nowHealthy := ws.healthy()
-	d.metrics.WanHealthy.WithLabelValues(ws.name).Set(boolToFloat(nowHealthy))
-
-	if nowHealthy != prevHealthy {
-		d.recomputeAffectedGroups(ctx, r.Wan, reasonHealth)
-	}
-	// Republish state.json on any per-family verdict transition.
-	// A family flip that *does* move the aggregate has already
-	// been captured by publishDecision via recomputeAffectedGroups
-	// above; one that doesn't (e.g. v4 drops while v6 holds under
-	// familyHealthPolicy=any) wouldn't otherwise update state.json
-	// at all, leaving wans[<name>].families[<f>].healthy stale
-	// relative to the live Prometheus view. docs/specs/daemon-state.md: state.json
-	// mirrors per-family Health, not just Decisions.
-	d.writeStateSnapshot(time.Time{})
+	d.publishHealthChange(ctx, change, reasonHealth)
 }
 
-// handleLinkEvent updates per-WAN carrier/operstate. Carrier-down
-// fast-tracks the WAN to unhealthy (docs/specs/failover.md cold-start invariant)
-// — the selector sees the carrier change immediately, without
-// waiting for the probe to time out.
+// handleLinkEvent forwards carrier/operstate to WAN Health, which
+// folds the event into every WAN on the interface before reporting.
+// Carrier-down fast-tracks those WANs to unhealthy without waiting
+// for the probe to time out.
 func (d *daemon) handleLinkEvent(ctx context.Context, e rtnl.LinkEvent) {
-	var healthChangedWANs []string
-	stateChanged := false
-	for _, ws := range d.wans {
-		if ws.cfg.Interface != e.Name {
-			continue
-		}
-		prevCarrier := ws.carrier
-		prevOperstate := ws.operstate
-		prevHealthy := ws.healthy()
-		ws.carrier = e.Carrier
-		ws.operstate = e.Operstate
+	d.publishHealthChange(ctx, d.health.Link(e), reasonCarrier)
+}
 
-		if prevCarrier != ws.carrier {
-			d.metrics.WanCarrierChanges.WithLabelValues(ws.name).Inc()
-		}
-		d.metrics.WanCarrier.WithLabelValues(ws.name).Set(boolToFloat(ws.carrier == rtnl.CarrierUp))
-		d.metrics.WanOperstate.WithLabelValues(ws.name).Set(float64(int(e.Operstate)))
-
-		if ws.healthy() != prevHealthy {
-			healthChangedWANs = append(healthChangedWANs, ws.name)
-		}
-		if prevCarrier != ws.carrier || prevOperstate != ws.operstate {
-			stateChanged = true
-		}
+// publishHealthChange recomputes every Group containing a WAN whose
+// Health flipped, then republishes state.json for any transition
+// docs/specs/daemon-state.md lists — including one that moves no
+// Decision, such as v4 dropping while v6 holds under
+// familyHealthPolicy=any.
+func (d *daemon) publishHealthChange(ctx context.Context, c health.Change, reason decisionReason) {
+	for _, wan := range c.Flipped {
+		d.recomputeAffectedGroups(ctx, wan, reason)
 	}
-
-	// Fold the event into every WAN sharing the interface before
-	// recomputing any Group. Otherwise map iteration can expose a
-	// transient Selection through a matching WAN whose link state has
-	// not yet been updated.
-	for _, wan := range healthChangedWANs {
-		d.recomputeAffectedGroups(ctx, wan, reasonCarrier)
-	}
-	// Republish state.json on any carrier/operstate transition.
-	// LinkSubscriber dedupes upstream so a fresh event always
-	// represents a real change, but a change that doesn't move Health
-	// (e.g. operstate down → dormant) would not otherwise update
-	// state.json.
-	if stateChanged {
+	if c.Republish {
 		d.writeStateSnapshot(time.Time{})
 	}
 }
@@ -317,7 +134,7 @@ func (d *daemon) recomputeAffectedGroups(ctx context.Context, wan string, reason
 		if !groupContainsWAN(g, wan) {
 			continue
 		}
-		committed := d.groups[name].Recompute(ctx, buildMemberHealth(g, d.wans), string(reason))
+		committed := d.groups[name].Recompute(ctx, d.health.MemberHealth(g), string(reason))
 		d.publishDecision(ctx, g, committed)
 	}
 }
@@ -348,14 +165,14 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, o
 	if !old.Has || !next.Has {
 		return
 	}
-	ws, ok := d.wans[old.Wan]
+	wan, ok := d.cfg.Wans[old.Wan]
 	if !ok {
 		return
 	}
-	addrs, err := d.interfaceAddrs(ws.cfg.Interface)
+	addrs, err := d.interfaceAddrs(wan.Interface)
 	if err != nil {
 		d.logger.Warn("conntrack flush: resolve vacated WAN addresses",
-			"group", g.Name, "wan", old.Wan, "iface", ws.cfg.Interface, "err", err)
+			"group", g.Name, "wan", old.Wan, "iface", wan.Interface, "err", err)
 		d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "conntrack_flush").Inc()
 		return
 	}
@@ -400,15 +217,15 @@ func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 // and handleRouteEvent reapplies it once the gateway is
 // discovered.
 func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan string, families ...probe.Family) error {
-	ws, ok := d.wans[activeWan]
+	wan, ok := d.cfg.Wans[activeWan]
 	if !ok {
 		return fmt.Errorf("apply routes: unknown wan %q", activeWan)
 	}
-	ifindex, err := d.ifindexOf(ws.cfg.Interface)
+	ifindex, err := d.ifindexOf(wan.Interface)
 	if err != nil {
-		d.logger.Error("ifindex lookup", "iface", ws.cfg.Interface, "err", err)
+		d.logger.Error("ifindex lookup", "iface", wan.Interface, "err", err)
 		d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "ifindex_lookup").Inc()
-		return fmt.Errorf("apply routes: ifindex %q: %w", ws.cfg.Interface, err)
+		return fmt.Errorf("apply routes: ifindex %q: %w", wan.Interface, err)
 	}
 
 	// writeOne does the per-family route build + write + error
@@ -424,14 +241,14 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 			IfIndex: ifindex,
 		}
 		switch {
-		case ws.cfg.PointToPoint:
+		case wan.PointToPoint:
 			route.PointToPoint = true
 		default:
-			gw, ok := d.gateways.get(ws.cfg.Interface, rtnl.RouteFamily(fam))
+			gw, ok := d.gateways.get(wan.Interface, rtnl.RouteFamily(fam))
 			if !ok || gw == nil {
 				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
 					"group", g.Name, "wan", activeWan, "family", famLabel,
-					"iface", ws.cfg.Interface)
+					"iface", wan.Interface)
 				return false
 			}
 			route.Gateway = gw
@@ -447,24 +264,20 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 		return false
 	}
 
-	var failed int
+	probed := familiesFromTargets(wan.Probe.Targets)
 	if len(families) == 0 {
-		for fam := range ws.families {
-			if writeOne(fam) {
-				failed++
-			}
+		families = probed
+	}
+	var failed int
+	for _, fam := range families {
+		// An explicit family set (the RouteEvent reapply path) may
+		// name a family the WAN doesn't probe; the daemon has no route
+		// to maintain for it.
+		if !slices.Contains(probed, fam) {
+			continue
 		}
-	} else {
-		// Explicit family set (the RouteEvent reapply path) — skip
-		// families the WAN doesn't probe; the daemon has no route to
-		// maintain for an unprobed family.
-		for _, fam := range families {
-			if _, probesIt := ws.families[fam]; !probesIt {
-				continue
-			}
-			if writeOne(fam) {
-				failed++
-			}
+		if writeOne(fam) {
+			failed++
 		}
 	}
 	if failed > 0 {
@@ -491,12 +304,12 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 		return
 	}
 
-	for wan, ws := range d.wans {
-		if ws.cfg.Interface != e.Iface {
+	for wanName, wan := range d.cfg.Wans {
+		if wan.Interface != e.Iface {
 			continue
 		}
 		for name, g := range d.groups {
-			committed := g.GatewayChanged(ctx, wan, probe.Family(e.Family))
+			committed := g.GatewayChanged(ctx, wanName, probe.Family(e.Family))
 			d.publishDecision(ctx, d.cfg.Groups[name], committed)
 		}
 	}
@@ -520,31 +333,16 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 func (d *daemon) writeStateSnapshot(now time.Time) {
 	snap := state.State{
 		UpdatedAt: now,
-		Wans:      make(map[string]state.Wan, len(d.wans)),
+		Wans:      make(map[string]state.Wan, len(d.cfg.Wans)),
 		Groups:    make(map[string]state.Group, len(d.groups)),
 	}
-	for _, ws := range d.wans {
-		fams := make(map[string]state.FamilyHealth, len(ws.families))
-		for fam, fs := range ws.families {
-			fams[fam.String()] = state.FamilyHealth{
-				Healthy:       fs.healthy,
-				RTTSeconds:    float64(fs.stats.RTTMicros) / 1e6,
-				JitterSeconds: float64(fs.stats.JitterMicros) / 1e6,
-				LossRatio:     fs.stats.LossRatio,
-				Targets:       targetsFor(ws.cfg, fam),
-			}
+	for name, wan := range d.health.Snapshot() {
+		iface := d.cfg.Wans[name].Interface
+		wan.Gateways = state.Gateways{
+			V4: d.gateways.string(iface, rtnl.RouteFamilyV4),
+			V6: d.gateways.string(iface, rtnl.RouteFamilyV6),
 		}
-		snap.Wans[ws.name] = state.Wan{
-			Interface: ws.cfg.Interface,
-			Carrier:   ws.carrier.String(),
-			Operstate: ws.operstate.String(),
-			Healthy:   ws.healthy(),
-			Gateways: state.Gateways{
-				V4: d.gateways.string(ws.cfg.Interface, rtnl.RouteFamilyV4),
-				V6: d.gateways.string(ws.cfg.Interface, rtnl.RouteFamilyV6),
-			},
-			Families: fams,
-		}
+		snap.Wans[name] = wan
 	}
 	for name, g := range d.groups {
 		snap.Groups[name] = g.Snapshot()
@@ -564,8 +362,8 @@ func (d *daemon) notifyHooks(g selector.Group, old, next selector.Active, now ti
 		return
 	}
 
-	oldIface := ifaceFor(d.wans, old)
-	nextIface := ifaceFor(d.wans, next)
+	oldIface := ifaceFor(d.cfg.Wans, old)
+	nextIface := ifaceFor(d.cfg.Wans, next)
 	hookCtx := state.HookContext{
 		Event:    event,
 		Group:    g.Name,
@@ -581,20 +379,10 @@ func (d *daemon) notifyHooks(g selector.Group, old, next selector.Active, now ti
 		GatewayV4New: d.gateways.string(nextIface, rtnl.RouteFamilyV4),
 		GatewayV6Old: d.gateways.string(oldIface, rtnl.RouteFamilyV6),
 		GatewayV6New: d.gateways.string(nextIface, rtnl.RouteFamilyV6),
-		Families:     probedFamiliesFor(d.wans, next),
+		Families:     probedFamiliesFor(d.cfg.Wans, next),
 		Table:        g.Table,
 		Mark:         g.Mark,
 		Timestamp:    now,
 	}
 	d.hooks.Notify(hookCtx)
-}
-
-func (d *daemon) recordProbeMetrics(r probe.ProbeResult, stableHealthy bool) {
-	famLabel := r.Family.String()
-	d.metrics.ProbeJitter.WithLabelValues(r.Wan, famLabel).Set(float64(r.Stats.JitterMicros) / 1e6)
-	d.metrics.ProbeLoss.WithLabelValues(r.Wan, famLabel).Set(r.Stats.LossRatio)
-	for _, t := range r.Stats.PerTarget {
-		d.metrics.ProbeRTT.WithLabelValues(r.Wan, t.Target, famLabel).Set(float64(t.RTTMicros) / 1e6)
-	}
-	d.metrics.WanFamilyHealthy.WithLabelValues(r.Wan, famLabel).Set(boolToFloat(stableHealthy))
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
@@ -78,25 +79,22 @@ func TestFamiliesFromTargets(t *testing.T) {
 	cases := []struct {
 		name string
 		t    config.Targets
-		v4   bool
-		v6   bool
+		want []probe.Family
 	}{
-		{"empty", config.Targets{}, false, false},
-		{"v4 only", config.Targets{V4: []string{"1.1.1.1"}}, true, false},
-		{"v6 only", config.Targets{V6: []string{"2606:4700:4700::1111"}}, false, true},
+		{"empty", config.Targets{}, []probe.Family{}},
+		{"v4 only", config.Targets{V4: []string{"1.1.1.1"}}, []probe.Family{probe.FamilyV4}},
+		{"v6 only", config.Targets{V6: []string{"2606:4700:4700::1111"}}, []probe.Family{probe.FamilyV6}},
 		{
 			"both",
 			config.Targets{V4: []string{"1.1.1.1"}, V6: []string{"2606:4700:4700::1111"}},
-			true,
-			true,
+			[]probe.Family{probe.FamilyV4, probe.FamilyV6},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := familiesFromTargets(tc.t)
-			if got.v4 != tc.v4 || got.v6 != tc.v6 {
-				t.Errorf("familiesFromTargets(%+v) = %+v, want {v4:%v v6:%v}", tc.t, got, tc.v4, tc.v6)
+			if got := familiesFromTargets(tc.t); !slices.Equal(got, tc.want) {
+				t.Errorf("familiesFromTargets(%+v) = %v, want %v", tc.t, got, tc.want)
 			}
 		})
 	}

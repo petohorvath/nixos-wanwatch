@@ -62,28 +62,27 @@ func identKeysFor(cfg *config.Config) []probe.IdentKey {
 	names := slices.Sorted(maps.Keys(cfg.Wans))
 	keys := make([]probe.IdentKey, 0, 2*len(names))
 	for _, name := range names {
-		wan := cfg.Wans[name]
-		fams := familiesFromTargets(wan.Probe.Targets)
-		if fams.v4 {
-			keys = append(keys, probe.IdentKey{Wan: name, Family: probe.FamilyV4})
-		}
-		if fams.v6 {
-			keys = append(keys, probe.IdentKey{Wan: name, Family: probe.FamilyV6})
+		for _, fam := range familiesFromTargets(cfg.Wans[name].Probe.Targets) {
+			keys = append(keys, probe.IdentKey{Wan: name, Family: fam})
 		}
 	}
 	return keys
 }
 
-// familiesFromTargets reports which IP families the WAN serves
-// (which Pinger goroutines to spawn for it). Mirrors
-// `wanwatch.probe.families` on the Nix side — both reduce to "is
-// the per-family bucket non-empty?" now that the config layer keeps
-// the buckets disjoint.
-func familiesFromTargets(t config.Targets) struct{ v4, v6 bool } {
-	return struct{ v4, v6 bool }{
-		v4: len(t.V4) > 0,
-		v6: len(t.V6) > 0,
+// familiesFromTargets lists the IP families the WAN serves (which
+// Pinger goroutines to spawn for it, and which default routes Apply
+// writes), v4 first. Mirrors `wanwatch.probe.families` on the Nix
+// side — both reduce to "is the per-family bucket non-empty?" now
+// that the config layer keeps the buckets disjoint.
+func familiesFromTargets(t config.Targets) []probe.Family {
+	fams := make([]probe.Family, 0, 2)
+	if len(t.V4) > 0 {
+		fams = append(fams, probe.FamilyV4)
 	}
+	if len(t.V6) > 0 {
+		fams = append(fams, probe.FamilyV6)
+	}
+	return fams
 }
 
 // targetsFor returns the probe targets for `wan` in `family` —

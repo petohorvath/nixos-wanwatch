@@ -29,7 +29,7 @@ Until a (WAN, Family) delivers its first `ProbeResult` with a full Window (`Wind
 
 1. The daemon boots and installs rules; no Probes have completed.
 2. rtnl reports `carrier=up, operstate=up` on the primary.
-3. `buildMemberHealth` marks the primary healthy.
+3. `Wans.MemberHealth` marks the primary healthy.
 4. `selector.Select` picks the primary.
 5. `apply.WriteDefault` writes the default route.
 6. State and Hooks fire.
@@ -46,8 +46,8 @@ t=0      primary healthy, backup healthy
 
 t=1      carrier drops on wan0
          rtnl emits LinkEvent{Name: wan0, Carrier: down}
-         handleLinkEvent flips primary's carrierUp() = false
-         buildMemberHealth: primary unhealthy, backup healthy
+         health.Wans.Link flips primary's carrierUp() = false
+         Wans.MemberHealth: primary unhealthy, backup healthy
          selector.Select: active = backup
 
          apply.WriteDefault(family=v4, table=100, gw=backup.v4, ifindex=wan1)
@@ -66,8 +66,8 @@ The `t=1` steps run sequentially on one goroutine. Apply never races with itself
 ```text
 t=10     carrier returns on wan0
          rtnl emits LinkEvent{Name: wan0, Carrier: up}
-         handleLinkEvent flips primary's carrierUp() = true
-         buildMemberHealth: primary healthy again (cold-start path:
+         health.Wans.Link flips primary's carrierUp() = true
+         Wans.MemberHealth: primary healthy again (cold-start path:
                             primary.healthy was true at boot and never
                             went false from probes)
          selector.Select: active = primary (lower priority among healthy)
@@ -87,7 +87,7 @@ Multi-active arrives with the v2 `load-balance` Strategy. Apply's `RouteReplace`
 Replaying the same event sequence (config, ProbeResults, LinkEvents) always produces the same Decision sequence. Both stateful elements are deterministic, and unit tests assert this across many invocations:
 
 - `WindowStats`, given the Sample order.
-- `HysteresisState`, given the order of observed booleans.
+- Hysteresis (`internal/health`), given the order of observed booleans.
 
 ## Failure modes
 

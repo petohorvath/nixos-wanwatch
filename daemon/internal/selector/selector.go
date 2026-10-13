@@ -1,15 +1,15 @@
 // Package selector decides which Group member should carry traffic
 // at any moment.
 //
-// The package owns three concerns:
+// The package owns two concerns:
 //
 //  1. **Types** — Group, Member, MemberHealth, Selection (this file).
 //  2. **Strategies** — pure functions that map (Group, []MemberHealth)
 //     to a Selection. v1 ships `primary-backup` (primarybackup.go);
 //     v2 will add `load-balance` when multi-active lands.
-//  3. **Hysteresis** — per-WAN consecutive-cycle state machine
-//     (hysteresis.go) that suppresses flapping by gating the
-//     externally-visible Healthy verdict.
+//
+// Hysteresis, which gates the Health a MemberHealth carries, lives
+// in internal/health.
 //
 // The package is `internal/selector/` rather than `internal/select/`
 // because `select` is a Go control-flow keyword and cannot appear as

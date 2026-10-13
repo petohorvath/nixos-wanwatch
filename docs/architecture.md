@@ -84,7 +84,8 @@ daemon/
   internal/config/      — config.json parser + structural validator
   internal/probe/       — Pinger goroutine, ICMP wire format, WindowStats
   internal/rtnl/        — link + route subscriptions, Gateway discovery, LinkEvent dedup
-  internal/selector/    — Strategies + per-WAN Hysteresis state
+  internal/health/      — per-WAN Health: thresholds, Hysteresis, Family policy, carrier
+  internal/selector/    — Strategies
   internal/decision/    — per-Group Selection, Apply retries and commits
   internal/apply/       — route / rule / conntrack via vishvananda/netlink
   internal/state/       — atomic state.json writer + Hook notification delivery
@@ -107,8 +108,8 @@ for {
 Events progress through `internal/decision/group.go` as follows:
 
 ```text
-ProbeResult → thresholds + per-WAN Hysteresis ─┐
-LinkEvent → carrier / operstate ──────────────┴→ Member Health
+ProbeResult → health.Wans.Probe ───────────────┐
+LinkEvent → health.Wans.Link ─────────────────┴→ Member Health
                                                      │
                                                      ▼
                                                Group.Recompute
@@ -128,6 +129,8 @@ RouteEvent → Gateway cache → Group.GatewayChanged ────┘        │
 ```
 
 Link monitoring opens the live link subscription before listing existing links, so a carrier change during startup cannot fall between the snapshot and the subscription. Snapshot events queue before the event loop starts. Each notification on a watched interface triggers a fresh read of that link, and the subscriber emits a LinkEvent only when the carrier or operstate differs from the last one it emitted. Buffered history therefore cannot replay a stale carrier loss into Selection. A failed read terminates the subscriber through the subsystem restart path.
+
+The health package owns WAN Health: threshold verdicts, Hysteresis, the cold-start gate, the Family policy, carrier and operstate, and the `wan_*` and `probe_*` gauges. It folds a LinkEvent into every WAN on the interface before reporting any of them, and returns a `Change` naming the WANs whose Health flipped and whether State must be republished. The daemon recomputes the Groups of each flipped WAN and republishes State on request.
 
 The decision package owns pending and committed Selections, Decision counts, active-Member gauges, and commit timestamps. The daemon forwards events and publishes returned commits; `Snapshot` supplies each Group's State. Strategies stay pure in `internal/selector`.
 
@@ -154,7 +157,7 @@ Discovery opens the live route subscription before listing existing IPv4 and IPv
 2. rtnl.LinkSubscriber emits LinkEvent{Name=wan0, Carrier=down}
        │
        ▼
-3. handleLinkEvent sets wan0.carrier = down
+3. health.Wans.Link sets carrier = down on every WAN on wan0
        │
        ▼
 4. recomputeAffectedGroups sends current Member Health to
