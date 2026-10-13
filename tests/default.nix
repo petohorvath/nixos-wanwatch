@@ -60,7 +60,8 @@ in
     package = packages.wanwatchd;
     integration = runNixUnit "integration.${system}";
   }
-  # CI also builds these against nixos-unstable through
-  # `--override-input nixpkgs` (ADR-0012).
+  # The project policy runs these as VM tests, because NixOS tests
+  # require the `nixos-test` system feature, and skips them on a runner
+  # without KVM (ADR-0013).
   // vmChecks
 )

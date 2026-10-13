@@ -90,7 +90,16 @@ cd daemon && go test -race -timeout 120s ./...
 
 `nix flake check` on Linux runs every check, including the full VM matrix. It is resource-intensive; report it as passed only when it actually ran.
 
-CI runs formatter drift, `tests/ci/` helper contracts, Go module verification, the unit, lint, daemon, golangci-lint, package, coverage, race, and integration checks on x86_64 and aarch64 Linux, and every VM scenario on x86_64 Linux, against both the locked nixpkgs and the current nixos-unstable revision. The workflow also runs weekly to catch drift on nixos-unstable; on pull requests the unstable VM job reports upstream drift without blocking the merge.
+CI calls the [shared project policy](https://github.com/petohorvath/nixos-project-policy/blob/v0.6/POLICY.md) from [`.github/workflows/check.yml`](./.github/workflows/check.yml) ([ADR-0013](./docs/adr/0013-adopt-project-policy.md)). On x86_64 and aarch64 Linux, the policy checks the inputs, public outputs, development shell, and formatter, and builds every check with the locked nixpkgs and with the policy's stable and unstable pins. The `vm-*` checks run in the policy's VM test jobs, which skip them on a runner without KVM. [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) adds Go module verification and the `tests/ci/` helper contracts, which need the network or run outside the Nix sandbox. To run the policy locally from a clean checkout, use a Nix whose `nix derivation show` reports format version 4, such as Nix 2.34:
+
+```sh
+nix run github:petohorvath/nixos-project-policy/v0.6 -- check .
+nix run github:petohorvath/nixos-project-policy/v0.6 -- test . --nixpkgs locked
+nix run github:petohorvath/nixos-project-policy/v0.6 -- test . --nixpkgs stable
+nix run github:petohorvath/nixos-project-policy/v0.6 -- test . --nixpkgs unstable
+```
+
+`test` skips the `vm-*` checks; add `--vm` to build only them.
 
 ## Conventions
 
