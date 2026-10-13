@@ -4,7 +4,7 @@ Contributor instructions for people and automated agents working in this reposit
 
 ## Project
 
-`nixos-wanwatch` provides multi-WAN monitoring and single-active failover for NixOS. Version `0.1.0` shipped the v1 design. [`CHANGELOG.md`](./CHANGELOG.md) records unreleased changes, including public-API breaks, and [`TODO.md`](./TODO.md) is the deferred-work backlog.
+`nixos-wanwatch` provides multi-WAN monitoring and single-active failover for NixOS. It has no release yet; `main` implements the v1 design. [`CHANGELOG.md`](./CHANGELOG.md) records unreleased changes, including public-API breaks, and [`TODO.md`](./TODO.md) is the deferred-work backlog.
 
 It has three layers, with dependencies pointing bottom-up only:
 
@@ -133,7 +133,7 @@ Coverage floors, lint rules, security hardening, and CI gates stay at their curr
 
 ## Documentation map
 
-- [`README.md`](./README.md): overview, quickstart, and commands.
+- [`README.md`](./README.md): overview, installation, usage, and limitations.
 - [`GLOSSARY.md`](./GLOSSARY.md): terminology.
 - [`docs/adr/`](./docs/adr/): architectural decisions.
 - [`docs/wan-monitoring.md`](./docs/wan-monitoring.md): conceptual introduction.

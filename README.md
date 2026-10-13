@@ -1,101 +1,218 @@
 # nixos-wanwatch
 
-Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides which is healthy, selects an active member per group, and switches kernel routing state on health changes.
+`nixos-wanwatch` has no release yet: its options and contracts may still change, and [`CHANGELOG.md`](./CHANGELOG.md) records each change under Unreleased.
 
-**Status**: v0.1.0 shipped the v1 design: library, NixOS module, daemon, and unit, integration, and VM test tiers. See [`CHANGELOG.md`](./CHANGELOG.md) for unreleased changes.
+`nixos-wanwatch` monitors a host's WANs and fails traffic over to a healthy one. It provides a NixOS module, `services.wanwatch`, and a daemon, `wanwatchd`, that probes each WAN with ICMP, derives its Health, and rewrites policy-routing tables when the preferred WAN fails or recovers. It serves NixOS routers and gateways with a backup connection, such as an LTE modem behind a fixed-line link.
 
-## What it does
+## Overview
 
-- ICMP / ICMPv6 probes per declared WAN, per family.
-- Sliding-window RTT / jitter / loss with hysteresis.
-- Carrier / operstate via rtnetlink — carrier-down fast-tracks to unhealthy.
-- Per-Group Strategy (v1: `primary-backup`) maps Health to a Selection.
-- Atomic apply: route + fwmark rule via netlink, conntrack flush, state snapshot, hook dispatch.
-- Prometheus metrics over a Unix socket. Optional Telegraf companion module.
+A WAN is an egress interface plus a Probe: the Targets it pings, the interval, and the loss and RTT thresholds. The daemon keeps a sliding Window of Samples per Target and turns them into a healthy or unhealthy verdict per IP Family. Hysteresis requires several consecutive cycles before Health flips, and carrier loss reported by the kernel makes a WAN unhealthy immediately.
 
-## Quickstart
+A Group lists WANs as Members, each with a `priority`. The `primary-backup` Strategy selects the healthy Member with the lowest `priority` value, breaking ties by WAN name.
+
+Each Group owns an fwmark and a routing table. At startup, the daemon installs `ip rule` entries that send marked packets to the table. When the Selection moves to a Member, the daemon writes that Member's default route into the table; on a switch between Members, it also flushes conntrack entries for the vacated WAN. It then publishes the new State and runs Hooks.
+
+Only packets that carry a Group's mark follow its routing table. The daemon leaves the main table alone, so a firewall rule must mark the traffic to steer; see [Steer traffic into a Group](#steer-traffic-into-a-group).
+
+[`docs/wan-monitoring.md`](./docs/wan-monitoring.md) introduces the concepts in more depth, and [`GLOSSARY.md`](./GLOSSARY.md) defines each term.
+
+## Contents
+
+The flake exposes these outputs:
+
+| Output | Contents |
+|---|---|
+| `nixosModules.default`, also `nixosModules.wanwatch` | The `services.wanwatch` module: options, rendered daemon config, a `wanwatch` system user, and a hardened systemd service |
+| `nixosModules.telegraf` | Optional `services.wanwatch.telegraf` module that scrapes the daemon's metrics with Telegraf |
+| `packages.<system>.wanwatchd`, also `packages.<system>.default` | The Go daemon, built for Linux systems only |
+| `lib` | The pure-Nix library behind the module: validated WAN, Probe, Member, and Group values, option types, and the config renderer |
+
+The sources live in [`nixos/`](./nixos/), [`daemon/`](./daemon/), and [`lib/`](./lib/); [`docs/architecture.md`](./docs/architecture.md) describes how the layers fit together.
+
+## Requirements
+
+The module needs NixOS with flakes enabled. The daemon runs on Linux only; CI builds and tests it on `x86_64-linux` and `aarch64-linux`.
+
+## Install
+
+Add the flake as an input and import its module into the host's configuration:
 
 ```nix
 {
-  inputs.wanwatch.url = "github:petohorvath/nixos-wanwatch";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    wanwatch = {
+      url = "github:petohorvath/nixos-wanwatch";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
-  outputs = { self, nixpkgs, wanwatch }: {
-    nixosConfigurations.router = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        wanwatch.nixosModules.default
-        ({ ... }: {
-          services.wanwatch = {
-            enable = true;
+  outputs =
+    { nixpkgs, wanwatch, ... }:
+    {
+      nixosConfigurations.router = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [
+          wanwatch.nixosModules.default
+          ./configuration.nix
+        ];
+      };
+    };
+}
+```
 
-            wans.primary = {
-              interface = "eth0";
-              probe.targets = {
-                v4 = [ "1.1.1.1" "8.8.8.8" ];
-                v6 = [ "2606:4700:4700::1111" ];
-              };
-            };
+## Usage
 
-            wans.backup = {
-              interface = "wwan0";
-              pointToPoint = true;     # LTE / PPP / WireGuard / tun
-              probe.targets.v4 = [ "1.1.1.1" ];
-            };
+Declare the WANs and a Group that fails over between them:
 
-            groups.home-uplink = {
-              members = [
-                { wan = "primary"; priority = 1; }
-                { wan = "backup";  priority = 2; }
-              ];
-              mark  = 1000;   # required — wanwatch.types.fwmark (1000..32767)
-              table = 1000;   # required — wanwatch.types.routingTableId (1000..32767)
-            };
-          };
-        })
+```nix
+{
+  services.wanwatch = {
+    enable = true;
+
+    wans.primary = {
+      interface = "eth0";
+      probe.targets = {
+        v4 = [ "1.1.1.1" "8.8.8.8" ];
+        v6 = [ "2606:4700:4700::1111" ];
+      };
+    };
+
+    wans.backup = {
+      interface = "wwan0";
+      pointToPoint = true;
+      probe.targets.v4 = [ "1.1.1.1" ];
+    };
+
+    groups.home-uplink = {
+      members = [
+        { wan = "primary"; priority = 1; }
+        { wan = "backup"; priority = 2; }
       ];
+      mark = 1000;
+      table = 1000;
     };
   };
 }
 ```
 
-`config.services.wanwatch.marks.home-uplink` and `.tables.home-uplink` re-expose the user-declared fwmark / routing-table id as read-only attributes so downstream firewall configs can reference them by name. See [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
+A WAN serves the Families that have Targets, so `primary` is dual-stack and `backup` is IPv4-only. For broadcast links, the daemon discovers each Family's Gateway from the main routing table. Point-to-point links such as PPP, WireGuard, GRE, and tun set `pointToPoint = true` and get a `scope link` default route instead. Each Group needs a `mark` and a `table` in `1000..32767`, unique across Groups.
 
-## Components
-
-| Layer | Where | Role |
-|---|---|---|
-| Pure-Nix library | `lib/` | Typed values (`wan`, `probe`, `group`, `member`), validation, typed fwmark/routing-table-id primitives, pure selector. |
-| NixOS module | `nixos/` | `services.wanwatch.*` option surface, JSON renderer, hardened systemd unit. |
-| Go daemon | `daemon/` | `wanwatchd` — probe goroutines, rtnl subscriber, selector + hysteresis, netlink apply, state writer, hook runner, Prometheus endpoint. |
-
-## Composition with sibling projects
-
-- **[`nix-libnet`](../nix-libnet)** — IP / CIDR / interface-name validators used throughout the lib.
-- **[`nixos-nftzones`](../nixos-nftzones)** — zone-based nftables firewall. References `services.wanwatch.marks.<group>` in `sroute` rules to direct traffic to the active member.
-
-## Commands
+After `nixos-rebuild switch`, the daemon publishes its State to `/run/wanwatch/state.json`:
 
 ```sh
-nix flake check       # unit + integration + VM tier (VM needs /dev/kvm)
-nix develop --command nix-unit --flake .#tests  # Nix unit + integration tests
-nix fmt               # nixfmt + gofumpt + goimports
-nix build .#wanwatchd # build the daemon binary
-nix develop           # devshell with go, gopls, golangci-lint, nix-unit
+jq '.groups' /run/wanwatch/state.json
 ```
 
-For executable reviews in a minimal Linux sandbox, use `bash tooling/review-env.sh COMMAND [ARG...]`. It provides the locked Go toolchain and GCC with vendored dependencies. See [review environment setup](.greptile/rules.md) for the optional upstream Nix bootstrap and focused validation commands.
+```json
+{
+  "home-uplink": {
+    "active": "primary",
+    "activeSince": "2026-10-13T09:12:04.118204511Z",
+    "decisionsTotal": 1,
+    "strategy": "primary-backup"
+  }
+}
+```
+
+`ip rule show` includes a `fwmark 0x3e8 lookup 1000` rule, and `ip route show table 1000` holds the default route through `eth0`. When `primary` fails, the daemon replaces that route with `default dev wwan0 scope link`.
+
+[`docs/wan-monitoring.md`](./docs/wan-monitoring.md) covers every Probe option and its default, and [`docs/selector.md`](./docs/selector.md) explains thresholds, Hysteresis, and the Strategy.
+
+## Steer traffic into a Group
+
+The module publishes each Group's mark and table as the read-only options `services.wanwatch.marks.<group>` and `services.wanwatch.tables.<group>`. Firewall rules reference these names instead of repeating the integers.
+
+With plain nftables, mark the forwarded LAN traffic before the routing decision:
+
+```nix
+{ config, ... }:
+let
+  mark = config.services.wanwatch.marks.home-uplink;
+in
+{
+  networking.nftables.tables.wanwatch-steering = {
+    family = "inet";
+    content = ''
+      chain prerouting {
+        type filter hook prerouting priority mangle; policy accept;
+        iifname "br-lan" meta mark set ${toString mark}
+      }
+    '';
+  };
+}
+```
+
+Most routers also apply source NAT on the Group's WAN interfaces; because it matches every interface in the Group, it follows the route to whichever Member is selected. [`docs/nftzones-integration.md`](./docs/nftzones-integration.md) shows the complete setup with [nixos-nftzones](https://github.com/petohorvath/nixos-nftzones), including SNAT and what changes on a failover.
+
+## Hooks
+
+After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up,down,switch}.d/` in lexicographic order, passing the Group, the old and new WAN, their interfaces and Gateways, and a timestamp in `WANWATCH_*` environment variables:
+
+```nix
+{ pkgs, ... }:
+{
+  environment.etc."wanwatch/hooks/switch.d/log".source =
+    pkgs.writeShellScript "wanwatch-log" ''
+      ${pkgs.util-linux}/bin/logger -t wanwatch \
+        "$WANWATCH_GROUP: $WANWATCH_WAN_OLD -> $WANWATCH_WAN_NEW"
+    '';
+}
+```
+
+Hooks are notifications: a failing or timed-out Hook is logged and counted but never undoes a Decision. `services.wanwatch.global.hookTimeoutMs` sets the deadline. [`docs/specs/daemon-state.md`](./docs/specs/daemon-state.md) lists every variable and the execution rules.
+
+## Metrics
+
+The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock`, readable by members of the `wanwatch` group. To scrape them with Telegraf, add `wanwatch.nixosModules.telegraf` to the host's modules next to `wanwatch.nixosModules.default`, then enable it:
+
+```nix
+{
+  services.telegraf.enable = true;
+  services.wanwatch.telegraf.enable = true;
+}
+```
+
+[`docs/metrics.md`](./docs/metrics.md) catalogs the series and gives example PromQL queries.
+
+## Global settings
+
+`services.wanwatch.global` sets the daemon's paths, log level, and Hook timeout:
+
+| Option | Default |
+|---|---|
+| `statePath` | `/run/wanwatch/state.json` |
+| `hooksDir` | `/etc/wanwatch/hooks` |
+| `metricsSocket` | `/run/wanwatch/metrics.sock` |
+| `logLevel` | `info` |
+| `hookTimeoutMs` | `5000` |
+
+The module renders the whole configuration to `/etc/wanwatch/config.json`; [`docs/specs/daemon-config.md`](./docs/specs/daemon-config.md) specifies its format.
 
 ## Documentation
 
-- [`GLOSSARY.md`](./GLOSSARY.md): terminology.
-- [`docs/wan-monitoring.md`](./docs/wan-monitoring.md): introduction for newcomers.
-- [`docs/architecture.md`](./docs/architecture.md): layers and data flow.
-- [`docs/selector.md`](./docs/selector.md): Strategy and Hysteresis.
-- [`docs/nftzones-integration.md`](./docs/nftzones-integration.md): wiring with the zone-based firewall.
-- [`docs/metrics.md`](./docs/metrics.md): Prometheus catalog.
-- [`docs/specs/`](./docs/specs/): frozen JSON contracts, failover and probe semantics, and prior art.
+- [`GLOSSARY.md`](./GLOSSARY.md): the terms used in options, State, metrics, and logs.
+- [`docs/wan-monitoring.md`](./docs/wan-monitoring.md): WANs, Probes, Health, Groups, and Decisions, with the Probe defaults.
+- [`docs/architecture.md`](./docs/architecture.md): layers, data flow, Families, and Gateways.
+- [`docs/selector.md`](./docs/selector.md): thresholds, Hysteresis, and Strategy.
+- [`docs/nftzones-integration.md`](./docs/nftzones-integration.md): firewall integration.
+- [`docs/metrics.md`](./docs/metrics.md): the Prometheus catalog and Telegraf.
+- [`docs/specs/`](./docs/specs/): the daemon config, State, failover, and probe-algorithm contracts.
 - [`docs/adr/`](./docs/adr/): architectural decisions.
+
+## Limitations
+
+- Failover is single-active: each Group routes through one Member at a time, and `primary-backup` is the only Strategy. Load balancing is not supported.
+- Probes use ICMP and ICMPv6 echo only; TCP, HTTP, and DNS probes are not available.
+- The daemon reads its configuration only at startup. When a rebuild changes only WAN, Group, or global settings, run `systemctl restart wanwatch` to apply them.
+- When no Member of a Group is healthy, the daemon leaves the Group's last default route in place.
+- When the Selection moves to a WAN that serves fewer Families, the dropped Family keeps its previous route.
+- On hosts that run systemd-networkd, the module defaults `ManageForeignRoutingPolicyRules` and `ManageForeignRoutes` to `false`, so networkd stops removing routes and rules it did not create.
+
+## Contributing
+
+Ask questions and report bugs in [GitHub issues](https://github.com/petohorvath/nixos-wanwatch/issues). [`AGENTS.md`](./AGENTS.md) describes the development shell, checks, conventions, and commit format that pull requests follow.
 
 ## License
 
-MIT — see [`LICENSE`](./LICENSE).
+MIT; see [`LICENSE`](./LICENSE).

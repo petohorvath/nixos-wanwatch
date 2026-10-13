@@ -44,6 +44,7 @@ in
   family-health-policy = scenario "family-health-policy" { };
   gateway-discovery = scenario "gateway-discovery" { };
   gateway-discovery-v6 = scenario "gateway-discovery-v6" { };
+  nftables-steering = scenario "nftables-steering" { };
   nftzones-integration = scenario "nftzones-integration" {
     nftzonesModule = nftzones.nixosModules.default;
     nftypes = nftzones.inputs.nftypes.lib;
