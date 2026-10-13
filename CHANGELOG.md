@@ -8,8 +8,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 - Specs now match the daemon's behavior: `failover.md` describes the full-Window cold-start gate and recovery latency, `daemon-state.md` the caller-supplied `updatedAt` and Hooks published while a Family awaits its Gateway, `daemon-config.md` the current Probe defaults, the Nix-side `global` defaults, and the daemon's full validation, and `probe-algorithm.md` the kernel-computed ICMPv6 checksum on raw sockets. No contract changed.
 - Gateway discovery now subscribes to route changes before taking its initial snapshot. Default routes installed during daemon startup are retained, preventing a missed Gateway from indefinitely deferring a Group route write. Buffered and subsequent notifications trigger current-route reads, so obsolete additions/deletions cannot regress a newer Gateway in State or a Group's route table.
-
-- Link monitoring now subscribes to link changes before taking its initial snapshot. A carrier change during daemon startup is no longer missed, which could leave a WAN that had come up reported as down and unselectable until its next transition. Buffered and subsequent notifications trigger current-link reads, so stale history cannot flap a Selection at startup.
+- Link monitoring now subscribes to link changes before taking its initial snapshot. A carrier change during daemon startup is no longer missed, which could leave a WAN that had come up reported as down and unselectable until its next transition. Buffered and subsequent notifications trigger current-link reads, so stale history cannot flap a Selection at startup. A carrier flap that ends before its read is coalesced: it emits no LinkEvent and does not increment `wanwatch_wan_carrier_changes_total`.
 
 ### Changed
 
