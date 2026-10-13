@@ -2,7 +2,9 @@
 
 All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); version numbers follow [SemVer](https://semver.org/spec/v2.0.0.html). Schema versions for the daemon's JSON contracts (`config.json`, `state.json`) are independent — bumped only on incompatible shape changes; see [`docs/specs/daemon-config.md`](./docs/specs/daemon-config.md) and [`docs/specs/daemon-state.md`](./docs/specs/daemon-state.md).
 
-## [Unreleased]
+## Unreleased
+
+No version has been released yet. This section describes the first release as it stands on `main`, from the v1 feature set ([v1 design plan](https://github.com/petohorvath/nixos-wanwatch/blob/042c384/PLAN.md)) through later changes; entries marked as API breaks carry migration notes for configurations that track `main`.
 
 ### Fixed
 
@@ -29,10 +31,54 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ### Added
 
+**Pure-Nix library** (`lib/`)
+
+- Value types `probe`, `wan`, `member`, `group` with the `make` / `tryMake` / `is<T>` / `eq` / `compare` / `toJSON` skeleton.
+- IP / CIDR / interface-name validation via [`nix-libnet`](https://github.com/petohorvath/nix-libnet).
+- Pure-Nix selector mirroring the Go daemon's strategy registry.
+- `wanwatch.config.render` / `.toJSON` — single source of truth for the daemon-config JSON shape.
+- `wanwatch.types.<name>` flattened NixOS option types per value type.
+
+**NixOS modules** (`nixos/`)
+
+- `nixosModules.default` (`services.wanwatch.*`) — option surface, JSON renderer, hardened systemd unit, dedicated `wanwatch:wanwatch` user.
+- Read-only outputs `services.wanwatch.marks.<group>` and `.tables.<group>` for cross-module composition.
+- `nixosModules.telegraf` (`services.wanwatch.telegraf.*`) — opt-in Prometheus scrape companion; joins the telegraf account to the wanwatch group for socket access.
+
+**Go daemon** (`daemon/`, `packages/wanwatchd/package.nix`)
+
+- `wanwatchd` single binary, `CGO_ENABLED=0`, vendored deps. Capabilities: `CAP_NET_ADMIN`, `CAP_NET_RAW`.
+- Packages: `config`, `probe`, `rtnl`, `selector`, `apply`, `state`, `metrics`.
+- ICMP / ICMPv6 probing with `SO_BINDTODEVICE` per WAN, stable per-(WAN, family) identifiers.
+- rtnetlink subscriber with carrier + operstate dedup, `ListExisting=true` for cold-start.
+- Selector with `primary-backup` strategy + two-stage hysteresis (band-pass thresholds + consecutive-cycle filter).
+- Netlink apply: `RouteReplace` (idempotent default route), `RuleAdd` (idempotent fwmark rule, EEXIST-swallowed), `ConntrackDeleteFilter` (best-effort source-IP flush).
+- Atomic `state.json` writer + run-parts hook dispatcher with 5 s per-hook timeout and the `WANWATCH_*` env-var contract.
+- Prometheus registry over a 0660 Unix socket; 16 metrics per PLAN §7.2 (catalog drops `wanwatch_probe_samples_total` and `wanwatch_apply_op_duration_seconds` — see `TODO.md` for the re-add work).
+
+**Tests**
+
+- Unit tier (`tests/unit/`) — nix-unit suites; per-value-type skeleton meta-test; Go table-driven tests with package coverage gates (config ≥95%, state ≥85%, apply/rtnl/metrics ≥70%).
+- Integration tier (`tests/integration/`) — full module-eval against `nixos/lib/eval-config.nix`; asserts rendered config, capabilities, and telegraf wiring.
+- VM tier (`tests/vm/`) — smoke, failover (v4 / v6 / dual-stack), recovery (v4 / v6), hooks, metrics (Telegraf round-trip), family-health-policy (two-node real-ICMP), nftzones-integration. Linux + KVM only.
+
+**Documentation**
+
+- `README.md` quickstart.
+- `docs/wan-monitoring.md` newcomer intro.
+- `docs/architecture.md` layering + Decision pipeline.
+- `docs/selector.md` strategy + hysteresis spec.
+- `docs/metrics.md` Prometheus catalog with PromQL examples.
+- `docs/nftzones-integration.md` end-to-end firewall composition.
+- `docs/specs/` — frozen contracts: `daemon-config.md`, `daemon-state.md`, `failover.md`, `probe-algorithm.md`, `prior-art.md`.
+- `GLOSSARY.md` enforced terminology.
+
+**Later additions**
+
 - `wanwatch.types.fwmark` and `wanwatch.types.routingTableId` (both `lib.types.ints.between 1000 32767`) — exposed under `lib/types/primitives.nix`. Planned to migrate into `nix-libnet` in a follow-up release.
 - `daemon/internal/rtnl.RouteSubscriber` — emits per-`(iface, family)` default-route add/del events from the main RIB, filtered to WAN interfaces.
 - `daemon/cmd/wanwatchd.gatewayCache` — mirrors the kernel's view; drives non-PtP route writes and re-applies on route flap.
-- VM scenarios added since 0.1.0: `tests/vm/cold-start.nix`, `tests/vm/failover-probe-loss.nix` (v4 netem-driven), `tests/vm/failover-probe-loss-v6.nix` (v6 netem-driven; closes the v6 probe + threshold + hysteresis gap that the carrier-driven `failover-v6.nix` left unexercised), `tests/vm/gateway-discovery.nix`, `tests/vm/nftables-steering.nix` (the README's plain-nftables marking example).
+- VM scenarios: `tests/vm/cold-start.nix`, `tests/vm/failover-probe-loss.nix` (v4 netem-driven), `tests/vm/failover-probe-loss-v6.nix` (v6 netem-driven; closes the v6 probe + threshold + hysteresis gap that the carrier-driven `failover-v6.nix` left unexercised), `tests/vm/gateway-discovery.nix`, `tests/vm/nftables-steering.nix` (the README's plain-nftables marking example).
 - Integration rejection cases (`testProbeNoTargets`, `testProbeFamilyMismatch` in `tests/integration/`) proving the lib validators stay wired into the live module-eval path.
 - `daemon/cmd/wanwatchd/daemon_test.go` — first unit coverage for the daemon's pipeline (`writeStateSnapshot`, `handleProbeResult`, `handleRouteEvent`). Lived as `state.go` before with no test file.
 - `wanwatch_apply_op_errors_total{op="rule_install"}` is now incremented on bootstrap `EnsureRule` failure (was: silent from the metric's perspective).
@@ -58,59 +104,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 - `docs/glossary.md` row for `Health` now matches the v1 boolean shape; the four-state spec (`up`/`down`/`degraded`/`unknown`) deferred to v2 — see `TODO.md`.
 - `state.SchemaVersion` pinned at 1 pre-release; the first tagged release freezes shape 1.
 
-## [0.1.0] — 2026-05-12
-
-Initial public release. Feature-complete per the [v1 design plan](https://github.com/petohorvath/nixos-wanwatch/blob/042c384/PLAN.md).
-
-### Added
-
-**Pure-Nix library** (`lib/`)
-
-- Value types `probe`, `wan`, `member`, `group` with the `make` / `tryMake` / `is<T>` / `eq` / `compare` / `toJSON` skeleton.
-- IP / CIDR / interface-name validation via [`nix-libnet`](https://github.com/petohorvath/nix-libnet).
-- Deterministic mark + table allocators (SHA-256 + linear probe) with cross-explicit collision detection.
-- Pure-Nix selector mirroring the Go daemon's strategy registry.
-- `wanwatch.config.render` / `.toJSON` — single source of truth for the daemon-config JSON shape.
-- `wanwatch.types.<name>` flattened NixOS option types per value type.
-
-**NixOS modules** (`modules/`)
-
-- `nixosModules.default` (`services.wanwatch.*`) — option surface, JSON renderer, hardened systemd unit, dedicated `wanwatch:wanwatch` user.
-- Read-only outputs `services.wanwatch.marks.<group>` and `.tables.<group>` for cross-module composition.
-- `nixosModules.telegraf` (`services.wanwatch.telegraf.*`) — opt-in Prometheus scrape companion; joins the telegraf account to the wanwatch group for socket access.
-
-**Go daemon** (`daemon/`, `pkgs/wanwatchd.nix`)
-
-- `wanwatchd` single binary, `CGO_ENABLED=0`, vendored deps. Capabilities: `CAP_NET_ADMIN`, `CAP_NET_RAW`.
-- Packages: `config`, `probe`, `rtnl`, `selector`, `apply`, `state`, `metrics`.
-- ICMP / ICMPv6 probing with `SO_BINDTODEVICE` per WAN, stable per-(WAN, family) identifiers.
-- rtnetlink subscriber with carrier + operstate dedup, `ListExisting=true` for cold-start.
-- Selector with `primary-backup` strategy + two-stage hysteresis (band-pass thresholds + consecutive-cycle filter).
-- Netlink apply: `RouteReplace` (idempotent default route), `RuleAdd` (idempotent fwmark rule, EEXIST-swallowed), `ConntrackDeleteFilter` (best-effort source-IP flush).
-- Atomic `state.json` writer + run-parts hook dispatcher with 5 s per-hook timeout and the `WANWATCH_*` env-var contract.
-- Prometheus registry over a 0660 Unix socket; 16 metrics per PLAN §7.2 (catalog drops `wanwatch_probe_samples_total` and `wanwatch_apply_op_duration_seconds` — see `TODO.md` for the re-add work).
-
-**Tests**
-
-- Unit tier (`tests/unit/`) — `lib.runTests` shape; per-value-type skeleton meta-test; Go table-driven tests with package coverage gates (config ≥95%, state ≥85%, apply/rtnl/metrics ≥70%).
-- Integration tier (`tests/integration/`) — full module-eval against `nixos/lib/eval-config.nix`; asserts rendered config, capabilities, and telegraf wiring.
-- VM tier (`tests/vm/`, 9 scenarios) — smoke, failover (v4 / v6 / dual-stack), recovery, hooks, metrics (Telegraf round-trip), family-health-policy (two-node real-ICMP), nftzones-integration. Linux + KVM only.
-
-**Documentation**
-
-- `README.md` quickstart.
-- `docs/wan-monitoring.md` newcomer intro.
-- `docs/architecture.md` layering + Decision pipeline.
-- `docs/selector.md` strategy + hysteresis spec.
-- `docs/metrics.md` Prometheus catalog with PromQL examples.
-- `docs/nftzones-integration.md` end-to-end firewall composition.
-- `docs/specs/` — frozen contracts: `daemon-config.md`, `daemon-state.md`, `failover.md`, `probe-algorithm.md`, `prior-art.md`.
-- `docs/glossary.md` enforced terminology.
-
 ### Schemas
 
 - `config.json` schema version: **1**.
-- `state.json` schema version: **1**. (Stays at 1 in [Unreleased] — pre-release we don't bump for in-tree refactors. The first tagged release freezes shape 1.)
-
-[Unreleased]: https://github.com/petohorvath/nixos-wanwatch/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/petohorvath/nixos-wanwatch/releases/tag/v0.1.0
+- `state.json` schema version: **1**. (Pre-release we don't bump for in-tree refactors. The first tagged release freezes shape 1.)
