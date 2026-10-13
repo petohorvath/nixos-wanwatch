@@ -133,7 +133,7 @@ Coverage floors, lint rules, security hardening, and CI gates stay at their curr
 
 ## Documentation map
 
-- [`README.md`](./README.md): overview, quickstart, and commands.
+- [`README.md`](./README.md): overview, installation, usage, and limitations.
 - [`GLOSSARY.md`](./GLOSSARY.md): terminology.
 - [`docs/adr/`](./docs/adr/): architectural decisions.
 - [`docs/wan-monitoring.md`](./docs/wan-monitoring.md): conceptual introduction.
