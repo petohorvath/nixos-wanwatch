@@ -11,7 +11,7 @@ package health
 // a row, and back to false only after `consecutiveDown` unhealthy
 // ones. The first observation is special: per docs/specs/failover.md the cold-start
 // handoff seeds the verdict straight from the measured Health (see
-// seed), so a (WAN, family) need not climb the up-ramp from scratch
+// seed), so a (WAN, Family) need not climb the up-ramp from scratch
 // when its first probe Window lands healthy.
 //
 // Not safe for concurrent use; Wans runs it on the caller's
@@ -66,7 +66,7 @@ func (h *hysteresis) observe(observedHealthy bool) bool {
 // seed initializes the verdict directly from the first observed
 // Health, bypassing the consecutive-cycle ramp — the docs/specs/failover.md
 // cold-start handoff. Until its first probe Window completes a
-// (WAN, family) is trusted via carrier alone; when that Window
+// (WAN, Family) is trusted via carrier alone; when that Window
 // lands, climbing to the measured Health over `consecutiveUp`
 // cycles would spuriously flap a healthy WAN down→up during
 // warm-up, so the verdict adopts it immediately. Counters are

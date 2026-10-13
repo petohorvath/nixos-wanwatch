@@ -337,10 +337,9 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 		Groups:    make(map[string]state.Group, len(d.groups)),
 	}
 	for name, wan := range d.health.Snapshot() {
-		iface := d.cfg.Wans[name].Interface
 		wan.Gateways = state.Gateways{
-			V4: d.gateways.string(iface, rtnl.RouteFamilyV4),
-			V6: d.gateways.string(iface, rtnl.RouteFamilyV6),
+			V4: d.gateways.string(wan.Interface, rtnl.RouteFamilyV4),
+			V6: d.gateways.string(wan.Interface, rtnl.RouteFamilyV6),
 		}
 		snap.Wans[name] = wan
 	}

@@ -12,6 +12,7 @@ No version has been released yet. This section describes the first release as it
 - Gateway discovery now subscribes to route changes before taking its initial snapshot. Default routes installed during daemon startup are retained, preventing a missed Gateway from indefinitely deferring a Group route write. Buffered and subsequent notifications trigger current-route reads, so obsolete additions/deletions cannot regress a newer Gateway in State or a Group's route table.
 - Link monitoring now subscribes to link changes before taking its initial snapshot. A carrier change during daemon startup is no longer missed, which could leave a WAN that had come up reported as down and unselectable until its next transition. Buffered and subsequent notifications trigger current-link reads, so stale history cannot flap a Selection at startup. A carrier flap that ends before its read is coalesced: it emits no LinkEvent and does not increment `wanwatch_wan_carrier_changes_total`.
 - `wanwatch_wan_healthy` now follows WAN Health after every probe result and link event. It previously updated only when a Family's Health flipped, so after a carrier loss it kept reporting a WAN as healthy while `state.json` said unhealthy, and before the first full Window it was never set even when carrier alone made the WAN healthy. WAN Health now lives in one daemon module, `internal/health`, which owns its rules and gauges.
+- The `WANWATCH_FAMILIES` Hook variable now lists Families in a fixed order, `v4` first, instead of an arbitrary one.
 
 ### Changed
 

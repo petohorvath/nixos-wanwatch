@@ -121,7 +121,7 @@ When the Window fills (`FamilyStats.WindowFilled`), `hysteresis.seed` adopts the
 
 ### Carrier fast-track
 
-Carrier loss makes `carrierUp()` false, and `Wans.MemberHealth` ANDs it into `Healthy`, so the Member becomes unhealthy without waiting for Probe timeouts. Carrier recovery reverses the path and the Selection re-evaluates.
+Carrier loss makes `carrierUp()` false, and WAN Health ANDs it with the Family verdicts, so `Wans.MemberHealth` reports the Member unhealthy without waiting for Probe timeouts. Carrier recovery reverses the path and the Selection re-evaluates.
 
 ## Determinism
 
