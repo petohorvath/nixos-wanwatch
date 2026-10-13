@@ -3,7 +3,8 @@
 Scenarios prepend `observation.py` to their `testScript` and construct
 `Observation(router, curl="${pkgs.curl}/bin/curl")`. This keeps the shared code
 inside the NixOS driver's Python lint and type checks on the locked nixpkgs and
-on nixos-unstable, which CI substitutes with `--override-input nixpkgs`.
+on the project policy's stable and unstable pins, which CI substitutes with
+`--override-input nixpkgs`.
 The observer accepts the existing machine directly. Topology, network readiness,
 fault injection, Hook assertions, and Telegraf output checks stay in scenarios.
 

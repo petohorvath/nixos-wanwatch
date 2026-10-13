@@ -4,9 +4,9 @@
   inputs = {
     /*
       The stable release branch, the only nixpkgs input. The other
-      inputs follow it so their `lib` outputs match. CI runs the `vm-*`
-      checks against nixos-unstable by overriding this input
-      (ADR-0012).
+      inputs follow it so their `lib` outputs match. CI also runs the
+      checks with the project policy's stable and unstable pins by
+      overriding this input (ADR-0012, ADR-0013).
     */
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
@@ -21,12 +21,20 @@
       `--override-input libnet path:/absolute/path/to/nix-libnet`;
       relative paths resolve inside the store copy of this flake.
     */
-    libnet.url = "github:petohorvath/nix-libnet";
-    libnet.inputs.nixpkgs.follows = "nixpkgs";
+    libnet = {
+      url = "github:petohorvath/nix-libnet/v0.1.0";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-parts.follows = "flake-parts";
+      };
+    };
 
-    # Used only by the nftzones-integration VM scenario.
+    /*
+      Used only by the nftzones-integration VM scenario. Pinned by
+      commit until nixos-nftzones publishes a release tag.
+    */
     nftzones = {
-      url = "github:petohorvath/nix-nftzones";
+      url = "github:petohorvath/nixos-nftzones?rev=dc5d2eff8877865de79c7577c2255191636090b6";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         libnet.follows = "libnet";

@@ -4,7 +4,7 @@ The flake has one nixpkgs input, `nixpkgs`, pinned to the stable `nixos-26.05` b
 
 ## Considered options
 
-- **Pinned unstable revision in `ci.yml`.** This makes runs repeatable, but someone has to update the revision by hand, which is the work this change removes. The override floats instead. Upstream drift can therefore fail the unstable VM job without a change in this repository. On pull requests, the job is `continue-on-error` and must not be a required check, so drift cannot block a merge. On `main` and on a weekly schedule, a failure turns the run red.
+- **Pinned unstable revision in `ci.yml`.** This makes runs repeatable, but someone has to update the revision by hand, which is the work this change removes. The override floats instead. Upstream drift can therefore fail the unstable VM job without a change in this repository. On pull requests, the job is `continue-on-error` and must not be a required check, so drift cannot block a merge. On `main` and on a weekly schedule, a failure turns the run red. [ADR-0013](./0013-adopt-project-policy.md) later replaced the floating revision with the unstable pin of the shared project policy.
 
 ## Consequences
 

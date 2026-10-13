@@ -71,7 +71,7 @@ Multi-WAN monitoring and failover for NixOS. Probes WAN interfaces, decides whic
 ## Composition with sibling projects
 
 - **[`nix-libnet`](../nix-libnet)** — IP / CIDR / interface-name validators used throughout the lib.
-- **[`nix-nftzones`](../nix-nftzones)** — zone-based nftables firewall. References `services.wanwatch.marks.<group>` in `sroute` rules to direct traffic to the active member.
+- **[`nixos-nftzones`](../nixos-nftzones)** — zone-based nftables firewall. References `services.wanwatch.marks.<group>` in `sroute` rules to direct traffic to the active member.
 
 ## Commands
 
