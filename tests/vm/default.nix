@@ -4,7 +4,7 @@
   receives the wanwatch module plus the extra modules and libraries it
   takes.
 
-  `nftzones`: the nix-nftzones flake, for the nftzones-integration
+  `nftzones`: the nixos-nftzones flake, for the nftzones-integration
   scenario.
   `nixosModules`: the flake's NixOS modules.
   `pkgs`: the package set the VMs build against.

@@ -1,6 +1,6 @@
 # nftzones integration
 
-`nixos-wanwatch` and `nix-nftzones` compose through two published Nix values and a runtime convention. nftzones needs no changes: the contract is on the wanwatch side, and any nftables or iptables configuration can use it. See [ADR 0007](./adr/0007-nftzones-integration-via-published-values.md).
+`nixos-wanwatch` and `nixos-nftzones` compose through two published Nix values and a runtime convention. nftzones needs no changes: the contract is on the wanwatch side, and any nftables or iptables configuration can use it. See [ADR 0007](./adr/0007-nftzones-integration-via-published-values.md).
 
 ## Contract
 

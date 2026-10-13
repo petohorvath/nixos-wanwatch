@@ -46,20 +46,24 @@
     },
     "nftypes": {
       "inputs": {
+        "flake-parts": [
+          "flake-parts"
+        ],
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1778155077,
-        "narHash": "sha256-2N7V3u60WXYr+66PuNziUrbCifikHgaqBhyq3OTH+vk=",
+        "lastModified": 1791910068,
+        "narHash": "sha256-+dTnuYJR/vB2b0TgLV3L0Ne1wIz2wdF42WRl+tCFoAE=",
         "owner": "petohorvath",
         "repo": "nix-nftypes",
-        "rev": "1fd7ab9619473fc4fb3dce0bbc94b0fc62a3ca0d",
+        "rev": "f65b79b86e9be45e30faa34ca26d2dfbda571ffe",
         "type": "github"
       },
       "original": {
         "owner": "petohorvath",
+        "ref": "v0.1.0",
         "repo": "nix-nftypes",
         "type": "github"
       }

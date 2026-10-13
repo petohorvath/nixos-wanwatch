@@ -29,17 +29,18 @@
       };
     };
 
-    /*
-      Used only by the nftzones-integration VM scenario. Pinned by
-      commit until nixos-nftzones publishes a release tag.
-    */
+    # Used only by the nftzones-integration VM scenario. Pinned by
+    # commit until nixos-nftzones publishes a release tag.
     nftzones = {
       url = "github:petohorvath/nixos-nftzones?rev=dc5d2eff8877865de79c7577c2255191636090b6";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         libnet.follows = "libnet";
-        nftypes.url = "github:petohorvath/nix-nftypes";
-        nftypes.inputs.nixpkgs.follows = "nixpkgs";
+        nftypes.url = "github:petohorvath/nix-nftypes/v0.1.0";
+        nftypes.inputs = {
+          nixpkgs.follows = "nixpkgs";
+          flake-parts.follows = "flake-parts";
+        };
       };
     };
 
