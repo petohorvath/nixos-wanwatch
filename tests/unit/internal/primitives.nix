@@ -112,7 +112,7 @@ in
       expected = [ ];
     };
 
-    testInvalidNamesField = {
+    testInvalidMessageNamesField = {
       expr = primitives.checkIdentifier "kind" "wan" "1bad";
       expected = [
         (lib.nameValuePair "kind" "wan must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got \"1bad\"")

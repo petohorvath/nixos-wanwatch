@@ -59,28 +59,20 @@ let
     "any"
   ];
 
-  # The fields `tryMake` reads from its input and from each nested
-  # attrset; any other field is reported as `probeUnknownField`.
-  knownFields = {
-    probe = [
-      "method"
-      "targets"
-      "intervalMs"
-      "timeoutMs"
-      "windowSize"
-      "thresholds"
-      "hysteresis"
-      "familyHealthPolicy"
-    ];
-    targets = [
-      "v4"
-      "v6"
-    ];
-    thresholds = builtins.attrNames defaults.thresholds;
-    hysteresis = builtins.attrNames defaults.hysteresis;
-  };
+  knownFields = [
+    "method"
+    "targets"
+    "intervalMs"
+    "timeoutMs"
+    "windowSize"
+    "thresholds"
+    "hysteresis"
+    "familyHealthPolicy"
+  ];
 
-  checkFields = name: checkUnknownFields "probeUnknownField" name knownFields.${name};
+  # The nested `targets`, `thresholds`, and `hysteresis` attrsets also
+  # report unknown fields as `probeUnknownField`.
+  checkUnknownProbeFields = checkUnknownFields "probeUnknownField";
 
   isPercentage = value: builtins.isInt value && value >= 0 && value <= 100;
 
@@ -121,7 +113,7 @@ let
         v6 = targets.v6 or [ ];
         hasTargets = !(builtins.isList v4 && builtins.isList v6 && v4 == [ ] && v6 == [ ]);
       in
-      checkFields "targets" targets
+      checkUnknownProbeFields "targets" [ "v4" "v6" ] targets
       ++ check "probeNoTargets" hasTargets "at least one of targets.v4 or targets.v6 must be non-empty"
       ++ validateTargetFamily "v4" libnet.ip.isIpv4 v4
       ++ validateTargetFamily "v6" libnet.ip.isIpv6 v6;
@@ -180,7 +172,7 @@ let
     if !(builtins.isAttrs thresholds) then
       check "probeInvalidThresholds" false "thresholds must be an attrset"
     else
-      checkFields "thresholds" thresholds
+      checkUnknownProbeFields "thresholds" (builtins.attrNames defaults.thresholds) thresholds
       ++ validateLossThresholds thresholds
       ++ validateRttThresholds thresholds;
 
@@ -193,7 +185,7 @@ let
     if !(builtins.isAttrs hysteresis) then
       check "probeInvalidHysteresis" false "hysteresis must be an attrset"
     else
-      checkFields "hysteresis" hysteresis
+      checkUnknownProbeFields "hysteresis" (builtins.attrNames defaults.hysteresis) hysteresis
       ++
         check "probeNonPositiveHysteresis" (isPositiveInt down)
           "hysteresis.consecutiveDown must be a positive integer; got ${builtins.toJSON down}"
@@ -237,7 +229,7 @@ let
 
   collectErrors =
     input: fields:
-    checkFields "probe" input
+    checkUnknownProbeFields "probe" knownFields input
     ++ validateMethod fields.method
     ++ validateTargets fields.targets
     ++ validateInterval fields.intervalMs
@@ -258,7 +250,7 @@ let
     Returns a `tryResult` whose value is the probe value, with each
     target parsed into a libnet IP value. Error kinds:
 
-      probeUnknownField              — a field outside the probe fields,
+      probeUnknownField              — a field outside the Probe fields,
                                        or in `targets`, `thresholds`,
                                        or `hysteresis`
       probeNoTargets                 — `targets.v4` and `targets.v6` empty
