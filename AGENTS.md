@@ -8,7 +8,7 @@ Contributor instructions for people and automated agents working in this reposit
 
 It has three layers, with dependencies pointing bottom-up only:
 
-- `lib/`: a pure-Nix library of validated WAN, Probe, Member, and Group values, option types, the selector mirror, and daemon-config rendering. It never depends on the module or the daemon.
+- `lib/`: a pure-Nix library of validated WAN, Probe, Member, Group, and global-settings values, option types, the selector mirror, and daemon-config rendering. It never depends on the module or the daemon.
 - `nixos/`: the thin `services.wanwatch` NixOS module and the optional Telegraf integration.
 - `daemon/`: the Linux-only Go `wanwatchd`, packaged by `packages/wanwatchd/package.nix`. Its packages under `daemon/internal/` stay private, and `daemon/vendor/` is vendored code that is never edited or reformatted by hand.
 

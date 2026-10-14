@@ -1,7 +1,7 @@
 /*
   Tests for `lib/internal/config.nix`, the daemon-config renderer:
-  cross-Group mark and table checks, the rendered shape, and the JSON
-  string form.
+  global-settings validation, cross-Group mark and table checks, the
+  rendered shape, and the JSON string form.
 */
 {
   fixtures,
@@ -39,7 +39,7 @@ let
   };
 
   renderInput = {
-    global = global.make { logLevel = "warn"; };
+    global.logLevel = "warn";
     inherit wans;
     groups = distinctGroups;
   };
@@ -137,9 +137,25 @@ in
       };
     };
 
-    testSerializesGlobal = {
+    testFillsGlobalDefaults = {
+      expr = (config.render { global.logLevel = "debug"; }).global;
+      expected = global.defaults // {
+        logLevel = "debug";
+      };
+    };
+
+    # A global value is also valid input.
+    testSerializesGlobalValue = {
       expr = (config.render { global = global.make fixtures.inputs.global.full; }).global;
       expected = fixtures.inputs.global.full;
+    };
+
+    testRejectsInvalidGlobal = {
+      expr = config.render { global.logLevel = "verbose"; };
+      expectedError = {
+        type = "ThrownError";
+        msg = "global.make: \\[globalInvalidLogLevel]";
+      };
     };
 
     testSerializesWansAndGroups = {

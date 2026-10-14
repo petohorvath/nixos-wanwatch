@@ -25,7 +25,7 @@ The flake exposes these outputs:
 | `nixosModules.default`, also `nixosModules.wanwatch` | The `services.wanwatch` module: options, rendered daemon config, a `wanwatch` system user, and a hardened systemd service |
 | `nixosModules.telegraf` | Optional `services.wanwatch.telegraf` module that scrapes the daemon's metrics with Telegraf |
 | `packages.<system>.wanwatchd`, also `packages.<system>.default` | The Go daemon, built for Linux systems only |
-| `lib` | The pure-Nix library behind the module: validated WAN, Probe, Member, and Group values, option types, and the config renderer |
+| `lib` | The pure-Nix library behind the module: validated WAN, Probe, Member, Group, and global-settings values, option types, and the config renderer |
 
 The sources live in [`nixos/`](./nixos/), [`daemon/`](./daemon/), and [`lib/`](./lib/); [`docs/architecture.md`](./docs/architecture.md) describes how the layers fit together.
 

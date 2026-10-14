@@ -1,7 +1,7 @@
 /*
-  Daemon-config renderer, exposed as `wanwatch.config`. Combines a
-  global value and WAN and Group values into the JSON document the
-  daemon reads at startup (`docs/specs/daemon-config.md`):
+  Daemon-config renderer, exposed as `wanwatch.config`. Combines global
+  settings with WAN and Group values into the JSON document the daemon
+  reads at startup (`docs/specs/daemon-config.md`):
 
     {
       "schema": 1,
@@ -10,8 +10,9 @@
       "groups": { "<name>": <group.toJSONValue>, ... }
     }
 
-  Rendering also rejects Groups that share a mark or a table, because
-  their traffic would be routed through the wrong table.
+  Rendering also validates the global settings with `global.make` and
+  rejects Groups that share a mark or a table, because their traffic
+  would be routed through the wrong table.
 */
 {
   lib,
@@ -61,24 +62,25 @@ let
   /*
     Render the daemon configuration.
 
-    `global`: a global value from `global.make`; default
-    `global.make { }`.
+    `global`: an input for `global.make`, such as a global value;
+    default `{ }`. Unset fields take `global.defaults`.
     `wans`: an attrset of WAN values from `wan.make`; default `{ }`.
     `groups`: an attrset of group values from `group.make`; default
     `{ }`.
 
-    Returns the JSON-shaped attrset. Throws when Groups share a mark or
-    a table.
+    Returns the JSON-shaped attrset. Throws the `global.make` error when
+    the global settings are invalid, and throws when Groups share a mark
+    or a table.
   */
   render =
     {
-      global ? internal.global.make { },
+      global ? { },
       wans ? { },
       groups ? { },
     }:
     {
       schema = schemaVersion;
-      global = internal.global.toJSONValue global;
+      global = internal.global.toJSONValue (internal.global.make global);
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
       groups = builtins.mapAttrs (_: group.toJSONValue) (assertUniqueMarksAndTables groups);
     };

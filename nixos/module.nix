@@ -41,14 +41,13 @@ let
 
   # The renderer takes value-type values, and `make` also applies the
   # cross-field checks that option types cannot express.
-  globalValue = wanwatch.global.make cfg.global;
   wanValues = lib.mapAttrs (_: wanwatch.wan.make) cfg.wans;
   groupValues = lib.mapAttrs (_: wanwatch.group.make) cfg.groups;
 
   validatedGroups = wanwatch.config.assertUniqueMarksAndTables groupValues;
 
   renderedConfig = wanwatch.config.toJSON {
-    global = globalValue;
+    inherit (cfg) global;
     wans = wanValues;
     groups = groupValues;
   };
@@ -86,7 +85,7 @@ in
       type = wanwatch.types.global;
       default = { };
       description = ''
-        Global daemon settings: paths, log level, and hook timeout.
+        Global daemon settings: paths, log level, and Hook timeout.
         Each field defaults to `wanwatch.global.defaults`.
       '';
     };

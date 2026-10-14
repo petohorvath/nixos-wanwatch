@@ -33,8 +33,8 @@ let
         type = types.nonEmptyStr;
         default = defaults.hooksDir;
         description = ''
-          Root of the hook-script tree. On every Decision the daemon
-          runs the scripts in `<hooksDir>/{up,down,switch}.d/`
+          Root of the Hook tree. On every Decision the daemon runs the
+          Hooks in `<hooksDir>/{up,down,switch}.d/`
           (docs/specs/daemon-state.md).
         '';
       };
@@ -59,8 +59,8 @@ let
         type = primitives.positiveInt;
         default = defaults.hookTimeoutMs;
         description = ''
-          Deadline in milliseconds for each script under `hooksDir`.
-          When it expires, the daemon sends SIGKILL to the hook's
+          Deadline in milliseconds for each Hook under `hooksDir`.
+          When it expires, the daemon sends SIGKILL to the Hook's
           process group and reports a timeout.
         '';
       };

@@ -76,8 +76,11 @@ let
 
   /*
     Validate global settings without throwing, reporting every
-    violation in one message. The checks mirror the daemon's, so a bad
-    setting fails evaluation instead of the service start.
+    violation in one message. The checks cover everything the daemon
+    rejects in `global`, so a bad setting fails evaluation instead of
+    the service start. They are stricter on paths, which must contain
+    a character other than whitespace, as `lib.types.nonEmptyStr`
+    requires.
 
     `input`: an attrset with any subset of the global fields; missing
     fields take `defaults`.
