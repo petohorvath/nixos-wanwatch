@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -231,20 +232,23 @@ func TestSchemaVersionConstantStable(t *testing.T) {
 	}
 }
 
+// TestWriteEmitsPerWanGateways checks the gateways block as the file
+// encodes it: an absent Gateway is null, never "".
 func TestWriteEmitsPerWanGateways(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
 
+	v4, v6 := "192.0.2.1", "2001:db8::1"
 	s := State{
 		Wans: map[string]Wan{
 			"primary": {
 				Interface: "eth0",
-				Gateways:  Gateways{V4: "192.0.2.1", V6: "2001:db8::1"},
+				Gateways:  Gateways{V4: &v4, V6: &v6},
 			},
 			"ptp": {
 				Interface: "wg0",
-				// Scope-link / point-to-point: both empty.
+				// Scope-link / point-to-point: no next-hop in either Family.
 				Gateways: Gateways{},
 			},
 		},
@@ -254,19 +258,26 @@ func TestWriteEmitsPerWanGateways(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	data, _ := os.ReadFile(path)
-	var out State
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var out struct {
+		Wans map[string]struct {
+			Gateways map[string]any `json:"gateways"`
+		} `json:"wans"`
+	}
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if got := out.Wans["primary"].Gateways.V4; got != "192.0.2.1" {
-		t.Errorf("primary.gateways.v4 = %q, want 192.0.2.1", got)
+	want := map[string]map[string]any{
+		"primary": {"v4": "192.0.2.1", "v6": "2001:db8::1"},
+		"ptp":     {"v4": nil, "v6": nil},
 	}
-	if got := out.Wans["primary"].Gateways.V6; got != "2001:db8::1" {
-		t.Errorf("primary.gateways.v6 = %q, want 2001:db8::1", got)
-	}
-	if got := out.Wans["ptp"].Gateways.V4; got != "" {
-		t.Errorf("ptp.gateways.v4 = %q, want empty", got)
+	for name, gateways := range want {
+		if got := out.Wans[name].Gateways; !reflect.DeepEqual(got, gateways) {
+			t.Errorf("%s.gateways = %#v, want %#v", name, got, gateways)
+		}
 	}
 }
 
@@ -320,7 +331,7 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
-	active := "primary"
+	active, gatewayV4 := "primary", "192.0.2.1"
 	s := State{
 		Wans: map[string]Wan{
 			"primary": {
@@ -328,7 +339,8 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 				Carrier:   "up",
 				Operstate: "up",
 				Healthy:   true,
-				Gateways:  Gateways{V4: "192.0.2.1", V6: "2001:db8::1"},
+				// A v4-only WAN has no v6 Gateway.
+				Gateways: Gateways{V4: &gatewayV4},
 				Families: map[string]FamilyHealth{
 					"v4": {
 						Healthy:       true,

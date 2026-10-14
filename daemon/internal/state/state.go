@@ -47,14 +47,14 @@ type Wan struct {
 // Gateways is the per-WAN snapshot of the kernel's main-table
 // default-route next-hops, one per family.
 //
-// Empty string for a family means either (a) the daemon has not
+// nil (JSON null) for a family means either (a) the daemon has not
 // yet observed a default route on that interface, or (b) the
 // route is scope-link (point-to-point) and has no next-hop IP.
 // Consumers needing to distinguish the two should consult the
 // WAN's `pointToPoint` configuration.
 type Gateways struct {
-	V4 string `json:"v4"`
-	V6 string `json:"v6"`
+	V4 *string `json:"v4"`
+	V6 *string `json:"v6"`
 }
 
 // FamilyHealth is the per-(WAN, family) probe-summary slice

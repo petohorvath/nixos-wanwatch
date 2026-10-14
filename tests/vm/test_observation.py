@@ -141,7 +141,7 @@ class ObservationTests(unittest.TestCase):
                 observe, machine = self.make_observation(
                     {
                         STATE: [
-                            snapshot(wans={"uplink": {"gateways": {family: ""}}}),
+                            snapshot(wans={"uplink": {"gateways": {family: None}}}),
                             snapshot(wans={"uplink": {"gateways": {family: gateway}}}),
                         ]
                     }
@@ -364,7 +364,7 @@ class ObservationTests(unittest.TestCase):
             with self.subTest(low=low, high=high), self.assertRaises(ValueError):
                 observe.wait_probe_loss("primary", "v4", low, high)
         with self.assertRaises(KeyError):
-            observe.wait_gateway("primary", "v5", "")
+            observe.wait_gateway("primary", "v5", None)
         self.assertEqual(machine.calls, [])
 
 

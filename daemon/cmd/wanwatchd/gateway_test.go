@@ -75,20 +75,36 @@ func TestGatewayCacheClear(t *testing.T) {
 	}
 }
 
-func TestGatewayCacheStringFormats(t *testing.T) {
+// TestGatewayCacheFormats covers both encodings of an absent
+// Gateway: nil for State, "" for Hook env vars.
+func TestGatewayCacheFormats(t *testing.T) {
 	t.Parallel()
 	c := newGatewayCache()
 	c.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 	c.set("wg0", rtnl.RouteFamilyV4, nil) // scope-link
 
-	if got := c.string("eth0", rtnl.RouteFamilyV4); got != "192.0.2.1" {
-		t.Errorf("String(eth0/v4) = %q, want 192.0.2.1", got)
+	tests := []struct {
+		name, iface, want string
+		absent            bool
+	}{
+		{name: "next-hop", iface: "eth0", want: "192.0.2.1"},
+		{name: "scope-link", iface: "wg0", absent: true},
+		{name: "missing", iface: "missing", absent: true},
 	}
-	if got := c.string("wg0", rtnl.RouteFamilyV4); got != "" {
-		t.Errorf("String(wg0/v4 scope-link) = %q, want empty", got)
-	}
-	if got := c.string("missing", rtnl.RouteFamilyV4); got != "" {
-		t.Errorf("String(missing) = %q, want empty", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := c.string(tt.iface, rtnl.RouteFamilyV4); got != tt.want {
+				t.Errorf("string(%s/v4) = %q, want %q", tt.iface, got, tt.want)
+			}
+			got := c.address(tt.iface, rtnl.RouteFamilyV4)
+			switch {
+			case tt.absent && got != nil:
+				t.Errorf("address(%s/v4) = %q, want nil", tt.iface, *got)
+			case !tt.absent && (got == nil || *got != tt.want):
+				t.Errorf("address(%s/v4) = %v, want %q", tt.iface, got, tt.want)
+			}
+		})
 	}
 }
 

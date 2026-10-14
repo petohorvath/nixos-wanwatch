@@ -50,14 +50,24 @@ func (c *gatewayCache) get(iface string, fam rtnl.RouteFamily) (net.IP, bool) {
 	return gw, ok
 }
 
-// string returns the gateway as a canonical string
-// (`"192.0.2.1"`, `"2001:db8::1"`) or `""` when the cache has no
-// entry or holds a scope-link (nil) entry. The empty-string
-// collapse matches the JSON state-file and hook env-var contracts.
-func (c *gatewayCache) string(iface string, fam rtnl.RouteFamily) string {
+// address returns the gateway as a canonical string
+// (`"192.0.2.1"`, `"2001:db8::1"`), or nil when the cache has no
+// entry or holds a scope-link (nil) entry. The nil collapse
+// matches the state-file contract, where an absent Gateway is null.
+func (c *gatewayCache) address(iface string, fam rtnl.RouteFamily) *string {
 	gw, ok := c.entries[gwKey{Iface: iface, Family: fam}]
 	if !ok || gw == nil {
-		return ""
+		return nil
 	}
-	return gw.String()
+	s := gw.String()
+	return &s
+}
+
+// string is address with an absent gateway as `""`, matching the
+// hook env-var contract, where every variable is a string.
+func (c *gatewayCache) string(iface string, fam rtnl.RouteFamily) string {
+	if gw := c.address(iface, fam); gw != nil {
+		return *gw
+	}
+	return ""
 }

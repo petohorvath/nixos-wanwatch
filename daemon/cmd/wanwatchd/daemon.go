@@ -338,8 +338,8 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 	}
 	for name, wan := range d.health.Snapshot() {
 		wan.Gateways = state.Gateways{
-			V4: d.gateways.string(wan.Interface, rtnl.RouteFamilyV4),
-			V6: d.gateways.string(wan.Interface, rtnl.RouteFamilyV6),
+			V4: d.gateways.address(wan.Interface, rtnl.RouteFamilyV4),
+			V6: d.gateways.address(wan.Interface, rtnl.RouteFamilyV6),
 		}
 		snap.Wans[name] = wan
 	}

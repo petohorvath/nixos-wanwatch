@@ -143,7 +143,7 @@ A missing Gateway is a soft skip: a commit can leave that Family's existing rout
 
 A WAN's Families come from the IP literals in `probe.targets`: IPv4 literals make it serve `v4`, IPv6 literals make it serve `v6`. Each Family's Health is computed independently and combined into WAN Health under `probe.familyHealthPolicy` (`all` or `any`).
 
-Gateways are never declared by the operator. `internal/rtnl` discovers each (WAN, Family) default-route next-hop from the kernel's main routing table. The Gateway is empty until a default route exists on the WAN's interface. See [ADR 0004](./adr/0004-runtime-gateway-discovery.md).
+Gateways are never declared by the operator. `internal/rtnl` discovers each (WAN, Family) default-route next-hop from the kernel's main routing table. The Gateway stays unknown, `null` in `state.json`, until a default route exists on the WAN's interface. See [ADR 0004](./adr/0004-runtime-gateway-discovery.md).
 
 Interfaces without a broadcast next-hop (PPP, WireGuard, GRE, tun) set `pointToPoint = true`. The daemon then installs a `scope link` default route out of the interface and needs no Gateway.
 

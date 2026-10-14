@@ -70,8 +70,11 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 	if !wan.Healthy {
 		t.Error("Wans[primary].Healthy = false, want true")
 	}
-	if wan.Gateways.V4 != "192.0.2.1" {
-		t.Errorf("Wans[primary].Gateways.V4 = %q, want 192.0.2.1", wan.Gateways.V4)
+	if gw := wan.Gateways.V4; gw == nil || *gw != "192.0.2.1" {
+		t.Errorf("Wans[primary].Gateways.V4 = %v, want 192.0.2.1", gw)
+	}
+	if gw := wan.Gateways.V6; gw != nil {
+		t.Errorf("Wans[primary].Gateways.V6 = %q, want nil (no v6 default route)", *gw)
 	}
 	fh, ok := wan.Families["v4"]
 	if !ok {
