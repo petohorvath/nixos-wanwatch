@@ -61,7 +61,7 @@ func TestEventLoopRoutesProbeResultToDaemon(t *testing.T) {
 	cancel()
 	<-done
 
-	if got := d.wans["primary"].families[probe.FamilyV4].stats.LossRatio; got != 0.5 {
+	if got := d.health.Snapshot()["primary"].Families["v4"].LossRatio; got != 0.5 {
 		t.Errorf("primary v4 LossRatio = %v, want 0.5", got)
 	}
 }
@@ -89,8 +89,8 @@ func TestEventLoopRoutesLinkEventToDaemon(t *testing.T) {
 	cancel()
 	<-done
 
-	if d.wans["primary"].carrier != rtnl.CarrierUp {
-		t.Errorf("primary carrier = %v, want up", d.wans["primary"].carrier)
+	if got := d.health.Snapshot()["primary"].Carrier; got != "up" {
+		t.Errorf("primary carrier = %q, want up", got)
 	}
 }
 

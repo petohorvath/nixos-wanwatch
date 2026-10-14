@@ -11,6 +11,7 @@ No version has been released yet. This section describes the first release as it
 - Specs now match the daemon's behavior: `failover.md` describes the full-Window cold-start gate and recovery latency, `daemon-state.md` the caller-supplied `updatedAt` and Hooks published while a Family awaits its Gateway, `daemon-config.md` the current Probe defaults, the Nix-side `global` defaults, and the daemon's full validation, and `probe-algorithm.md` the kernel-computed ICMPv6 checksum on raw sockets. No contract changed.
 - Gateway discovery now subscribes to route changes before taking its initial snapshot. Default routes installed during daemon startup are retained, preventing a missed Gateway from indefinitely deferring a Group route write. Buffered and subsequent notifications trigger current-route reads, so obsolete additions/deletions cannot regress a newer Gateway in State or a Group's route table.
 - Link monitoring now subscribes to link changes before taking its initial snapshot. A carrier change during daemon startup is no longer missed, which could leave a WAN that had come up reported as down and unselectable until its next transition. Buffered and subsequent notifications trigger current-link reads, so stale history cannot flap a Selection at startup. A carrier flap that ends before its read is coalesced: it emits no LinkEvent and does not increment `wanwatch_wan_carrier_changes_total`.
+- `wanwatch_wan_healthy` now follows WAN Health after every probe result and link event. It previously updated only when a Family's Health flipped, so after a carrier loss it kept reporting a WAN as healthy while `state.json` said unhealthy, and before the first full Window it was never set even when carrier alone made the WAN healthy.
 
 ### Changed
 
@@ -99,7 +100,8 @@ No version has been released yet. This section describes the first release as it
 - `state.Writer` now serializes `Write` calls with a `sync.Mutex` (was "serialize at the caller" documentation).
 - `state.Writer.Write` preserves a non-zero caller-supplied `UpdatedAt` (was: always overwritten with `time.Now().UTC()`).
 - `daemon/cmd/wanwatchd.gatewayCache` and its `set` / `clear` / `get` / `string` methods are unexported — `package main` has no external consumers, so the capitalized names were promising a public surface that didn't exist.
-- `probe.NewWindow` returns an error instead of panicking; `selector.NewHysteresisState(up, down)` takes thresholds at construction rather than per-call.
+- `probe.NewWindow` returns an error instead of panicking; Hysteresis takes its thresholds at construction rather than per-call.
+- WAN Health lives in one daemon module, `internal/health`: thresholds, Hysteresis (moved from `internal/selector`), the cold-start gate, the Family policy, carrier and operstate, and their gauges. The daemon forwards ProbeResults and LinkEvents to it and acts on the returned Change.
 - `cmd/wanwatchd` file shuffle: the file holding the `daemon` struct is now `daemon.go` (was `state.go`), the subscriber wiring is `subscribers.go` (was `daemon.go`), free helpers extracted to `helpers.go`.
 - `docs/glossary.md` row for `Health` now matches the v1 boolean shape; the four-state spec (`up`/`down`/`degraded`/`unknown`) deferred to v2 — see `TODO.md`.
 - `state.SchemaVersion` pinned at 1 pre-release; the first tagged release freezes shape 1.

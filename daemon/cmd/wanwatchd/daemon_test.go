@@ -21,10 +21,10 @@ import (
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 )
 
-// TestWriteStateSnapshotHappyPath proves the round-trip: the
-// daemon's in-memory state maps to a state.State and survives
-// JSON serialization with the expected schema and per-WAN /
-// per-Group fields.
+// TestWriteStateSnapshotHappyPath proves the round-trip: the WAN
+// Health view, merged with the daemon's Gateway cache, maps to a
+// state.State and survives JSON serialization with the expected
+// schema and per-WAN / per-Group fields.
 func TestWriteStateSnapshotHappyPath(t *testing.T) {
 	t.Parallel()
 	cfg := testCfg()
@@ -37,14 +37,13 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 		},
 	}
 	d := testDaemon(t, cfg)
-	d.wans["primary"].carrier = rtnl.CarrierUp
-	d.wans["primary"].operstate = rtnl.OperstateUp
-	d.wans["primary"].families[probe.FamilyV4].healthy = true
-	d.wans["primary"].families[probe.FamilyV4].stats = probe.FamilyStats{
+	linkUp(d, "primary")
+	// A partial Window: live statistics, Health still carrier-only.
+	d.health.Probe(probe.ProbeResult{Wan: "primary", Family: probe.FamilyV4, Stats: probe.FamilyStats{
 		RTTMicros:    12_500,
 		JitterMicros: 800,
 		LossRatio:    0.05,
-	}
+	}})
 	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 
 	d.writeStateSnapshot(time.Time{})
@@ -86,305 +85,6 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 	}
 }
 
-// TestHandleProbeResultDrivesUnhealthy: a high-loss probe result
-// for a healthy WAN should drive the family verdict to unhealthy
-// once hysteresis settles, and the aggregate WAN.Healthy flips.
-//
-// Uses a 1-cycle hysteresis (consecutiveDown=1) so one bad sample
-// is enough — the slow-default 3-of-3 would need a loop.
-func TestHandleProbeResultDrivesUnhealthy(t *testing.T) {
-	t.Parallel()
-	cfg := testCfg()
-	cfg.Wans["primary"] = config.Wan{
-		Name:      "primary",
-		Interface: "eth0",
-		Probe: config.Probe{
-			Targets: config.Targets{V4: []string{"1.1.1.1"}},
-			Thresholds: config.Thresholds{
-				LossPctUp: 10, LossPctDown: 20,
-				RttMsUp: 100, RttMsDown: 200,
-			},
-			Hysteresis: config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
-		},
-	}
-	d := testDaemon(t, cfg)
-	// markHealthy brings carrier up; with families still uncooked the
-	// WAN starts healthy — the cold-start state we transition out of.
-	markHealthy(d, "primary")
-	if !d.wans["primary"].healthy() {
-		t.Fatalf("precondition: primary not healthy at setup")
-	}
-
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats: probe.FamilyStats{
-			LossRatio: 0.95, RTTMicros: 50_000,
-			WindowFilled: true,
-		},
-	})
-
-	if d.wans["primary"].families[probe.FamilyV4].healthy {
-		t.Error("primary/v4 still healthy after high-loss probe")
-	}
-	if d.wans["primary"].healthy() {
-		t.Error("primary aggregate still healthy after high-loss probe")
-	}
-}
-
-// TestHandleProbeResultSeedsHysteresisNoColdStartFlap: a healthy
-// WAN with consecutiveUp>1 must not flap during warm-up. The first
-// ProbeResult seeds the hysteresis straight from the measured
-// Health (docs/specs/failover.md) instead of ramping up from false — without the
-// seed, a good first probe leaves the hysteresis verdict false
-// until consecutiveUp probes in, briefly dropping a healthy WAN.
-func TestHandleProbeResultSeedsHysteresisNoColdStartFlap(t *testing.T) {
-	t.Parallel()
-	cfg := testCfg()
-	cfg.Wans["primary"] = config.Wan{
-		Name:      "primary",
-		Interface: "eth0",
-		Probe: config.Probe{
-			Targets: config.Targets{V4: []string{"1.1.1.1"}},
-			Thresholds: config.Thresholds{
-				LossPctUp: 10, LossPctDown: 20,
-				RttMsUp: 100, RttMsDown: 200,
-			},
-			// consecutiveUp=3: pre-fix, a single good probe would not
-			// flip the hysteresis healthy — it would ramp from false.
-			Hysteresis: config.Hysteresis{ConsecutiveUp: 3, ConsecutiveDown: 3},
-		},
-	}
-	d := testDaemon(t, cfg)
-	markHealthy(d, "primary")
-
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats: probe.FamilyStats{
-			LossRatio: 0.0, RTTMicros: 10_000,
-			WindowFilled: true,
-		},
-	})
-
-	if !d.wans["primary"].families[probe.FamilyV4].healthy {
-		t.Error("primary/v4 not healthy after a good first probe — hysteresis ramped instead of seeding")
-	}
-	if !d.wans["primary"].healthy() {
-		t.Error("primary aggregate not healthy after a good first probe")
-	}
-}
-
-// TestHandleProbeResultDefersSeedUntilWindowFilled: a partial-window
-// first ProbeResult (the probe loop fires before the route has
-// converged → Lost first sample) must not seed the hysteresis. The
-// family stays uncooked, combineFamilies keeps the WAN healthy via
-// carrier alone (docs/specs/failover.md), and no spurious health Decision fires.
-// Once a full Window lands healthy, the seed fires and the family
-// transitions in one shot — never down→up.
-func TestHandleProbeResultDefersSeedUntilWindowFilled(t *testing.T) {
-	t.Parallel()
-	cfg := testCfg()
-	cfg.Wans["primary"] = config.Wan{
-		Name:      "primary",
-		Interface: "eth0",
-		Probe: config.Probe{
-			Targets: config.Targets{V4: []string{"1.1.1.1"}},
-			Thresholds: config.Thresholds{
-				LossPctUp: 5, LossPctDown: 25,
-				RttMsUp: 4000, RttMsDown: 5000,
-			},
-			// consecutiveUp/Down=2 mirrors the cold-start scenario;
-			// a pre-fix ramp would dip the WAN for one cycle before
-			// recovering, generating a down+up Decision pair.
-			Hysteresis: config.Hysteresis{ConsecutiveUp: 2, ConsecutiveDown: 2},
-		},
-	}
-	d := testDaemon(t, cfg)
-	markHealthy(d, "primary")
-
-	// Partial-window Lost first sample (route hasn't converged).
-	// Without the gate, hysteresis would Seed unhealthy here.
-	partialStats := probe.FamilyStats{
-		LossRatio: 1.0,
-		RTTMicros: 0,
-		// WindowFilled deliberately omitted (zero == false).
-	}
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats:  partialStats,
-	})
-	fs := d.wans["primary"].families[probe.FamilyV4]
-	if fs.cooked {
-		t.Error("cooked = true after a partial-window Sample; want deferred")
-	}
-	if !d.wans["primary"].healthy() {
-		t.Error("aggregate flipped unhealthy on a partial-window Lost sample; want carrier-only-healthy")
-	}
-	// Live stats absorbed even in the deferred branch — operators
-	// rely on Prometheus showing real RTT/loss before hysteresis
-	// has cooked, so fs.stats and the per-family probe metrics
-	// must reflect the ProbeResult either way.
-	if fs.stats.LossRatio != partialStats.LossRatio {
-		t.Errorf("fs.stats.LossRatio = %v after partial probe, want %v (live stats not absorbed)",
-			fs.stats.LossRatio, partialStats.LossRatio)
-	}
-	if v := readGauge(t, d.metrics.ProbeLoss.WithLabelValues("primary", "v4")); v != partialStats.LossRatio {
-		t.Errorf("wanwatch_probe_loss_ratio = %v after partial probe, want %v",
-			v, partialStats.LossRatio)
-	}
-
-	// First full Window now lands healthy. Seed adopts it.
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats: probe.FamilyStats{
-			LossRatio: 0.0, RTTMicros: 10_000,
-			WindowFilled: true,
-		},
-	})
-	if !d.wans["primary"].families[probe.FamilyV4].cooked {
-		t.Error("cooked = false after a full-Window seed")
-	}
-	if !d.wans["primary"].families[probe.FamilyV4].healthy {
-		t.Error("family not healthy after a healthy full-Window seed — Seed didn't fire on first filled Window")
-	}
-}
-
-// TestColdStartCookHealthyDoesNotBumpDecisions: docs/specs/failover.md cold-start
-// requires hysteresis to seed from the first healthy probe Window
-// rather than ramp up from false, so a WAN that's already healthy
-// via carrier-only never flaps during warm-up. recomputeAffectedGroups
-// fires the carrier-up Decision once; the subsequent cook with a
-// healthy raw verdict must not produce a second Decision. The VM
-// cold-start scenario asserts this end-to-end; this is the
-// unit-level pin against a refactor accidentally breaking the
-// invariant the VM test depends on.
-func TestColdStartCookHealthyDoesNotBumpDecisions(t *testing.T) {
-	t.Parallel()
-	cfg := testCfgWithGroup()
-	// testCfg's default Thresholds are all zero, which would make
-	// any non-zero RTT trip lossPctUp/rttMsUp and seed unhealthy.
-	// Set realistic ones so a healthy probe really reads as healthy.
-	cfg.Wans["primary"] = config.Wan{
-		Name:      "primary",
-		Interface: "eth0",
-		Probe: config.Probe{
-			Targets:    config.Targets{V4: []string{"1.1.1.1"}},
-			Thresholds: config.Thresholds{LossPctUp: 5, LossPctDown: 25, RttMsUp: 4000, RttMsDown: 5000},
-			Hysteresis: config.Hysteresis{ConsecutiveUp: 2, ConsecutiveDown: 2},
-		},
-	}
-	d := testDaemon(t, cfg)
-	markHealthy(d, "primary", "backup")
-
-	g := d.groups["home"]
-	// Carrier-up Decision lands primary as active. decisionsTotal=1.
-	d.recomputeAffectedGroups(t.Context(), "primary", reasonCarrier)
-	if g.Snapshot().DecisionsTotal != 1 {
-		t.Fatalf("setup: decisionsTotal = %d, want 1 (cold-start carrier Decision)", g.Snapshot().DecisionsTotal)
-	}
-	if g.Snapshot().Active == nil || *g.Snapshot().Active != "primary" {
-		t.Fatalf("setup: active = %+v, want primary", g.Snapshot().Active)
-	}
-
-	// First full Window for v4 lands healthy. Cook fires;
-	// fs.healthy goes true; ws.healthy() was already true via
-	// cold-start carrier-only, stays true now via cooked-healthy.
-	// No aggregate flip → no recomputeAffectedGroups call → no
-	// Decision counter bump.
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats: probe.FamilyStats{
-			LossRatio: 0, RTTMicros: 10_000,
-			WindowFilled: true,
-		},
-	})
-
-	fs := d.wans["primary"].families[probe.FamilyV4]
-	if !fs.cooked {
-		t.Fatalf("post-cook precondition: family.cooked = false, want true")
-	}
-	if !fs.healthy {
-		t.Fatalf("post-cook precondition: family.healthy = false, want true (Seed adopted raw=true)")
-	}
-	if g.Snapshot().DecisionsTotal != 1 {
-		t.Errorf("decisionsTotal = %d, want 1 — cold-start cook on a healthy Window must not produce a health Decision",
-			g.Snapshot().DecisionsTotal)
-	}
-}
-
-// TestColdStartManyPartialWindowsThenCook: a cold-start that takes
-// more than one probe cycle to fill the Window (e.g. multi-target
-// probes where targets fill at different rates, or simply a config
-// with windowSize > 1 — the common case) must keep the daemon in
-// carrier-only mode through *every* partial-window ProbeResult, and
-// only cook on the cycle that finally lands WindowFilled=true. Pins
-// that the deferred branch is idempotent across an arbitrary ramp,
-// not a one-shot no-op.
-func TestColdStartManyPartialWindowsThenCook(t *testing.T) {
-	t.Parallel()
-	cfg := testCfg()
-	cfg.Wans["primary"] = config.Wan{
-		Name:      "primary",
-		Interface: "eth0",
-		Probe: config.Probe{
-			Targets: config.Targets{V4: []string{"1.1.1.1"}},
-			Thresholds: config.Thresholds{
-				LossPctUp: 5, LossPctDown: 25,
-				RttMsUp: 4000, RttMsDown: 5000,
-			},
-			Hysteresis: config.Hysteresis{ConsecutiveUp: 2, ConsecutiveDown: 2},
-		},
-	}
-	d := testDaemon(t, cfg)
-	markHealthy(d, "primary")
-
-	// Three partial-window probes. All must defer; the daemon's
-	// cold-start carrier-only health must hold through every one.
-	// The LossRatio is varied so a buggy gate that triggered on
-	// "raw verdict bad" rather than "window not filled" would
-	// surface here.
-	partials := []float64{1.0, 0.5, 0.2}
-	for i, loss := range partials {
-		d.handleProbeResult(t.Context(), probe.ProbeResult{
-			Wan:    "primary",
-			Family: probe.FamilyV4,
-			Stats: probe.FamilyStats{
-				LossRatio: loss,
-				RTTMicros: 10_000,
-				// WindowFilled deliberately omitted (zero == false).
-			},
-		})
-		fs := d.wans["primary"].families[probe.FamilyV4]
-		if fs.cooked {
-			t.Fatalf("partial probe %d (loss=%v): cooked=true, want still uncooked", i, loss)
-		}
-		if !d.wans["primary"].healthy() {
-			t.Fatalf("partial probe %d (loss=%v): aggregate not healthy via carrier-only cold-start", i, loss)
-		}
-	}
-
-	// Fourth probe completes the Window, healthy. Cook fires.
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats: probe.FamilyStats{
-			LossRatio: 0, RTTMicros: 10_000,
-			WindowFilled: true,
-		},
-	})
-	fs := d.wans["primary"].families[probe.FamilyV4]
-	if !fs.cooked {
-		t.Error("after the filled Window: cooked=false, want true (gate should release)")
-	}
-	if !fs.healthy {
-		t.Error("after the filled Window with raw=true: family.healthy=false, want true")
-	}
-}
-
 // TestHandleRouteEventPopulatesGatewayCache: an Add RouteEvent
 // populates the cache so subsequent applyRoutes can find a gw.
 func TestHandleRouteEventPopulatesGatewayCache(t *testing.T) {
@@ -414,36 +114,6 @@ func TestHandleRouteEventDelClearsCache(t *testing.T) {
 	})
 	if _, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4); ok {
 		t.Error("cache still has eth0/v4 after Del event")
-	}
-}
-
-// TestHandleLinkEventUpdatesEveryWANOnSharedInterface guards the
-// supported shape where multiple WANs monitor one interface. The
-// subscriber emits one LinkEvent per interface, so the handler must
-// fan that event out to every matching WAN rather than whichever map
-// entry happens to be visited first.
-func TestHandleLinkEventUpdatesEveryWANOnSharedInterface(t *testing.T) {
-	t.Parallel()
-	cfg := testCfg()
-	cfg.Wans["backup"] = config.Wan{
-		Name:      "backup",
-		Interface: "eth0",
-		Probe:     cfg.Wans["backup"].Probe,
-	}
-	d := testDaemon(t, cfg)
-
-	d.handleLinkEvent(t.Context(), rtnl.LinkEvent{
-		Name:      "eth0",
-		Carrier:   rtnl.CarrierUp,
-		Operstate: rtnl.OperstateUp,
-	})
-
-	for _, name := range []string{"primary", "backup"} {
-		ws := d.wans[name]
-		if ws.carrier != rtnl.CarrierUp || ws.operstate != rtnl.OperstateUp {
-			t.Errorf("WAN %q link state = carrier %v, operstate %v; want up, up",
-				name, ws.carrier, ws.operstate)
-		}
 	}
 }
 
@@ -514,27 +184,29 @@ func testCfgWithGroup() *config.Config {
 	return cfg
 }
 
-// markHealthy brings each named WAN's carrier + operstate up.
-// newDaemon leaves carrier at CarrierUnknown (cold start), which
-// carrierUp() reads as false; with carrier up and families still
-// uncooked, wanState.healthy() is true — the cold-start state.
-func markHealthy(d *daemon, wans ...string) {
+// linkUp reports carrier and operstate up on each named WAN's
+// interface straight to WAN Health, leaving Group recompute to the
+// test. With no full Window yet the WAN is healthy: the cold-start
+// state.
+func linkUp(d *daemon, wans ...string) {
 	for _, name := range wans {
-		ws := d.wans[name]
-		ws.carrier = rtnl.CarrierUp
-		ws.operstate = rtnl.OperstateUp
+		d.health.Link(rtnl.LinkEvent{
+			Name:      d.cfg.Wans[name].Interface,
+			Carrier:   rtnl.CarrierUp,
+			Operstate: rtnl.OperstateUp,
+		})
 	}
 }
 
-// markUnhealthy cooks every family of each named WAN with a failed
-// probe verdict. Carrier is left as-is — the cooked-unhealthy
-// families collapse combineFamilies, so wanState.healthy() is
-// false even with carrier up. The probe-side mirror of markHealthy.
-func markUnhealthy(d *daemon, wans ...string) {
+// probeLost reports a fully lost full Window for every Family of each
+// named WAN straight to WAN Health, which seeds those Families
+// unhealthy. Group recompute is left to the test.
+func probeLost(d *daemon, wans ...string) {
 	for _, name := range wans {
-		for _, fs := range d.wans[name].families {
-			fs.cooked = true
-			fs.healthy = false
+		for _, fam := range d.cfg.Wans[name].Probe.Targets.Families() {
+			d.health.Probe(probe.ProbeResult{Wan: name, Family: fam, Stats: probe.FamilyStats{
+				LossRatio: 1, WindowFilled: true,
+			}})
 		}
 	}
 }
@@ -546,7 +218,7 @@ func markUnhealthy(d *daemon, wans ...string) {
 func TestRecomputeGroupColdToPrimary(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
+	linkUp(d, "primary", "backup")
 
 	g := d.groups["home"]
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
@@ -682,7 +354,7 @@ func TestFlushSwitchedConntrackMetersFlushFailure(t *testing.T) {
 func TestRecomputeGroupSwitchFlushesConntrack(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
+	linkUp(d, "primary", "backup")
 
 	var flushedIfaces []string
 	d.interfaceAddrs = func(iface string) ([]net.IP, error) {
@@ -699,7 +371,7 @@ func TestRecomputeGroupSwitchFlushesConntrack(t *testing.T) {
 		t.Errorf("conntrack resolve on cold-start up = %v, want none", flushedIfaces)
 	}
 	// primary sickens → switch to backup: primary's iface is flushed.
-	markUnhealthy(d, "primary")
+	probeLost(d, "primary")
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
 	if len(flushedIfaces) != 1 || flushedIfaces[0] != "eth0" {
 		t.Errorf("conntrack resolve on switch = %v, want [eth0]", flushedIfaces)
@@ -730,7 +402,7 @@ func TestRecomputeAffectedGroupsFansOut(t *testing.T) {
 		},
 	}
 	d := testDaemon(t, cfg)
-	markHealthy(d, "primary", "backup")
+	linkUp(d, "primary", "backup")
 
 	// `primary` only belongs to `home` — recomputing for primary
 	// should leave guest untouched.
@@ -782,9 +454,10 @@ func TestNotifyHooksCapturesDecisionData(t *testing.T) {
 	// Change all sources while delivery is held behind the first event.
 	g.Name, g.Table, g.Mark = "changed", 999, 999
 	d.cfg.Groups["home"] = g
-	d.wans["primary"].cfg.Interface = "changed0"
-	d.wans["backup"].cfg.Interface = "changed1"
-	delete(d.wans["primary"].families, probe.FamilyV6)
+	primaryCfg, backupCfg := d.cfg.Wans["primary"], d.cfg.Wans["backup"]
+	primaryCfg.Interface, backupCfg.Interface = "changed0", "changed1"
+	primaryCfg.Probe.Targets.V6 = nil
+	d.cfg.Wans["primary"], d.cfg.Wans["backup"] = primaryCfg, backupCfg
 	d.gateways.clear("eth0", rtnl.RouteFamilyV4)
 	d.gateways.clear("eth0", rtnl.RouteFamilyV6)
 	d.gateways.clear("wwan0", rtnl.RouteFamilyV4)
@@ -840,7 +513,7 @@ func TestNotifyHooksNoEventOnIdentical(t *testing.T) {
 func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
+	linkUp(d, "primary", "backup")
 	writes := countWrites(d)
 
 	g := d.groups["home"]
@@ -868,7 +541,7 @@ func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	markHealthy(d, "primary", "backup")
+	linkUp(d, "primary", "backup")
 	writes := countWrites(d)
 
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
@@ -914,99 +587,55 @@ func writeHook(t *testing.T, eventDir, name, script string) {
 	}
 }
 
-// TestHandleProbeResultUnknownWanNoOp: a result for a WAN the
-// daemon has no state for must silently drop — catches a config-
-// reload race where the prober has spun up but the daemon's WAN
-// map hasn't.
-func TestHandleProbeResultUnknownWanNoOp(t *testing.T) {
+// TestHandleProbeResultForwardsHealthChange pins the probe-path
+// wiring: a WAN Health flip recomputes its Groups, a Family transition
+// that leaves WAN Health alone republishes state.json without a
+// Decision (docs/specs/daemon-state.md), and a partial Window does
+// neither. Health rules themselves are tested in internal/health.
+func TestHandleProbeResultForwardsHealthChange(t *testing.T) {
 	t.Parallel()
-	d := testDaemon(t, testCfg())
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "ghost",
-		Family: probe.FamilyV4,
-		Stats:  probe.FamilyStats{LossRatio: 0.5},
-	})
-	// No panic, no metric pollution. Verify d.wans is untouched
-	// (no ghost entry sneaked in).
-	if _, ok := d.wans["ghost"]; ok {
-		t.Error("handleProbeResult created a wanState for an unknown WAN")
+	cases := []struct {
+		name          string
+		policy        string
+		windowFilled  bool
+		wantDecisions int
+		wantActive    string
+		wantPublished bool
+	}{
+		{"Health flip switches the Group", "all", true, 1, "backup", true},
+		{"Family flip under any republishes only", "any", true, 0, "primary", true},
+		{"partial Window changes nothing", "all", false, 0, "primary", false},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := testCfgWithGroup()
+			primary := cfg.Wans["primary"]
+			primary.Probe.FamilyHealthPolicy = tc.policy
+			cfg.Wans["primary"] = primary
+			d := testDaemon(t, cfg)
+			for _, iface := range []string{"eth0", "wwan0"} {
+				d.handleLinkEvent(t.Context(), rtnl.LinkEvent{Name: iface, Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp})
+			}
+			g := d.groups["home"]
+			decisions := g.Snapshot().DecisionsTotal
+			published := readCounter(t, d.metrics.StatePublications)
 
-// TestHandleProbeResultUnknownFamilyNoOp: result for a (known
-// WAN, unsupported family) — the family map is built from the
-// declared probe.targets, so a result for a family the config
-// didn't ask for is a programmer mistake, not a runtime case.
-// Drop silently.
-func TestHandleProbeResultUnknownFamilyNoOp(t *testing.T) {
-	t.Parallel()
-	cfg := testCfg()
-	// backup is v4-only (target list has only "8.8.8.8") — so its
-	// families map will not contain FamilyV6.
-	d := testDaemon(t, cfg)
-	if _, ok := d.wans["backup"].families[probe.FamilyV6]; ok {
-		t.Fatal("setup: backup unexpectedly probes v6")
-	}
-	// This should be a no-op.
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "backup",
-		Family: probe.FamilyV6,
-		Stats:  probe.FamilyStats{LossRatio: 0.0},
-	})
-}
+			d.handleProbeResult(t.Context(), probe.ProbeResult{
+				Wan: "primary", Family: probe.FamilyV4,
+				Stats: probe.FamilyStats{LossRatio: 1, WindowFilled: tc.windowFilled},
+			})
 
-// TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate:
-// for a dual-stack WAN under familyHealthPolicy=any, a single
-// family going unhealthy doesn't move the aggregate (the other
-// family is still healthy via cold-start). No Decision fires, but
-// the per-family `healthy` field in state.json *does* change — so
-// per docs/specs/daemon-state.md state.json is republished anyway: it mirrors live
-// per-family Health, not just Decisions. Prior to the family-flip
-// republish this case left state.json stale relative to the
-// Prometheus view, and made it impossible to use state.json to
-// answer "is family X probe-healthy yet?" before a Decision lands.
-func TestHandleProbeResultRepublishesOnFamilyFlipWithoutAggregate(t *testing.T) {
-	t.Parallel()
-	cfg := testCfg()
-	// any-policy: aggregate stays true as long as ≥1 family is
-	// healthy. Cold-start gives both `cooked=false` ⇒ both count
-	// as healthy ⇒ aggregate=true. A first ProbeResult with bad
-	// stats flips v4's cooked=true (raw=false ⇒ stable=false), but
-	// v6 is still uncooked → aggregate remains true under "any".
-	cfg.Wans["primary"] = config.Wan{
-		Name:      "primary",
-		Interface: "eth0",
-		Probe: config.Probe{
-			Targets: config.Targets{
-				V4: []string{"1.1.1.1"},
-				V6: []string{"2606:4700:4700::1111"},
-			},
-			Thresholds:         config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
-			Hysteresis:         config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
-			FamilyHealthPolicy: "any",
-		},
-	}
-	d := testDaemon(t, cfg)
-	markHealthy(d, "primary")
-
-	d.handleProbeResult(t.Context(), probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats: probe.FamilyStats{
-			LossRatio: 0.95, RTTMicros: 50_000,
-			WindowFilled: true,
-		},
-	})
-
-	if !d.wans["primary"].healthy() {
-		t.Error("aggregate flipped under `any` despite v6 still uncooked")
-	}
-	// No Decision fired, but the per-family verdict transitioned —
-	// state.json must be rewritten so consumers see the live v4
-	// health. testDaemon skips bootstrap, so the file's mere
-	// existence proves the family-flip republish happened.
-	if _, err := os.Stat(d.cfg.Global.StatePath); err != nil {
-		t.Errorf("state.json not written on family flip: %v", err)
+			if delta := g.Snapshot().DecisionsTotal - decisions; delta != tc.wantDecisions {
+				t.Errorf("Decisions = +%d, want +%d", delta, tc.wantDecisions)
+			}
+			if active := g.Snapshot().Active; active == nil || *active != tc.wantActive {
+				t.Errorf("active = %v, want %s", active, tc.wantActive)
+			}
+			if got := readCounter(t, d.metrics.StatePublications) > published; got != tc.wantPublished {
+				t.Errorf("state.json republished = %v, want %v", got, tc.wantPublished)
+			}
+		})
 	}
 }
 
@@ -1130,27 +759,6 @@ func TestSlowHookDoesNotBlockWatchdogAck(t *testing.T) {
 	}
 	waitForHookPath(t, finished, 2*time.Second)
 	d.hooks.Close()
-}
-
-// TestRecordProbeMetricsEmptyPerTarget: cold start emits a
-// FamilyStats with no per-target entries — the PerTarget loop
-// must be a no-op (not crash, not emit a stale gauge with empty
-// label).
-func TestRecordProbeMetricsEmptyPerTarget(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfg())
-	d.recordProbeMetrics(probe.ProbeResult{
-		Wan:    "primary",
-		Family: probe.FamilyV4,
-		Stats:  probe.FamilyStats{LossRatio: 0, RTTMicros: 0, PerTarget: nil},
-	}, false)
-	// We mostly want "no panic"; assert one observable side
-	// effect that should still happen even on empty PerTarget:
-	// the WanFamilyHealthy gauge.
-	v := readGauge(t, d.metrics.WanFamilyHealthy.WithLabelValues("primary", "v4"))
-	if v != 0 {
-		t.Errorf("WanFamilyHealthy(primary,v4) = %v, want 0", v)
-	}
 }
 
 // TestApplyRoutesErrorContract: applyRoutes returns nil for a soft

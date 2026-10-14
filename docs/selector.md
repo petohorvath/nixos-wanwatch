@@ -92,10 +92,10 @@ Between the bands, Health holds. The Nix option type enforces `Up < Down` for bo
 
 ### Stage 2: consecutive-cycle filter
 
-A `HysteresisState` per (WAN, Family) counts consecutive observations in the new direction. Health flips only after `consecutiveUp` or `consecutiveDown` successive observations agree. Thresholds below 1 are clamped to 1; the Nix layer is the authoritative validator.
+A Hysteresis state machine per (WAN, Family), in `daemon/internal/health/hysteresis.go`, counts consecutive observations in the new direction. Health flips only after `consecutiveUp` or `consecutiveDown` successive observations agree. Thresholds below 1 are clamped to 1; the Nix layer is the authoritative validator.
 
 ```go
-func (h *HysteresisState) Observe(observedHealthy bool) bool {
+func (h *hysteresis) observe(observedHealthy bool) bool {
     if observedHealthy {
         h.unhealthyCount = 0
         h.healthyCount++
@@ -115,13 +115,13 @@ func (h *HysteresisState) Observe(observedHealthy bool) bool {
 
 ### Cold start
 
-A Family stays uncooked (`familyState.cooked = false`) until its first full Window. `combineFamilies` counts an uncooked Family as healthy, so carrier-up alone makes the WAN healthy and produces an initial Decision instead of publishing no Selection while Samples accumulate.
+A Family stays uncooked (`family.cooked = false`) until its first full Window. `combineFamilies` counts an uncooked Family as healthy, so carrier-up alone makes the WAN healthy and produces an initial Decision instead of publishing no Selection while Samples accumulate.
 
-When the Window fills (`FamilyStats.WindowFilled`), `HysteresisState.Seed` adopts the measured Health directly, and later results go through `Observe`. Waiting for a full Window prevents one lost first Sample from seeding the WAN unhealthy and producing a spurious down/up Decision pair. The cold-start invariant is specified in [`specs/failover.md`](./specs/failover.md#cold-start-invariant).
+When the Window fills (`FamilyStats.WindowFilled`), `hysteresis.seed` adopts the measured Health directly, and later results go through `observe`. Waiting for a full Window prevents one lost first Sample from seeding the WAN unhealthy and producing a spurious down/up Decision pair. The cold-start invariant is specified in [`specs/failover.md`](./specs/failover.md#cold-start-invariant).
 
 ### Carrier fast-track
 
-Carrier loss makes `carrierUp()` false, and `buildMemberHealth` ANDs it into `Healthy`, so the Member becomes unhealthy without waiting for Probe timeouts. Carrier recovery reverses the path and the Selection re-evaluates.
+Carrier loss makes `carrierUp()` false, and WAN Health ANDs it with the Family verdicts, so `Wans.MemberHealth` reports the Member unhealthy without waiting for Probe timeouts. Carrier recovery reverses the path and the Selection re-evaluates.
 
 ## Determinism
 
@@ -130,14 +130,14 @@ Carrier loss makes `carrierUp()` false, and `buildMemberHealth` ANDs it into `He
 ## Family-policy aggregation
 
 ```text
-combineFamilies(families, policy):
+combineFamilies(wan):
     probed, healthy = 0, 0
-    for f in families:
+    for f in wan.families:
         probed++
         if !f.cooked or f.healthy:
             healthy++
     if probed == 0: return false
-    switch policy:
+    switch wan.probe.familyHealthPolicy:
         case "any": return healthy > 0
         default:    return healthy == probed  # "all"
 ```
@@ -150,4 +150,4 @@ The default `all` is conservative for a routing decision; `any` suits dual-stack
 - **Routes and rules.** `daemon/internal/apply/` translates a Selection into kernel state.
 - **Userspace notification.** The State writer and Hook runner handle it.
 
-Selector tests live in `selector_test.go`, `primarybackup_test.go`, `hysteresis_test.go`, and `tests/unit/internal/selector.nix`. The full Decision pipeline is tested in `cmd/wanwatchd` and end to end in `tests/vm/`.
+Selector tests live in `selector_test.go`, `primarybackup_test.go`, and `tests/unit/internal/selector.nix`. Health tests, including Hysteresis, live in `daemon/internal/health/`. The full Decision pipeline is tested in `cmd/wanwatchd` and end to end in `tests/vm/`.

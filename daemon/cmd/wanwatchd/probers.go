@@ -38,7 +38,7 @@ func startProbers(ctx context.Context, cancel context.CancelCauseFunc, cfg *conf
 			Wan:        k.Wan,
 			Family:     k.Family,
 			Interface:  wan.Interface,
-			Targets:    targetsFor(wan, k.Family),
+			Targets:    wan.Probe.Targets.For(k.Family),
 			Ident:      idents[k],
 			Interval:   time.Duration(wan.Probe.IntervalMs) * time.Millisecond,
 			Timeout:    time.Duration(wan.Probe.TimeoutMs) * time.Millisecond,
@@ -62,37 +62,9 @@ func identKeysFor(cfg *config.Config) []probe.IdentKey {
 	names := slices.Sorted(maps.Keys(cfg.Wans))
 	keys := make([]probe.IdentKey, 0, 2*len(names))
 	for _, name := range names {
-		wan := cfg.Wans[name]
-		fams := familiesFromTargets(wan.Probe.Targets)
-		if fams.v4 {
-			keys = append(keys, probe.IdentKey{Wan: name, Family: probe.FamilyV4})
-		}
-		if fams.v6 {
-			keys = append(keys, probe.IdentKey{Wan: name, Family: probe.FamilyV6})
+		for _, fam := range cfg.Wans[name].Probe.Targets.Families() {
+			keys = append(keys, probe.IdentKey{Wan: name, Family: fam})
 		}
 	}
 	return keys
-}
-
-// familiesFromTargets reports which IP families the WAN serves
-// (which Pinger goroutines to spawn for it). Mirrors
-// `wanwatch.probe.families` on the Nix side — both reduce to "is
-// the per-family bucket non-empty?" now that the config layer keeps
-// the buckets disjoint.
-func familiesFromTargets(t config.Targets) struct{ v4, v6 bool } {
-	return struct{ v4, v6 bool }{
-		v4: len(t.V4) > 0,
-		v6: len(t.V6) > 0,
-	}
-}
-
-// targetsFor returns the probe targets for `wan` in `family` —
-// straight from the per-family bucket. The lib + config.Validate
-// enforce that each bucket only holds same-family literals, so no
-// runtime filtering is needed here.
-func targetsFor(wan config.Wan, family probe.Family) []string {
-	if family == probe.FamilyV4 {
-		return wan.Probe.Targets.V4
-	}
-	return wan.Probe.Targets.V6
 }

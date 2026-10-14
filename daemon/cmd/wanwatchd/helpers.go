@@ -4,22 +4,13 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 )
 
 // Small free-function helpers shared across the daemon pipeline.
 // They don't depend on the `daemon` struct — keeping them out of
 // daemon.go avoids burying short utilities under the bigger methods.
-
-// boolToFloat is the gauge-friendly bool encoding: 1.0 for true,
-// 0.0 for false. Used everywhere a Prometheus gauge stores a binary
-// signal (`wanwatch_wan_healthy`, `wanwatch_wan_carrier`, etc.).
-func boolToFloat(b bool) float64 {
-	if b {
-		return 1
-	}
-	return 0
-}
 
 // interfaceIndex wraps net.InterfaceByName to report ifindex with
 // an error message that names the offending interface — apply
@@ -69,24 +60,19 @@ func filterGlobalUnicast(addrs []net.Addr) []net.IP {
 }
 
 // ifaceFor resolves an Active to its WAN's interface name via the
-// daemon's `wans` map. Returns "" when Active is absent or the WAN
-// isn't known — hook env vars treat empty string as "no value".
-func ifaceFor(wans map[string]*wanState, a selector.Active) string {
+// configured WANs. Returns "" when Active is absent or the WAN isn't
+// known — hook env vars treat empty string as "no value".
+func ifaceFor(wans map[string]config.Wan, a selector.Active) string {
 	if !a.Has {
 		return ""
 	}
-	if w, ok := wans[a.Wan]; ok {
-		return w.cfg.Interface
-	}
-	return ""
+	return wans[a.Wan].Interface
 }
 
 // probedFamiliesFor lists the families an Active WAN is probing as
-// stringified labels ("v4", "v6"). Empty slice when Active is
-// absent or the WAN isn't known. Order is map-iteration order —
-// fine for env vars but tests that assert exact contents should
-// sort first.
-func probedFamiliesFor(wans map[string]*wanState, a selector.Active) []string {
+// stringified labels, v4 first. Nil when Active is absent or the WAN
+// isn't known.
+func probedFamiliesFor(wans map[string]config.Wan, a selector.Active) []string {
 	if !a.Has {
 		return nil
 	}
@@ -95,7 +81,7 @@ func probedFamiliesFor(wans map[string]*wanState, a selector.Active) []string {
 		return nil
 	}
 	out := make([]string, 0, 2)
-	for fam := range w.families {
+	for _, fam := range w.Probe.Targets.Families() {
 		out = append(out, fam.String())
 	}
 	return out

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
@@ -112,16 +113,6 @@ func testCfg() *config.Config {
 	}
 }
 
-func TestBoolToFloat(t *testing.T) {
-	t.Parallel()
-	if got := boolToFloat(true); got != 1 {
-		t.Errorf("boolToFloat(true) = %v, want 1", got)
-	}
-	if got := boolToFloat(false); got != 0 {
-		t.Errorf("boolToFloat(false) = %v, want 0", got)
-	}
-}
-
 func TestInterfaceIndexLoopback(t *testing.T) {
 	t.Parallel()
 	// `lo` is the one interface that's always present on every Linux
@@ -187,9 +178,9 @@ func TestFilterGlobalUnicast(t *testing.T) {
 
 func TestIfaceFor(t *testing.T) {
 	t.Parallel()
-	wans := map[string]*wanState{
-		"primary": {cfg: config.Wan{Interface: "eth0"}},
-		"backup":  {cfg: config.Wan{Interface: "wwan0"}},
+	wans := map[string]config.Wan{
+		"primary": {Interface: "eth0"},
+		"backup":  {Interface: "wwan0"},
 	}
 	cases := []struct {
 		name   string
@@ -212,40 +203,29 @@ func TestIfaceFor(t *testing.T) {
 
 func TestProbedFamiliesFor(t *testing.T) {
 	t.Parallel()
-	wans := map[string]*wanState{
-		"v4only": {
-			cfg:      config.Wan{Interface: "wan4"},
-			families: map[probe.Family]*familyState{probe.FamilyV4: {family: probe.FamilyV4}},
-		},
-		"dual": {
-			cfg: config.Wan{Interface: "wan0"},
-			families: map[probe.Family]*familyState{
-				probe.FamilyV4: {family: probe.FamilyV4},
-				probe.FamilyV6: {family: probe.FamilyV6},
-			},
-		},
+	wans := map[string]config.Wan{
+		"v4only": {Probe: config.Probe{Targets: config.Targets{V4: []string{"192.0.2.1"}}}},
+		"dual": {Probe: config.Probe{Targets: config.Targets{
+			V4: []string{"192.0.2.1"},
+			V6: []string{"2001:db8::1"},
+		}}},
 	}
-
-	if got := probedFamiliesFor(wans, selector.NoActive); got != nil {
-		t.Errorf("absent Active = %v, want nil", got)
+	cases := []struct {
+		name   string
+		active selector.Active
+		want   []string
+	}{
+		{"absent → nil", selector.NoActive, nil},
+		{"unknown WAN → nil", selector.Active{Wan: "ghost", Has: true}, nil},
+		{"v4-only WAN", selector.Active{Wan: "v4only", Has: true}, []string{"v4"}},
+		{"dual-stack WAN, v4 first", selector.Active{Wan: "dual", Has: true}, []string{"v4", "v6"}},
 	}
-	if got := probedFamiliesFor(wans, selector.Active{Wan: "ghost", Has: true}); got != nil {
-		t.Errorf("unknown WAN = %v, want nil", got)
-	}
-	if got := probedFamiliesFor(wans, selector.Active{Wan: "v4only", Has: true}); len(got) != 1 || got[0] != "v4" {
-		t.Errorf("v4-only WAN = %v, want [v4]", got)
-	}
-	// Dual-stack: map iteration order is non-deterministic, so just
-	// check the multiset.
-	got := probedFamiliesFor(wans, selector.Active{Wan: "dual", Has: true})
-	if len(got) != 2 {
-		t.Fatalf("dual WAN = %v, want 2 entries", got)
-	}
-	saw := map[string]bool{}
-	for _, f := range got {
-		saw[f] = true
-	}
-	if !saw["v4"] || !saw["v6"] {
-		t.Errorf("dual WAN = %v, want both v4 and v6", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := probedFamiliesFor(wans, tc.active); !slices.Equal(got, tc.want) {
+				t.Errorf("probedFamiliesFor(_, %+v) = %v, want %v", tc.active, got, tc.want)
+			}
+		})
 	}
 }

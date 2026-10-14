@@ -202,7 +202,7 @@ pkgs.testers.runNixOSTest {
     #
     # Fixing it needs sub-cycle timing the driver lacks, a larger
     # windowSize that slows every phase, or a daemon test hook. Go unit
-    # tests in internal/probe/ and internal/selector/ cover Window
+    # tests in internal/probe/ and internal/health/ cover Window
     # damping and hysteresis deterministically.
 
     # ==== Phase D — band-pass threshold ====
@@ -234,7 +234,7 @@ pkgs.testers.runNixOSTest {
     #     https://github.com/petohorvath/nixos-wanwatch/actions/runs/25958981356
     #
     # Fixing it needs windowSize ≈ 25 or per-test tuning, both slowing
-    # every phase. internal/selector/hysteresis_test.go covers the hold
+    # every phase. internal/health/hysteresis_test.go covers the hold
     # deterministically.
 
     # D3 — clear ⇒ recovery
