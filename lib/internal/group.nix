@@ -55,16 +55,18 @@ let
   tryMakeMember =
     wan: input: member.tryMake (if builtins.isAttrs input then { inherit wan; } // input else input);
 
-  # Names the rejected member in its forwarded error.
-  wrapMemberError =
-    key: result: lib.nameValuePair "groupInvalidMember" "members.${key}: ${result.error}";
-
-  # A member input may set `wan`, but only to its own key.
-  checkMemberKey =
-    key: value:
-    check "groupInvalidMember" (
-      value.wan == key
-    ) "members.${key}: wan must match the attribute key; got ${builtins.toJSON value.wan}";
+  # One member's errors, each naming its key: the `member.tryMake`
+  # error, or a `wan` that differs from the key.
+  memberErrors =
+    key: result:
+    map (message: lib.nameValuePair "groupInvalidMember" "members.${key}: ${message}") (
+      if result.success then
+        lib.optional (
+          result.value.wan != key
+        ) "wan must match the attribute key; got ${builtins.toJSON result.value.wan}"
+      else
+        [ result.error ]
+    );
 
   /*
     Parse each member input under its key, so `tryMake` parses every
@@ -78,16 +80,12 @@ let
     members:
     let
       results = builtins.mapAttrs tryMakeMember members;
-      rejected = lib.filterAttrs (_: result: !result.success) results;
+    in
+    {
       parsed = lib.mapAttrs (_: result: result.value) (
         lib.filterAttrs (_: result: result.success) results
       );
-    in
-    {
-      inherit parsed;
-      errors =
-        lib.mapAttrsToList wrapMemberError rejected
-        ++ lib.concatLists (lib.mapAttrsToList checkMemberKey parsed);
+      errors = lib.concatLists (lib.mapAttrsToList memberErrors results);
     };
 
   # Takes `tryMake`'s parsed members so each member is parsed once.
