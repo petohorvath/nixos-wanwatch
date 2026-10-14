@@ -38,9 +38,9 @@ func TestGroupContainsWAN(t *testing.T) {
 	t.Parallel()
 	g := selector.Group{
 		Name: "home",
-		Members: []selector.Member{
-			{Wan: "primary"},
-			{Wan: "backup"},
+		Members: map[string]selector.Member{
+			"primary": {Wan: "primary"},
+			"backup":  {Wan: "backup"},
 		},
 	}
 	cases := []struct {

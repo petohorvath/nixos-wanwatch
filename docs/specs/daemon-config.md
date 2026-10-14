@@ -2,7 +2,7 @@
 
 The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd` reads it at startup. `wanwatch.config.toJSON` in `lib/internal/config.nix` produces it; `daemon/internal/config/config.go` parses it and re-validates its structure.
 
-**Schema version**: `1`. Any backwards-incompatible field change bumps it. The daemon refuses to start when `schema` does not match its `SupportedSchema`.
+**Schema version**: `1`. The daemon refuses to start when `schema` does not match its `SupportedSchema`. Pre-release, the version is pinned: the renderer and the daemon ship together, so in-tree shape changes do not bump it. The first tagged release freezes shape 1; after that, any backwards-incompatible field change bumps the number.
 
 ## Top-level shape
 
@@ -107,50 +107,50 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
 ```json
 {
   "name": "home-uplink",
-  "members": [ { ... }, { ... } ],
+  "members": { "<wan>": { ... }, ... },
   "strategy": "primary-backup",
-  "table": 100,
-  "mark": 100
+  "table": 1000,
+  "mark": 1000
 }
 ```
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `name` | string | yes | Must match the attribute key. |
-| `members` | array<object> | yes | Non-empty; no duplicate `wan` references. |
+| `members` | object | yes | Non-empty map from WAN name to Member object. |
 | `strategy` | string | yes | v1: `"primary-backup"`. |
 | `table` | int | yes | Routing-table ID. User-declared integer in `[1000, 32767]` (type `wanwatch.types.routingTableId`). |
 | `mark` | int | yes | fwmark. User-declared integer in `[1000, 32767]` (type `wanwatch.types.fwmark`). |
 
 See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and tables are not allocated automatically.
 
-## `groups.<name>.members[]`
+## `groups.<name>.members.<wan>`
 
 ```json
 {
   "wan": "primary",
-  "weight": 100,
   "priority": 1
 }
 ```
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `wan` | string | yes | Key in the top-level `wans` map. |
-| `weight` | int | yes | `1..1000`. Reserved for v2 multi-active Strategies; ignored under `primary-backup`. |
-| `priority` | int | yes | `1..1000`. Lower is preferred under `primary-backup`. |
+| `wan` | string | yes | Must match the attribute key, which must be a key in the top-level `wans` map. |
+| `priority` | int | yes | Positive integer. Lower is preferred under `primary-backup`. |
 
 ## Validation layers
 
 | Layer | Catches |
 |---|---|
 | Option types (`lib/types/`) | Wrong field types, enum mismatches, malformed IP literals (via libnet). |
-| `wanwatch.<type>.tryMake` | Unknown fields, which a direct library caller could otherwise misspell unnoticed, and cross-field invariants: Family coupling, duplicate Members, threshold ordering. |
+| `wanwatch.<type>.tryMake` | Unknown fields, which a direct library caller could otherwise misspell unnoticed, and cross-field invariants: Family coupling, Member `wan`/key disagreement, threshold ordering. |
 | `config.render` | Invalid `global` settings, through `wanwatch.global.make`: unknown fields, empty or whitespace-only paths, an unknown `logLevel`, or a non-positive `hookTimeoutMs`. |
 | `config.assertUniqueMarksAndTables` | Marks or tables shared across Groups. |
-| `daemon/internal/config/Validate` | Unknown keys and trailing data at parse time, then the first failing check of: empty paths or non-positive `hookTimeoutMs` in `global`; name/key disagreement; empty `interface`; `method` other than `icmp`; no Targets; non-positive `intervalMs`, `timeoutMs`, or `windowSize`; `familyHealthPolicy` other than `all` or `any`; loss thresholds outside `0..100` or not ordered up < down; RTT thresholds not positive or not ordered up < down; Hysteresis counters below 1; unknown `strategy`; non-positive `table` or `mark`; no Members; dangling `member.wan` references. |
+| `daemon/internal/config/Validate` | Unknown keys and trailing data at parse time, then the first failing check of: empty paths or non-positive `hookTimeoutMs` in `global`; name/key disagreement; empty `interface`; `method` other than `icmp`; no Targets; non-positive `intervalMs`, `timeoutMs`, or `windowSize`; `familyHealthPolicy` other than `all` or `any`; loss thresholds outside `0..100` or not ordered up < down; RTT thresholds not positive or not ordered up < down; Hysteresis counters below 1; unknown `strategy`; non-positive `table` or `mark`; no Members; Member `wan`/key disagreement; dangling `member.wan` references. |
 
 ## Compatibility policy
+
+Pre-release, `schemaVersion` and `SupportedSchema` stay at 1; the renderer and the daemon ship together, so in-tree shape changes do not bump them. The rules below apply from the first tagged release.
 
 The schema version is bumped only when an existing field changes meaning or a required field is added without a default. An optional field with a backwards-compatible default needs no bump.
 

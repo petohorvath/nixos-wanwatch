@@ -73,14 +73,6 @@ func TestPrimaryBackup(t *testing.T) {
 			},
 			want: Active{Wan: "aaa", Has: true},
 		},
-		{
-			name: "weight is ignored by primary-backup",
-			members: []MemberHealth{
-				{Member: Member{Wan: "primary", Priority: 1, Weight: 1}, Healthy: true},
-				{Member: Member{Wan: "backup", Priority: 2, Weight: 1000}, Healthy: true},
-			},
-			want: Active{Wan: "primary", Has: true},
-		},
 	}
 
 	for _, tc := range tests {

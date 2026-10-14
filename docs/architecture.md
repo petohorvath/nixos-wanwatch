@@ -53,7 +53,7 @@ lib/internal/
   primitives.nix     — tryOk/tryErr, check, formatErrors
   probe.nix          — value type + threshold/hysteresis sub-types
   wan.nix            — value type; Families derived from probe.targets
-  member.nix         — per-Group attributes (priority, weight)
+  member.nix         — per-Group attributes (priority)
   group.nix          — value type, Strategy enum, mark/table validators
   global.nix         — value type for the daemon's global settings
   selector.nix       — pure Nix mirror of the Go selector
@@ -143,7 +143,7 @@ A missing Gateway is a soft skip: a commit can leave that Family's existing rout
 
 A WAN's Families come from the IP literals in `probe.targets`: IPv4 literals make it serve `v4`, IPv6 literals make it serve `v6`. Each Family's Health is computed independently and combined into WAN Health under `probe.familyHealthPolicy` (`all` or `any`).
 
-Gateways are never declared by the operator. `internal/rtnl` discovers each (WAN, Family) default-route next-hop from the kernel's main routing table. The Gateway is empty until a default route exists on the WAN's interface. See [ADR 0004](./adr/0004-runtime-gateway-discovery.md).
+Gateways are never declared by the operator. `internal/rtnl` discovers each (WAN, Family) default-route next-hop from the kernel's main routing table. The Gateway stays unknown, `null` in `state.json`, until a default route exists on the WAN's interface. See [ADR 0004](./adr/0004-runtime-gateway-discovery.md).
 
 Interfaces without a broadcast next-hop (PPP, WireGuard, GRE, tun) set `pointToPoint = true`. The daemon then installs a `scope link` default route out of the interface and needs no Gateway.
 
@@ -193,4 +193,4 @@ A full queue drops the newest event, so slow Hooks cannot stall routing or watch
 | Change a metric | `daemon/internal/metrics/metrics.go`, `docs/metrics.md` |
 | Add a Hook env var | `daemon/internal/state/hooks.go` (`Env*` constants), `docs/specs/daemon-state.md` |
 | Tune Probe defaults | `lib/internal/probe.nix` (`defaults`) |
-| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`; bump `schemaVersion` in both and update `docs/specs/daemon-config.md` |
+| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`, and `docs/specs/daemon-config.md`; after the first release, also bump `schemaVersion` in both |

@@ -49,7 +49,6 @@ let
     };
     full = {
       wan = "backup";
-      weight = 50;
       priority = 2;
     };
   };
@@ -86,20 +85,21 @@ in
     group = {
       minimal = {
         name = "home-uplink";
-        members = [ member.minimal ];
+        # The attribute key names the WAN, so a Member input may omit
+        # `wan`.
+        members.primary = { };
         mark = 1000;
         table = 1000;
       };
       full = {
         name = "guest-uplink";
-        members = [
-          {
+        members = {
+          primary = {
             wan = "primary";
-            weight = 100;
             priority = 1;
-          }
-          member.full
-        ];
+          };
+          backup = member.full;
+        };
         strategy = "primary-backup";
         mark = 1001;
         table = 1001;

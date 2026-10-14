@@ -6,11 +6,11 @@
     groupStrategy — enum of `internal.group.validStrategies`
     groupTable    — `primitives.routingTableId`
     groupMark     — `primitives.fwmark`
-    group         — the complete Group submodule, with
-                    `memberTypes.member` elements
+    group         — the complete Group submodule, whose `members`
+                    maps WAN names to `memberTypes.member` values
 
   Option types cannot compare fields or sibling attributes, so
-  `internal.group.tryMake` checks members and
+  `internal.group.tryMake` checks that members is non-empty and
   `internal.config.assertUniqueMarksAndTables` checks marks and tables
   across Groups.
 */
@@ -44,16 +44,16 @@ let
           '';
         };
         members = mkOption {
-          type = types.listOf memberTypes.member;
+          type = types.attrsOf memberTypes.member;
           example = lib.literalExpression ''
-            [
-              { wan = "primary"; priority = 1; }
-              { wan = "backup";  priority = 2; }
-            ]
+            {
+              primary.priority = 1;
+              backup.priority = 2;
+            }
           '';
           description = ''
-            Members of this Group. The list must be non-empty and must
-            not reference a WAN twice.
+            Members of this Group, keyed by the name of the WAN each
+            one references. The attribute set must be non-empty.
           '';
         };
         strategy = mkOption {

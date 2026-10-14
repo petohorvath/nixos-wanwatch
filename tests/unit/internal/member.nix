@@ -25,7 +25,6 @@ in
     testValues = {
       expr = member.defaults;
       expected = {
-        weight = 100;
         priority = 1;
       };
     };
@@ -38,12 +37,15 @@ in
 
   fields = {
     wan = memberFieldTests "wan" "memberInvalidWan" cases.identifiers;
-    weight = memberFieldTests "weight" "memberInvalidWeight" cases.positiveInts;
     priority = memberFieldTests "priority" "memberInvalidPriority" cases.positiveInts;
   };
 
   rejections = helpers.rejectionTests member.tryMake {
     memberInvalidWan.missingWan = { };
+    # Member has no `weight` until a Strategy reads one.
+    memberUnknownField.weight = minimal // {
+      weight = 100;
+    };
   };
 
   # WANs, Groups, and Members report invalid identifiers alike.
@@ -56,13 +58,11 @@ in
     expr = getErrorKinds (
       member.tryMake {
         wan = "1bad";
-        weight = 0;
         priority = -1;
       }
     );
     expected = [
       "memberInvalidWan"
-      "memberInvalidWeight"
       "memberInvalidPriority"
     ];
   };

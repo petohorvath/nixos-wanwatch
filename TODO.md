@@ -113,7 +113,7 @@ See [ADR-0002](./docs/adr/0002-one-selection-per-group.md).
 Multi-active routing across healthy members. Requires
 `apply.WriteDefault` to emit MultiPath nexthops and the metrics
 catalog to allow multiple `1`s for `wanwatch_group_active{group,wan}`.
-The `weight` field on Member is reserved for this.
+Member gains the `weight` it needs then; v1 has none.
 `docs/selector.md`, `docs/specs/failover.md` (single-active invariant),
 `daemon/internal/selector/primarybackup.go:10`.
 
@@ -201,7 +201,7 @@ Root cause analysis is incomplete. Three plausible mechanisms:
    bind, but a v6-only race here would explain the symptom.
 2. **netlink decoder.** The library decodes the v6 default
    route's `Gw` as `nil` with unstable nixpkgs' newer kernel,
-   so `gatewayCache.string(...)` returns `""` and the test
+   so `gatewayCache.address(...)` returns nil and the test
    predicate (`== "fd00:1::1"`) never matches. Newer kernels'
    RTA_VIA / RTA_MULTIPATH encoding for v6 defaults is a plausible
    trigger.
@@ -215,9 +215,9 @@ waits used by `gateway-discovery-v6.nix` dump `state.json`, live
 metrics, both families' kernel routes, and the last 50 lines of the
 daemon journal on timeout. Next time it flakes, that evidence distinguishes:
 
-- empty `state.json` v6 gateway + kernel route present + no
+- null `state.json` v6 gateway + kernel route present + no
   daemon "route event" log → option 1 or 3 (subscription gap)
-- `gateways.v6 == ""` populated in state.json + daemon log shows
+- `gateways.v6 == null` in state.json + daemon log shows
   the route event with `gw=<nil>` → option 2 (decoder)
 
 Fix candidates depending on which leg:

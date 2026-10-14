@@ -23,8 +23,9 @@ let
   # stays qualified as `internal.global`.
   inherit (internal) group wan;
 
-  # Bumped on every incompatible change to the daemon-config shape; the
-  # daemon rejects configs with another version.
+  # Pinned at 1 until the first tagged release, then bumped on every
+  # incompatible change to the daemon-config shape; the daemon rejects
+  # configs with another version.
   schemaVersion = 1;
 
   # Returns one message per `field` value that several groups share.
@@ -101,25 +102,4 @@ in
     schemaVersion
     toJSON
     ;
-
-  /*
-    Deprecated name of `assertUniqueMarksAndTables`, from when marks and
-    tables were allocated automatically. Warns when used.
-
-    `groups`: an attrset of group values keyed by name.
-
-    Returns `groups` unchanged. Throws when Groups share a mark or a
-    table.
-  */
-  resolveAllocations = lib.warn "wanwatch: config.resolveAllocations is deprecated; use config.assertUniqueMarksAndTables" assertUniqueMarksAndTables;
-
-  /*
-    Alias of `render`, so the renderer exports the same `toJSONValue`
-    name as the value types.
-
-    `config`: the attrset accepted by `render`.
-
-    Returns the JSON-shaped attrset `render` returns.
-  */
-  toJSONValue = render;
 }

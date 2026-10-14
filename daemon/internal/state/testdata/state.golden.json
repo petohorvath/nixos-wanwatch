@@ -9,7 +9,7 @@
       "healthy": true,
       "gateways": {
         "v4": "192.0.2.1",
-        "v6": "2001:db8::1"
+        "v6": null
       },
       "families": {
         "v4": {

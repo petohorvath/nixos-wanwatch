@@ -34,6 +34,8 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 | `wans` | object | Map from WAN name to per-WAN State. |
 | `groups` | object | Map from Group name to per-Group State. |
 
+An absent value is always `null`, never `""`: a Gateway not yet known, no active Member, or no `activeSince`. Hook env vars are strings, so they encode the same absences as `""`.
+
 ## `wans.<name>`
 
 ```json
@@ -56,8 +58,8 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 | `carrier` | string | `"up"`, `"down"`, or `"unknown"`. |
 | `operstate` | string | IFLA_OPERSTATE text: `up`, `down`, `dormant`, `lowerlayerdown`, `notpresent`, `testing`, `unknown`. |
 | `healthy` | bool | WAN Health, aggregated under `probe.familyHealthPolicy`. |
-| `gateways.v4` | string | Discovered v4 Gateway, or `""` when the kernel has no v4 default on this interface or the route is scope-link (`pointToPoint`). |
-| `gateways.v6` | string | Same for v6. |
+| `gateways.v4` | string \| null | Discovered v4 Gateway, or `null` when the kernel has no v4 default on this interface or the route is scope-link (`pointToPoint`). |
+| `gateways.v6` | string \| null | Same for v6. |
 | `families` | object | One entry per Family present in `probe.targets`. |
 
 ## `wans.<name>.families.<v4|v6>`

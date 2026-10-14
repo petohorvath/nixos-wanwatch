@@ -8,7 +8,7 @@
 
 A WAN is an egress interface plus a Probe: the Targets it pings, the interval, and the loss and RTT thresholds. The daemon keeps a sliding Window of Samples per Target and turns them into a healthy or unhealthy verdict per IP Family. Hysteresis requires several consecutive cycles before Health flips, and carrier loss reported by the kernel makes a WAN unhealthy immediately.
 
-A Group lists WANs as Members, each with a `priority`. The `primary-backup` Strategy selects the healthy Member with the lowest `priority` value, breaking ties by WAN name.
+A Group holds WANs as Members, keyed by WAN name, each with a `priority`. The `primary-backup` Strategy selects the healthy Member with the lowest `priority` value, breaking ties by WAN name.
 
 Each Group owns an fwmark and a routing table. At startup, the daemon installs `ip rule` entries that send marked packets to the table. When the Selection moves to a Member, the daemon writes that Member's default route into the table; on a switch between Members, it also flushes conntrack entries for the vacated WAN. It then publishes the new State and runs Hooks.
 
@@ -85,10 +85,10 @@ Declare the WANs and a Group that fails over between them:
     };
 
     groups.home-uplink = {
-      members = [
-        { wan = "primary"; priority = 1; }
-        { wan = "backup"; priority = 2; }
-      ];
+      members = {
+        primary.priority = 1;
+        backup.priority = 2;
+      };
       mark = 1000;
       table = 1000;
     };

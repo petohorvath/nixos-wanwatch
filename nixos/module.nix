@@ -13,7 +13,7 @@
         probe.targets.v4 = [ "1.1.1.1" ];
       };
       groups.home-uplink = {
-        members = [ { wan = "primary"; } ];
+        members.primary = { };
         mark = 1000;
         table = 1000;
       };
@@ -103,8 +103,8 @@ in
       type = lib.types.attrsOf wanwatch.types.group;
       default = { };
       description = ''
-        Groups, each an ordered list of Members under a Strategy. Each
-        attribute name is the Group's identifier.
+        Groups, each a set of Members under a Strategy. Each attribute
+        name is the Group's identifier.
       '';
     };
 

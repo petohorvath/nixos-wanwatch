@@ -1,9 +1,6 @@
-/*
-  Generic helpers shared by the wanwatch value types: `tryResult`
-  constructors, error records, and identifier and integer predicates.
-  Exposed as `wanwatch.internal.primitives`; nothing here is
-  type-specific.
-*/
+# Generic helpers shared by the wanwatch value types: `tryResult`
+# constructors, error records, and identifier and integer predicates.
+# Not exported from `lib/default.nix`; nothing here is type-specific.
 { lib }:
 let
   # Shared by `isValidName` and `checkIdentifier`, so the predicate and
@@ -142,7 +139,7 @@ in
 
   /*
     Test the positive-integer fields shared by the value types, such
-    as `weight`, `priority`, and `intervalMs`.
+    as `priority` and `intervalMs`.
 
     `value`: any value.
 

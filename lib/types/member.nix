@@ -1,9 +1,10 @@
 /*
   Option types for Group Members, exported through `wanwatch.types`:
 
-    memberWan      — wanwatch identifier of a declared WAN; the daemon
-                     checks the reference when it loads its config
-    memberWeight   — positive integer, default 100
+    memberWan      — wanwatch identifier of a declared WAN; in
+                     `members.<wan>` it is the read-only attribute key,
+                     and the daemon checks the reference when it loads
+                     its config
     memberPriority — positive integer, default 1; lower is preferred
     member         — the complete Member submodule
 */
@@ -17,44 +18,39 @@ let
   inherit (lib) mkOption types;
 
   memberWan = primitives.identifier;
-  memberWeight = primitives.positiveInt;
   memberPriority = primitives.positiveInt;
 
-  member = types.submodule {
-    options = {
-      wan = mkOption {
-        type = memberWan;
-        example = "primary";
-        description = ''
-          Name of the WAN this Member references. It must name a WAN
-          declared in the same `services.wanwatch` configuration.
-        '';
+  member = types.submodule (
+    { name, ... }:
+    {
+      options = {
+        wan = mkOption {
+          type = memberWan;
+          readOnly = true;
+          default = name;
+          description = ''
+            Name of the WAN this Member references, taken from the
+            attribute key: `members.primary.wan` is `"primary"`. It
+            must name a WAN declared in the same `services.wanwatch`
+            configuration.
+          '';
+        };
+        priority = mkOption {
+          type = memberPriority;
+          default = defaults.priority;
+          description = ''
+            Preference order for the primary-backup strategy; lower is
+            preferred. Ties go to the lexicographically smaller `wan`.
+          '';
+        };
       };
-      weight = mkOption {
-        type = memberWeight;
-        default = defaults.weight;
-        description = ''
-          Tiebreaker among Members with equal priority. The
-          primary-backup strategy ignores it; it matters once
-          multi-active strategies exist.
-        '';
-      };
-      priority = mkOption {
-        type = memberPriority;
-        default = defaults.priority;
-        description = ''
-          Preference order for the primary-backup strategy; lower is
-          preferred. Ties go to the lexicographically smaller `wan`.
-        '';
-      };
-    };
-  };
+    }
+  );
 in
 {
   inherit
     member
     memberPriority
     memberWan
-    memberWeight
     ;
 }

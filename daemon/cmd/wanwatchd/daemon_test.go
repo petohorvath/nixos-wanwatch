@@ -70,8 +70,11 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 	if !wan.Healthy {
 		t.Error("Wans[primary].Healthy = false, want true")
 	}
-	if wan.Gateways.V4 != "192.0.2.1" {
-		t.Errorf("Wans[primary].Gateways.V4 = %q, want 192.0.2.1", wan.Gateways.V4)
+	if gw := gatewayText(wan.Gateways.V4); gw != "192.0.2.1" {
+		t.Errorf("Wans[primary].Gateways.V4 = %s, want 192.0.2.1", gw)
+	}
+	if gw := gatewayText(wan.Gateways.V6); gw != "<nil>" {
+		t.Errorf("Wans[primary].Gateways.V6 = %s, want <nil> (no v6 default route)", gw)
 	}
 	fh, ok := wan.Families["v4"]
 	if !ok {
@@ -175,9 +178,9 @@ func testCfgWithGroup() *config.Config {
 			Strategy: "primary-backup",
 			Table:    100,
 			Mark:     0x100,
-			Members: []selector.Member{
-				{Wan: "primary", Priority: 1},
-				{Wan: "backup", Priority: 2},
+			Members: map[string]selector.Member{
+				"primary": {Wan: "primary", Priority: 1},
+				"backup":  {Wan: "backup", Priority: 2},
 			},
 		},
 	}
@@ -389,15 +392,15 @@ func TestRecomputeAffectedGroupsFansOut(t *testing.T) {
 	cfg.Groups = map[string]selector.Group{
 		"home": {
 			Name: "home", Strategy: "primary-backup", Table: 100, Mark: 0x100,
-			Members: []selector.Member{
-				{Wan: "primary", Priority: 1},
-				{Wan: "backup", Priority: 2},
+			Members: map[string]selector.Member{
+				"primary": {Wan: "primary", Priority: 1},
+				"backup":  {Wan: "backup", Priority: 2},
 			},
 		},
 		"guest": {
 			Name: "guest", Strategy: "primary-backup", Table: 200, Mark: 0x200,
-			Members: []selector.Member{
-				{Wan: "backup", Priority: 1},
+			Members: map[string]selector.Member{
+				"backup": {Wan: "backup", Priority: 1},
 			},
 		},
 	}

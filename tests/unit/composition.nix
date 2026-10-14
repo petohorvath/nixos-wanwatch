@@ -13,26 +13,11 @@
       "config"
       "global"
       "group"
-      "internal"
       "member"
       "probe"
       "selector"
       "types"
       "version"
-      "wan"
-    ];
-  };
-
-  testExportsInternalModules = {
-    expr = builtins.attrNames wanwatch.internal;
-    expected = [
-      "config"
-      "global"
-      "group"
-      "member"
-      "primitives"
-      "probe"
-      "selector"
       "wan"
     ];
   };

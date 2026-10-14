@@ -10,21 +10,29 @@
 }:
 let
   inherit (fixtures) cases;
-  inherit (fixtures.inputs.member) minimal;
-  inherit (helpers) typeTests;
+  inherit (helpers) evalSubmodule typeTests;
   inherit (wanwatch) types;
+
+  # `members.<wan>` supplies the WAN name, so inputs leave it out.
+  minimal = removeAttrs fixtures.inputs.member.minimal [ "wan" ];
 in
 {
   memberWan = typeTests types.memberWan cases.identifiers;
-  memberWeight = typeTests types.memberWeight cases.positiveInts;
   memberPriority = typeTests types.memberPriority cases.positiveInts;
 
-  member = typeTests types.member {
+  member = {
+    testWanTakesAttributeKey = {
+      expr = (evalSubmodule "wan" types.member (minimal // { wan = "backup"; })).wan;
+      expected = "backup";
+    };
+  }
+  // typeTests types.member {
     invalid = [
-      { }
-      (minimal // { wan = "1bad"; })
-      (minimal // { weight = 0; })
+      # The attribute key sets the read-only `wan`.
+      (minimal // { wan = "backup"; })
       (minimal // { priority = 0; })
+      # Member has no `weight` until a Strategy reads one.
+      (minimal // { weight = 100; })
     ];
   };
 }

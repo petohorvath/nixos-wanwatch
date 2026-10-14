@@ -48,25 +48,27 @@ let
         };
       };
       groups.home-uplink = {
-        members = [
-          {
-            wan = "primary";
-            priority = 1;
-          }
-          {
-            wan = "backup";
-            priority = 2;
-          }
-        ];
+        members = {
+          primary.priority = 1;
+          backup.priority = 2;
+        };
         mark = 1000;
         table = 1000;
       };
     };
   };
 
-  # A WAN whose only fault is its probe targets.
-  evaluateWithTargets =
-    targets:
+  # One WAN in one Group, faulty only in the given probe targets or
+  # Members.
+  evaluateOneWan =
+    {
+      targets ? {
+        v4 = [ "1.1.1.1" ];
+      },
+      members ? {
+        broken = { };
+      },
+    }:
     evaluate [
       {
         services.wanwatch = {
@@ -76,7 +78,7 @@ let
             probe = { inherit targets; };
           };
           groups.home = {
-            members = [ { wan = "broken"; } ];
+            inherit members;
             mark = 1000;
             table = 1000;
           };
@@ -155,18 +157,16 @@ in
         strategy = "primary-backup";
         mark = 1000;
         table = 1000;
-        members = [
-          {
+        members = {
+          primary = {
             wan = "primary";
             priority = 1;
-            weight = 100;
-          }
-          {
+          };
+          backup = {
             wan = "backup";
             priority = 2;
-            weight = 100;
-          }
-        ];
+          };
+        };
       };
     };
 
@@ -211,9 +211,11 @@ in
 
   rejections = {
     testProbeNoTargets = {
-      expr = renderConfig (evaluateWithTargets {
-        v4 = [ ];
-        v6 = [ ];
+      expr = renderConfig (evaluateOneWan {
+        targets = {
+          v4 = [ ];
+          v6 = [ ];
+        };
       });
       expectedError = {
         type = "ThrownError";
@@ -222,12 +224,22 @@ in
     };
 
     testProbeFamilyMismatch = {
-      expr = renderConfig (evaluateWithTargets {
-        v4 = [ "2606:4700:4700::1111" ];
+      expr = renderConfig (evaluateOneWan {
+        targets.v4 = [ "2606:4700:4700::1111" ];
       });
       expectedError = {
         type = "ThrownError";
         msg = "\\[probeTargetFamilyMismatch]";
+      };
+    };
+
+    testGroupNoMembers = {
+      expr = renderConfig (evaluateOneWan {
+        members = { };
+      });
+      expectedError = {
+        type = "ThrownError";
+        msg = "\\[groupNoMembers]";
       };
     };
   };

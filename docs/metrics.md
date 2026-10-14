@@ -27,7 +27,7 @@ This catalog matches the series registered in `daemon/internal/metrics/metrics.g
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `wanwatch_group_active` | gauge | `group`, `wan` | `1` for the active Member, `0` for the others. |
-| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. Emitted `reason` values are `health` and `carrier`; `startup` and `manual` are reserved. |
+| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. `reason` is `health` or `carrier`. |
 
 ## Apply
 
@@ -37,7 +37,7 @@ Apply metrics are split into per-Family and Family-agnostic series so no label i
 |---|---|---|---|
 | `wanwatch_apply_route_duration_seconds` | histogram | `group`, `family` | Wall time of `RouteReplace`. |
 | `wanwatch_apply_route_errors_total` | counter | `group`, `family` | Route writes that returned a netlink error. |
-| `wanwatch_apply_op_errors_total` | counter | `group`, `op` | Family-agnostic errors. Emitted `op` values are `conntrack_flush`, `ifindex_lookup`, and `rule_install`; `state_write` and `hook` are reserved. |
+| `wanwatch_apply_op_errors_total` | counter | `group`, `op` | Family-agnostic errors. `op` is `conntrack_flush`, `ifindex_lookup`, or `rule_install`. |
 
 ## Daemon
 

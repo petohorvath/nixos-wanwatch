@@ -10,12 +10,11 @@ type Group struct {
     Strategy string
     Table    int
     Mark     int
-    Members  []Member
+    Members  map[string]Member // keyed by Member.Wan
 }
 
 type Member struct {
     Wan      string
-    Weight   int // reserved for multi-active Strategies
     Priority int // lower is preferred
 }
 
@@ -57,7 +56,7 @@ sort healthy by (priority asc, wan asc)
 return Selection{Active: Active{Wan: healthy[0].Member.Wan, Has: true}}
 ```
 
-The lowest `priority` wins, and ties go to the lexicographically first WAN name, so equal priorities stay deterministic. `weight` is ignored.
+The lowest `priority` wins, and ties go to the lexicographically first WAN name, so equal priorities stay deterministic.
 
 | Members (priority, Health) | Active |
 |---|---|

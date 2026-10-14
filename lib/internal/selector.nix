@@ -9,7 +9,7 @@
 }:
 let
   # Lowest priority among healthy Members wins; ties go to the
-  # lexicographically smaller WAN name. Weight is ignored. Matches
+  # lexicographically smaller WAN name. Matches
   # `daemon/internal/selector/primarybackup.go`.
   primaryBackup =
     group: memberHealth:
@@ -18,7 +18,9 @@ let
       isPreferred =
         left: right:
         if left.priority != right.priority then left.priority < right.priority else left.wan < right.wan;
-      healthyMembers = lib.sort isPreferred (builtins.filter isHealthy group.members);
+      healthyMembers = lib.sort isPreferred (
+        builtins.filter isHealthy (builtins.attrValues group.members)
+      );
     in
     if healthyMembers == [ ] then null else (builtins.head healthyMembers).wan;
 

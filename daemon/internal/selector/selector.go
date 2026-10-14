@@ -28,19 +28,20 @@ var ErrUnknownStrategy = errors.New("selector: unknown strategy")
 
 // Group is the daemon-side view of a Group value. It mirrors the
 // JSON shape produced by `wanwatch.group.toJSONValue` so the daemon
-// can deserialize directly into this struct.
+// can deserialize directly into this struct. Members is keyed by
+// the WAN each Member references; config validation checks every
+// key against its Member's Wan.
 type Group struct {
-	Name     string   `json:"name"`
-	Strategy string   `json:"strategy"`
-	Table    int      `json:"table"`
-	Mark     int      `json:"mark"`
-	Members  []Member `json:"members"`
+	Name     string            `json:"name"`
+	Strategy string            `json:"strategy"`
+	Table    int               `json:"table"`
+	Mark     int               `json:"mark"`
+	Members  map[string]Member `json:"members"`
 }
 
 // Member is the daemon-side view of a Member value.
 type Member struct {
 	Wan      string `json:"wan"`
-	Weight   int    `json:"weight"`
 	Priority int    `json:"priority"`
 }
 

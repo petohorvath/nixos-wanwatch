@@ -9,10 +9,6 @@ import (
 // (lower = preferred). Ties are broken by lexicographic WAN name
 // so the output is deterministic. When no Member is healthy,
 // Active.Has is false.
-//
-// Weight is ignored by this strategy — it matters once multi-active
-// (load-balance) lands in v2 and the selector returns a weighted
-// set rather than a single Active.
 func primaryBackup(g Group, members []MemberHealth) Selection {
 	healthy := healthyMembers(members)
 	if len(healthy) == 0 {
