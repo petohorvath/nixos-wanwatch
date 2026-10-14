@@ -144,7 +144,7 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 |---|---|
 | Option types (`lib/types/`) | Wrong field types, enum mismatches, malformed IP literals (via libnet). |
 | `wanwatch.<type>.tryMake` | Unknown fields, which a direct library caller could otherwise misspell unnoticed, and cross-field invariants: Family coupling, Member `wan`/key disagreement, threshold ordering. |
-| `config.render` | Invalid `global` settings, through `wanwatch.global.make`: unknown fields, empty or whitespace-only paths, an unknown `logLevel`, or a non-positive `hookTimeoutMs`. |
+| `config.render` | Invalid `global` settings, through `wanwatch.global.make`: unknown fields, empty or whitespace-only paths, an unknown `logLevel`, or a non-positive `hookTimeoutMs`; and Member `wan` references that `wans` does not declare. |
 | `config.assertUniqueMarksAndTables` | Marks or tables shared across Groups. |
 | `daemon/internal/config/Validate` | Unknown keys and trailing data at parse time, then the first failing check of: empty paths or non-positive `hookTimeoutMs` in `global`; name/key disagreement; empty `interface`; `method` other than `icmp`; no Targets; non-positive `intervalMs`, `timeoutMs`, or `windowSize`; `familyHealthPolicy` other than `all` or `any`; loss thresholds outside `0..100` or not ordered up < down; RTT thresholds not positive or not ordered up < down; Hysteresis counters below 1; unknown `strategy`; non-positive `table` or `mark`; no Members; Member `wan`/key disagreement; dangling `member.wan` references. |
 

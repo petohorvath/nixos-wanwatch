@@ -10,9 +10,10 @@
       "groups": { "<name>": <group.toJSONValue>, ... }
     }
 
-  Rendering also validates the global settings with `global.make` and
-  rejects Groups that share a mark or a table, because their traffic
-  would be routed through the wrong table.
+  Rendering also validates the global settings with `global.make`,
+  rejects Members that reference an undeclared WAN, which the daemon
+  would refuse, and rejects Groups that share a mark or a table,
+  because their traffic would be routed through the wrong table.
 */
 {
   lib,
@@ -60,6 +61,41 @@ let
     else
       throw "wanwatch: duplicate mark or table across groups: ${lib.concatStringsSep "; " messages}";
 
+  # Returns one message per Member whose `wan` is not a key of `wans`.
+  describeUndeclaredMemberWans =
+    wans: groups:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        name: group:
+        lib.pipe group.members [
+          builtins.attrNames
+          (builtins.filter (wan: !(wans ? ${wan})))
+          (map (wan: "group '${name}' references wan '${wan}'"))
+        ]
+      ) groups
+    );
+
+  /*
+    Reject Members that reference a WAN `wans` does not declare. The
+    daemon refuses such a config at startup, so a typo would otherwise
+    surface as a failed unit instead of an evaluation error.
+
+    `wans`: an attrset of WAN values keyed by name.
+    `groups`: an attrset of group values keyed by name.
+
+    Returns `groups` unchanged. Throws a message listing every
+    undeclared reference.
+  */
+  assertDeclaredMemberWans =
+    wans: groups:
+    let
+      messages = describeUndeclaredMemberWans wans groups;
+    in
+    if messages == [ ] then
+      groups
+    else
+      throw "wanwatch: group members reference undeclared WANs: ${lib.concatStringsSep "; " messages}";
+
   /*
     Render the daemon configuration.
 
@@ -70,8 +106,9 @@ let
     `{ }`.
 
     Returns the JSON-shaped attrset. Throws the `global.make` error when
-    the global settings are invalid, and throws when Groups share a mark
-    or a table.
+    the global settings are invalid, and throws when a Member references
+    a WAN that `wans` does not declare or when Groups share a mark or a
+    table.
   */
   render =
     {
@@ -83,7 +120,11 @@ let
       schema = schemaVersion;
       global = internal.global.toJSONValue (internal.global.make global);
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
-      groups = builtins.mapAttrs (_: group.toJSONValue) (assertUniqueMarksAndTables groups);
+      groups = lib.pipe groups [
+        (assertDeclaredMemberWans wans)
+        assertUniqueMarksAndTables
+        (builtins.mapAttrs (_: group.toJSONValue))
+      ];
     };
 
   /*

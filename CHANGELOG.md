@@ -8,6 +8,7 @@ No version has been released yet. This section describes the first release as it
 
 ### Fixed
 
+- `wanwatch.config.render`, and so module evaluation, rejects a Member whose `wan` names no declared WAN, listing every such reference. Only the daemon checked this before, so a typo in `groups.<name>.members` built, then failed the unit after its restart limit.
 - `docs/metrics.md` no longer subtracts the `wanwatch_group_decisions_total` counter from a timestamp; the example now counts Decisions per Group over the last hour. Its Telegraf example uses the bare `unix://` socket URL that the Telegraf module renders.
 - Specs now match the daemon's behavior: `failover.md` describes the full-Window cold-start gate and recovery latency, `daemon-state.md` the caller-supplied `updatedAt` and Hooks published while a Family awaits its Gateway, `daemon-config.md` the current Probe defaults, the Nix-side `global` defaults, and the daemon's full validation, and `probe-algorithm.md` the kernel-computed ICMPv6 checksum on raw sockets. No contract changed.
 - Gateway discovery now subscribes to route changes before taking its initial snapshot. Default routes installed during daemon startup are retained, preventing a missed Gateway from indefinitely deferring a Group route write. Buffered and subsequent notifications trigger current-route reads, so obsolete additions/deletions cannot regress a newer Gateway in State or a Group's route table.

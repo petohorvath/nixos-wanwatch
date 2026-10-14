@@ -242,5 +242,20 @@ in
         msg = "\\[groupNoMembers]";
       };
     };
+
+    # A typo in a Member's WAN fails here rather than as a daemon
+    # restart loop.
+    testMemberUndeclaredWan = {
+      expr = renderConfig (evaluate [
+        primaryAndBackup
+        {
+          services.wanwatch.groups.home-uplink.members.bakcup = { };
+        }
+      ]);
+      expectedError = {
+        type = "ThrownError";
+        msg = "group 'home-uplink' references wan 'bakcup'";
+      };
+    };
   };
 }

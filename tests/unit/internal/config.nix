@@ -174,6 +174,7 @@ in
 
     testRejectsSharedMark = {
       expr = config.render {
+        inherit wans;
         groups = makeGroups {
           a = {
             mark = 1500;
@@ -188,6 +189,45 @@ in
       expectedError = {
         type = "ThrownError";
         msg = "mark 1500 is shared";
+      };
+    };
+
+    # The daemon would reject the file and fail its unit.
+    testRejectsUndeclaredMemberWan = {
+      expr = config.render {
+        inherit wans;
+        groups.home-uplink = group.make (
+          fixtures.inputs.group.minimal
+          // {
+            members = {
+              primary = { };
+              backup = { };
+            };
+          }
+        );
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = "group 'home-uplink' references wan 'backup'";
+      };
+    };
+
+    testNamesEveryUndeclaredMemberWan = {
+      expr = config.render {
+        groups = makeGroups {
+          a = {
+            mark = 1500;
+            table = 1500;
+          };
+          b = {
+            mark = 1600;
+            table = 1600;
+          };
+        };
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = "group 'a' references wan 'primary'; group 'b' references wan 'primary'";
       };
     };
   };
