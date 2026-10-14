@@ -56,10 +56,22 @@ in
     expr = builtins.attrNames config;
     expected = [
       "assertUniqueMarksAndTables"
+      "paths"
       "render"
       "schemaVersion"
       "toJSON"
     ];
+  };
+
+  # The module's sandbox lets the daemon write only under /run/wanwatch
+  # (ADR-0014).
+  testPaths = {
+    expr = config.paths;
+    expected = {
+      statePath = "/run/wanwatch/state.json";
+      hooksDir = "/etc/wanwatch/hooks";
+      metricsSocket = "/run/wanwatch/metrics.sock";
+    };
   };
 
   assertUniqueMarksAndTables = {
@@ -136,7 +148,7 @@ in
       expr = config.render { };
       expected = {
         schema = config.schemaVersion;
-        global = global.defaults;
+        global = global.defaults // config.paths;
         wans = { };
         groups = { };
       };
@@ -144,15 +156,13 @@ in
 
     testFillsGlobalDefaults = {
       expr = (config.render { global.logLevel = "debug"; }).global;
-      expected = global.defaults // {
-        logLevel = "debug";
-      };
+      expected = global.defaults // config.paths // { logLevel = "debug"; };
     };
 
     # A global value is also valid input.
     testSerializesGlobalValue = {
       expr = (config.render { global = global.make fixtures.inputs.global.full; }).global;
-      expected = fixtures.inputs.global.full;
+      expected = fixtures.inputs.global.full // config.paths;
     };
 
     testRejectsInvalidGlobal = {

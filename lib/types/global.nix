@@ -20,33 +20,6 @@ let
 
   global = types.submodule {
     options = {
-      statePath = mkOption {
-        type = types.nonEmptyStr;
-        default = defaults.statePath;
-        description = ''
-          File the daemon atomically rewrites with its State on every
-          Decision. The default lives in the service's
-          RuntimeDirectory under `/run`.
-        '';
-      };
-      hooksDir = mkOption {
-        type = types.nonEmptyStr;
-        default = defaults.hooksDir;
-        description = ''
-          Root of the Hook tree. On every Decision the daemon runs the
-          Hooks in `<hooksDir>/{up,down,switch}.d/`
-          (docs/specs/daemon-state.md).
-        '';
-      };
-      metricsSocket = mkOption {
-        type = types.nonEmptyStr;
-        default = defaults.metricsSocket;
-        description = ''
-          Unix socket on which the daemon serves Prometheus metrics.
-          The socket has mode 0660, so scrapers need membership in
-          the daemon's group.
-        '';
-      };
       logLevel = mkOption {
         type = globalLogLevel;
         default = defaults.logLevel;
@@ -59,9 +32,9 @@ let
         type = primitives.positiveInt;
         default = defaults.hookTimeoutMs;
         description = ''
-          Deadline in milliseconds for each Hook under `hooksDir`.
-          When it expires, the daemon sends SIGKILL to the Hook's
-          process group and reports a timeout.
+          Deadline in milliseconds for each Hook. When it expires,
+          the daemon sends SIGKILL to the Hook's process group and
+          reports a timeout.
         '';
       };
     };

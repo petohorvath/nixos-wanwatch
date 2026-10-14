@@ -181,6 +181,17 @@ in
       };
     };
 
+    testServiceIdentity = {
+      expr = {
+        inherit (baseConfig.systemd.services.wanwatch.serviceConfig) User Group RuntimeDirectory;
+      };
+      expected = {
+        User = "wanwatch";
+        Group = "wanwatch";
+        RuntimeDirectory = "wanwatch";
+      };
+    };
+
     testServiceCapabilities = {
       expr = baseConfig.systemd.services.wanwatch.serviceConfig.AmbientCapabilities;
       expected = [
@@ -240,6 +251,29 @@ in
       expectedError = {
         type = "ThrownError";
         msg = "\\[groupNoMembers]";
+      };
+    };
+
+    # ADR-0014: the module owns the daemon's paths and identity.
+    testGlobalStatePathNotConfigurable = {
+      expr = renderConfig (evaluate [
+        primaryAndBackup
+        { services.wanwatch.global.statePath = "/var/lib/wanwatch/state.json"; }
+      ]);
+      expectedError = {
+        type = "ThrownError";
+        msg = "global\\.statePath' does not exist";
+      };
+    };
+
+    testServiceGroupNotConfigurable = {
+      expr = renderConfig (evaluate [
+        primaryAndBackup
+        { services.wanwatch.group = "network"; }
+      ]);
+      expectedError = {
+        type = "ThrownError";
+        msg = "wanwatch\\.group' does not exist";
       };
     };
 

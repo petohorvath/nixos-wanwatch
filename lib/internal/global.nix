@@ -3,13 +3,11 @@
   settings configure the daemon process rather than one WAN or Group.
   A global value carries:
 
-    statePath     — file the daemon atomically rewrites with its State
-    hooksDir      — root of the Hook tree, `<hooksDir>/{up,down,switch}.d/`
-    metricsSocket — Unix socket that serves Prometheus metrics
     logLevel      — minimum level the daemon logs, from `validLogLevels`
     hookTimeoutMs — deadline for each Hook in milliseconds
 
-  Every field has a default in `defaults`, so `make { }` is valid.
+  Every field has a default in `defaults`, so `make { }` is valid. The
+  daemon's paths are not settings; `config.paths` fixes them.
 */
 { internal }:
 let
@@ -23,12 +21,7 @@ let
 
   formatErrors = internal.primitives.formatErrors "global.make";
 
-  # The default statePath and metricsSocket live in /run/wanwatch, the
-  # RuntimeDirectory that `nixos/module.nix` creates.
   defaults = {
-    statePath = "/run/wanwatch/state.json";
-    hooksDir = "/etc/wanwatch/hooks";
-    metricsSocket = "/run/wanwatch/metrics.sock";
     logLevel = "info";
     hookTimeoutMs = 5000;
   };
@@ -43,15 +36,6 @@ let
   ];
 
   knownFields = builtins.attrNames defaults;
-
-  # Matches `lib.types.nonEmptyStr`, the paths' option type: at least
-  # one character other than a space, tab, or newline.
-  isNonEmptyString = value: builtins.isString value && builtins.match "[ \t\n]*" value == null;
-
-  validatePath =
-    kind: field: value:
-    check kind (isNonEmptyString value)
-      "${field} must be a non-empty string; got ${builtins.toJSON value}";
 
   validateLogLevel =
     logLevel:
@@ -68,19 +52,15 @@ let
   collectErrors =
     input: fields:
     checkUnknownFields "globalUnknownField" "global" knownFields input
-    ++ validatePath "globalInvalidStatePath" "statePath" fields.statePath
-    ++ validatePath "globalInvalidHooksDir" "hooksDir" fields.hooksDir
-    ++ validatePath "globalInvalidMetricsSocket" "metricsSocket" fields.metricsSocket
     ++ validateLogLevel fields.logLevel
     ++ validateHookTimeout fields.hookTimeoutMs;
 
   /*
     Validate global settings without throwing, reporting every
     violation in one message. The checks cover everything the daemon
-    rejects in `global`, so a bad setting fails evaluation instead of
-    the service start. They are stricter on paths, which must contain
-    a character other than whitespace, as `lib.types.nonEmptyStr`
-    requires.
+    rejects in these settings, so a bad setting fails evaluation
+    instead of the service start. A path field is unknown, because
+    `config.paths` fixes the paths.
 
     `input`: an attrset with any subset of the global fields; missing
     fields take `defaults`.
@@ -88,10 +68,6 @@ let
     Returns a `tryResult` whose value is the global value. Error kinds:
 
       globalUnknownField           — a field outside the global fields
-      globalInvalidStatePath       — statePath is not a non-empty string
-      globalInvalidHooksDir        — hooksDir is not a non-empty string
-      globalInvalidMetricsSocket   — metricsSocket is not a non-empty
-                                     string
       globalInvalidLogLevel        — logLevel not in `validLogLevels`
       globalNonPositiveHookTimeout — hookTimeoutMs ≤ 0
   */
@@ -124,16 +100,11 @@ let
 
     `global`: a global value.
 
-    Returns the JSON-shaped attrset embedded by `config.render`.
+    Returns the JSON-shaped attrset that `config.render` embeds, adding
+    `config.paths`.
   */
   toJSONValue = global: {
-    inherit (global)
-      hookTimeoutMs
-      hooksDir
-      logLevel
-      metricsSocket
-      statePath
-      ;
+    inherit (global) hookTimeoutMs logLevel;
   };
 in
 {

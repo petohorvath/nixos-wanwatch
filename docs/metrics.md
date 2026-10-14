@@ -1,6 +1,6 @@
 # Metrics catalog
 
-The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock`, configurable with `services.wanwatch.global.metricsSocket`. The socket has mode `0660` and owner `wanwatch:wanwatch`; Telegraf reads it through supplementary group membership.
+The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock`. The socket has mode `0660` and owner `wanwatch:wanwatch`; Telegraf reads it through supplementary group membership.
 
 This catalog matches the series registered in `daemon/internal/metrics/metrics.go`. Every name has the `wanwatch_` prefix.
 

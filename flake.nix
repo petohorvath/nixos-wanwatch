@@ -96,7 +96,7 @@
         nixosModules = {
           default = flake-parts.lib.importApply ./nixos/module.nix { wanwatch = self.lib; };
           wanwatch = self.nixosModules.default;
-          telegraf = ./nixos/telegraf.nix;
+          telegraf = flake-parts.lib.importApply ./nixos/telegraf.nix { wanwatch = self.lib; };
         };
       };
     };

@@ -162,6 +162,8 @@ After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up
 
 Hooks are notifications: a failing or timed-out Hook is logged and counted but never undoes a Decision. `services.wanwatch.global.hookTimeoutMs` sets the deadline. [`docs/specs/daemon-state.md`](./docs/specs/daemon-state.md) lists every variable and the execution rules.
 
+Hooks run as the `wanwatch` user inside the daemon's systemd sandbox, which allows writes only under `/run/wanwatch` and a private `/tmp`. To let Hooks reach another service, such as a socket owned by its group, add that group to `users.users.wanwatch.extraGroups`.
+
 ## Metrics
 
 The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock`, readable by members of the `wanwatch` group. To scrape them with Telegraf, add `wanwatch.nixosModules.telegraf` to the host's modules next to `wanwatch.nixosModules.default`, then enable it:
@@ -177,17 +179,23 @@ The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.s
 
 ## Global settings
 
-`services.wanwatch.global` sets the daemon's paths, log level, and Hook timeout:
+`services.wanwatch.global` sets the daemon's log level and Hook timeout:
 
 | Option | Default |
 |---|---|
-| `statePath` | `/run/wanwatch/state.json` |
-| `hooksDir` | `/etc/wanwatch/hooks` |
-| `metricsSocket` | `/run/wanwatch/metrics.sock` |
 | `logLevel` | `info` |
 | `hookTimeoutMs` | `5000` |
 
-The module renders the whole configuration to `/etc/wanwatch/config.json`; [`docs/specs/daemon-config.md`](./docs/specs/daemon-config.md) specifies its format.
+## Paths
+
+The daemon runs as the `wanwatch` user and group, which the module creates. Its systemd sandbox makes the file system read-only apart from `/run/wanwatch` and a private `/tmp`, so the module fixes the daemon's paths ([ADR-0014](./docs/adr/0014-module-owns-identity-and-paths.md)):
+
+| Path | Contents |
+|---|---|
+| `/etc/wanwatch/config.json` | The rendered configuration; [`docs/specs/daemon-config.md`](./docs/specs/daemon-config.md) specifies its format |
+| `/etc/wanwatch/hooks/` | Hook scripts in `up.d/`, `down.d/`, and `switch.d/` |
+| `/run/wanwatch/state.json` | State |
+| `/run/wanwatch/metrics.sock` | Prometheus metrics |
 
 ## Documentation
 

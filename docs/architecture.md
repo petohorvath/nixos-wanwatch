@@ -57,7 +57,7 @@ lib/internal/
   group.nix          — value type, Strategy enum, mark/table validators
   global.nix         — value type for the daemon's global settings
   selector.nix       — pure Nix mirror of the Go selector
-  config.nix         — JSON renderer + duplicate-mark/table assertion
+  config.nix         — JSON renderer, fixed paths, consistency checks
 ```
 
 `lib/types/<name>.nix` exposes a NixOS option type for each value type, flattened as `wanwatch.types.<name>`. `wanwatch.types.fwmark` and `routingTableId` restrict the integers each Group declares to `[1000, 32767]`.

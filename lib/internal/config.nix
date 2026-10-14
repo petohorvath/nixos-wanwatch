@@ -5,7 +5,7 @@
 
     {
       "schema": 1,
-      "global": <global.toJSONValue>,
+      "global": <global.toJSONValue> // paths,
       "wans":   { "<name>": <wan.toJSONValue>, ... },
       "groups": { "<name>": <group.toJSONValue>, ... }
     }
@@ -28,6 +28,15 @@ let
   # incompatible change to the daemon-config shape; the daemon rejects
   # configs with another version.
   schemaVersion = 1;
+
+  # The daemon's paths, which are fixed rather than settings: the NixOS
+  # module's sandbox lets the daemon write only under /run/wanwatch
+  # (docs/adr/0014-module-owns-identity-and-paths.md).
+  paths = {
+    statePath = "/run/wanwatch/state.json";
+    hooksDir = "/etc/wanwatch/hooks";
+    metricsSocket = "/run/wanwatch/metrics.sock";
+  };
 
   # Returns one message per `field` value that several groups share.
   describeSharedValues =
@@ -105,10 +114,10 @@ let
     `groups`: an attrset of group values from `group.make`; default
     `{ }`.
 
-    Returns the JSON-shaped attrset. Throws the `global.make` error when
-    the global settings are invalid, and throws when a Member references
-    a WAN that `wans` does not declare or when Groups share a mark or a
-    table.
+    Returns the JSON-shaped attrset, whose `global` also carries
+    `paths`. Throws the `global.make` error when the global settings
+    are invalid, and throws when a Member references a WAN that `wans`
+    does not declare or when Groups share a mark or a table.
   */
   render =
     {
@@ -118,7 +127,7 @@ let
     }:
     {
       schema = schemaVersion;
-      global = internal.global.toJSONValue (internal.global.make global);
+      global = internal.global.toJSONValue (internal.global.make global) // paths;
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
       groups = lib.pipe groups [
         (assertDeclaredMemberWans wans)
@@ -139,6 +148,7 @@ in
 {
   inherit
     assertUniqueMarksAndTables
+    paths
     render
     schemaVersion
     toJSON

@@ -9,6 +9,8 @@
     services.wanwatch.enable = true;
     services.wanwatch.telegraf.enable = true;
 */
+{ wanwatch }:
+
 {
   config,
   lib,
@@ -59,7 +61,7 @@ in
       {
         # Current Telegraf treats a `:/metrics` suffix as part of the
         # socket path; a bare `unix://` URL uses the default `/metrics`.
-        urls = [ "unix://${cfg.global.metricsSocket}" ];
+        urls = [ "unix://${wanwatch.config.paths.metricsSocket}" ];
         inherit (telegrafCfg) interval;
         namepass = [ "wanwatch_*" ];
       }
@@ -67,6 +69,6 @@ in
 
     # The metrics socket has mode 0660; group membership grants access
     # without relaxing it.
-    users.users.telegraf.extraGroups = [ cfg.group ];
+    users.users.telegraf.extraGroups = [ "wanwatch" ];
   };
 }

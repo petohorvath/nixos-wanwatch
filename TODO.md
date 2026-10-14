@@ -39,6 +39,13 @@ definitions. Wanwatch consumer API stays identical
 (`wanwatch.types.fwmark` keeps resolving — to the libnet
 definition instead of the local one).
 
+### Declarative Hooks option
+
+Add `services.wanwatch.hooks.<event>.<name>` (a path or package)
+that the module links to `/etc/wanwatch/hooks/<event>.d/<name>`,
+replacing hand-written `environment.etc` entries. The Hook tree
+stays at its fixed path ([ADR-0014](./docs/adr/0014-module-owns-identity-and-paths.md)).
+
 ### Pre-apply hooks
 
 Add a `<hooksDir>/pre-{up,down,switch}.d/*` tier that fires *before*
