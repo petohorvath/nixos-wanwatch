@@ -1,5 +1,6 @@
-# Composes the value types and renderers, exposed as `wanwatch.internal`.
-# Each module receives only the lower-level modules it uses.
+# Composes the value types and renderers that `lib/default.nix` exports
+# and `lib/types` builds on. Each module receives only the lower-level
+# modules it uses.
 { lib, libnet }:
 let
   primitives = import ./primitives.nix { inherit lib; };

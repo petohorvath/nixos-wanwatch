@@ -1,16 +1,15 @@
-# Tests for `lib/internal/primitives.nix`, exposed as
-# `wanwatch.internal.primitives`.
+# Tests for `lib/internal/primitives.nix`, which `lib/default.nix` does
+# not export, so the suite imports it directly.
 {
   fixtures,
   helpers,
   lib,
-  wanwatch,
   ...
 }:
 let
   inherit (fixtures) cases;
   inherit (helpers) predicateTests;
-  inherit (wanwatch.internal) primitives;
+  primitives = import ../../../lib/internal/primitives.nix { inherit lib; };
 
   # Accepts positive numbers, so `partitionTry` sees both outcomes.
   parsePositive =

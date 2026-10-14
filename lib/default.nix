@@ -13,15 +13,15 @@
     }
 
   `libnet` is nix-libnet with its option types (`withLib`). The value
-  types are also exported at the top level (`wanwatch.wan`), and
-  `wanwatch.types` holds the flattened option types.
+  types, the selector, and the renderer are exported at the top level
+  (`wanwatch.wan`), and `wanwatch.types` holds the flattened option
+  types. The shared helpers in `internal/primitives.nix` stay private.
 */
 { lib, libnet }:
 let
   internal = import ./internal { inherit lib libnet; };
 in
 {
-  inherit internal;
   inherit (internal)
     config
     global
