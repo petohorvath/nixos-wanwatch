@@ -109,12 +109,17 @@ func (t Targets) Families() []probe.Family {
 	return fams
 }
 
-// For returns the Targets for family, in configuration order.
+// For returns the Targets for family, in configuration order, and
+// nil for a value that is not a Family.
 func (t Targets) For(family probe.Family) []string {
-	if family == probe.FamilyV4 {
+	switch family {
+	case probe.FamilyV4:
 		return t.V4
+	case probe.FamilyV6:
+		return t.V6
+	default:
+		return nil
 	}
-	return t.V6
 }
 
 // Thresholds mirrors the nested probe.thresholds submodule.

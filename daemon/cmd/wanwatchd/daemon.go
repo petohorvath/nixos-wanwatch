@@ -270,8 +270,8 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 	}
 	var failed int
 	for _, fam := range families {
-		// An explicit family set (the RouteEvent reapply path) may
-		// name a family the WAN doesn't probe; the daemon has no route
+		// An explicit Family set (the RouteEvent reapply path) may
+		// name a Family the WAN doesn't probe; the daemon has no route
 		// to maintain for it.
 		if !slices.Contains(probed, fam) {
 			continue

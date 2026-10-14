@@ -52,6 +52,7 @@ func TestTargetsFor(t *testing.T) {
 		{"v6 bucket", targets, probe.FamilyV6, []string{"2001:db8::1"}},
 		{"empty v4", Targets{}, probe.FamilyV4, nil},
 		{"empty v6", Targets{}, probe.FamilyV6, nil},
+		{"unknown Family", targets, probe.Family(0), nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

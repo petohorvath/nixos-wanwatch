@@ -130,14 +130,14 @@ Carrier loss makes `carrierUp()` false, and WAN Health ANDs it with the Family v
 ## Family-policy aggregation
 
 ```text
-combineFamilies(families, policy):
+combineFamilies(wan):
     probed, healthy = 0, 0
-    for f in families:
+    for f in wan.families:
         probed++
         if !f.cooked or f.healthy:
             healthy++
     if probed == 0: return false
-    switch policy:
+    switch wan.probe.familyHealthPolicy:
         case "any": return healthy > 0
         default:    return healthy == probed  # "all"
 ```
