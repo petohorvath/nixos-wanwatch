@@ -2,10 +2,8 @@
   `services.wanwatch`: multi-WAN monitoring and failover. Renders the
   declared WANs and Groups into the daemon configuration, creates the
   `wanwatch` system user and group, and runs wanwatchd as a hardened
-  systemd service. The module fixes the user, the group, and the
-  daemon's paths, because the sandbox leaves `/run/wanwatch` as the
-  only writable directory other processes can see
-  (docs/adr/0014-module-owns-identity-and-paths.md).
+  systemd service. The user, the group, and the daemon's paths are
+  fixed (docs/adr/0014-module-owns-identity-and-paths.md).
 
   Example:
 

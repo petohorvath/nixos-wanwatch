@@ -86,6 +86,19 @@ let
       }
     ];
 
+  # ADR-0014: the module owns the daemon's identity and paths, so
+  # setting a former option fails evaluation.
+  rejectsRemovedOption = optionPattern: definition: {
+    expr = renderConfig (evaluate [
+      primaryAndBackup
+      { services.wanwatch = definition; }
+    ]);
+    expectedError = {
+      type = "ThrownError";
+      msg = "${optionPattern}' does not exist";
+    };
+  };
+
   baseConfig = evaluate [ primaryAndBackup ];
   rendered = renderConfig baseConfig;
 
@@ -254,26 +267,17 @@ in
       };
     };
 
-    # ADR-0014: the module owns the daemon's paths and identity.
-    testGlobalStatePathNotConfigurable = {
-      expr = renderConfig (evaluate [
-        primaryAndBackup
-        { services.wanwatch.global.statePath = "/var/lib/wanwatch/state.json"; }
-      ]);
-      expectedError = {
-        type = "ThrownError";
-        msg = "global\\.statePath' does not exist";
+    removedOptions = {
+      testUser = rejectsRemovedOption "wanwatch\\.user" { user = "root"; };
+      testGroup = rejectsRemovedOption "wanwatch\\.group" { group = "network"; };
+      testStatePath = rejectsRemovedOption "global\\.statePath" {
+        global.statePath = "/var/lib/wanwatch/state.json";
       };
-    };
-
-    testServiceGroupNotConfigurable = {
-      expr = renderConfig (evaluate [
-        primaryAndBackup
-        { services.wanwatch.group = "network"; }
-      ]);
-      expectedError = {
-        type = "ThrownError";
-        msg = "wanwatch\\.group' does not exist";
+      testHooksDir = rejectsRemovedOption "global\\.hooksDir" {
+        global.hooksDir = "/var/lib/wanwatch/hooks";
+      };
+      testMetricsSocket = rejectsRemovedOption "global\\.metricsSocket" {
+        global.metricsSocket = "/var/lib/wanwatch/metrics.sock";
       };
     };
 
