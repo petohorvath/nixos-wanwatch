@@ -38,7 +38,7 @@ func startProbers(ctx context.Context, cancel context.CancelCauseFunc, cfg *conf
 			Wan:        k.Wan,
 			Family:     k.Family,
 			Interface:  wan.Interface,
-			Targets:    targetsFor(wan, k.Family),
+			Targets:    wan.Probe.Targets.For(k.Family),
 			Ident:      idents[k],
 			Interval:   time.Duration(wan.Probe.IntervalMs) * time.Millisecond,
 			Timeout:    time.Duration(wan.Probe.TimeoutMs) * time.Millisecond,
@@ -62,36 +62,9 @@ func identKeysFor(cfg *config.Config) []probe.IdentKey {
 	names := slices.Sorted(maps.Keys(cfg.Wans))
 	keys := make([]probe.IdentKey, 0, 2*len(names))
 	for _, name := range names {
-		for _, fam := range familiesFromTargets(cfg.Wans[name].Probe.Targets) {
+		for _, fam := range cfg.Wans[name].Probe.Targets.Families() {
 			keys = append(keys, probe.IdentKey{Wan: name, Family: fam})
 		}
 	}
 	return keys
-}
-
-// familiesFromTargets lists the IP families the WAN serves (which
-// Pinger goroutines to spawn for it, and which default routes Apply
-// writes), v4 first. Mirrors `wanwatch.probe.families` on the Nix
-// side — both reduce to "is the per-family bucket non-empty?" now
-// that the config layer keeps the buckets disjoint.
-func familiesFromTargets(t config.Targets) []probe.Family {
-	fams := make([]probe.Family, 0, 2)
-	if len(t.V4) > 0 {
-		fams = append(fams, probe.FamilyV4)
-	}
-	if len(t.V6) > 0 {
-		fams = append(fams, probe.FamilyV6)
-	}
-	return fams
-}
-
-// targetsFor returns the probe targets for `wan` in `family` —
-// straight from the per-family bucket. The lib + config.Validate
-// enforce that each bucket only holds same-family literals, so no
-// runtime filtering is needed here.
-func targetsFor(wan config.Wan, family probe.Family) []string {
-	if family == probe.FamilyV4 {
-		return wan.Probe.Targets.V4
-	}
-	return wan.Probe.Targets.V6
 }

@@ -18,6 +18,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 )
 
@@ -91,6 +92,29 @@ type Probe struct {
 type Targets struct {
 	V4 []string `json:"v4"`
 	V6 []string `json:"v6"`
+}
+
+// Families lists the Families a WAN with these Targets serves, v4
+// first: a Family is served when its bucket is non-empty. Mirrors
+// `wanwatch.probe.families` on the Nix side; Validate keeps each
+// bucket to same-Family literals, so no address parsing is needed.
+func (t Targets) Families() []probe.Family {
+	fams := make([]probe.Family, 0, 2)
+	if len(t.V4) > 0 {
+		fams = append(fams, probe.FamilyV4)
+	}
+	if len(t.V6) > 0 {
+		fams = append(fams, probe.FamilyV6)
+	}
+	return fams
+}
+
+// For returns the Targets for family, in configuration order.
+func (t Targets) For(family probe.Family) []string {
+	if family == probe.FamilyV4 {
+		return t.V4
+	}
+	return t.V6
 }
 
 // Thresholds mirrors the nested probe.thresholds submodule.

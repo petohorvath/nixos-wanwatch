@@ -203,7 +203,7 @@ func linkUp(d *daemon, wans ...string) {
 // unhealthy. Group recompute is left to the test.
 func probeLost(d *daemon, wans ...string) {
 	for _, name := range wans {
-		for _, fam := range familiesFromTargets(d.cfg.Wans[name].Probe.Targets) {
+		for _, fam := range d.cfg.Wans[name].Probe.Targets.Families() {
 			d.health.Probe(probe.ProbeResult{Wan: name, Family: fam, Stats: probe.FamilyStats{
 				LossRatio: 1, WindowFilled: true,
 			}})

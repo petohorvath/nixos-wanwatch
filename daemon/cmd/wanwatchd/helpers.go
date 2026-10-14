@@ -81,7 +81,7 @@ func probedFamiliesFor(wans map[string]config.Wan, a selector.Active) []string {
 		return nil
 	}
 	out := make([]string, 0, 2)
-	for _, fam := range familiesFromTargets(w.Probe.Targets) {
+	for _, fam := range w.Probe.Targets.Families() {
 		out = append(out, fam.String())
 	}
 	return out

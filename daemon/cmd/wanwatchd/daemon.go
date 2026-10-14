@@ -264,7 +264,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 		return false
 	}
 
-	probed := familiesFromTargets(wan.Probe.Targets)
+	probed := wan.Probe.Targets.Families()
 	if len(families) == 0 {
 		families = probed
 	}

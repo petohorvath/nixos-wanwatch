@@ -63,15 +63,10 @@ func New(cfgs map[string]config.Wan, mreg *metrics.Registry) *Wans {
 	for name, cfg := range cfgs {
 		ws := &wan{name: name, cfg: cfg, families: make(map[probe.Family]*family, 2)}
 		hyst := cfg.Probe.Hysteresis
-		for fam, targets := range map[probe.Family][]string{
-			probe.FamilyV4: cfg.Probe.Targets.V4,
-			probe.FamilyV6: cfg.Probe.Targets.V6,
-		} {
-			if len(targets) > 0 {
-				ws.families[fam] = &family{
-					targets: targets,
-					hyst:    newHysteresis(hyst.ConsecutiveUp, hyst.ConsecutiveDown),
-				}
+		for _, fam := range cfg.Probe.Targets.Families() {
+			ws.families[fam] = &family{
+				targets: cfg.Probe.Targets.For(fam),
+				hyst:    newHysteresis(hyst.ConsecutiveUp, hyst.ConsecutiveDown),
 			}
 		}
 		w.byName[name] = ws

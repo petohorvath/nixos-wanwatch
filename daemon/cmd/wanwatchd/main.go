@@ -9,8 +9,7 @@
 //   - daemon.go       — event handlers, Apply adapter and commit publication
 //     (WAN Health lives in internal/health, Selection progression
 //     in internal/decision)
-//   - probers.go      — startProbers + probe-target helpers
-//     (identKeysFor, targetsFor, familiesFromTargets)
+//   - probers.go      — startProbers + identKeysFor
 //   - subscribers.go  — startLinkSubscriber, startRouteSubscriber
 //   - eventloop.go    — eventLoop (central event dispatch)
 //   - decision.go     — pure helpers (groupContainsWAN, hookEventFor)
