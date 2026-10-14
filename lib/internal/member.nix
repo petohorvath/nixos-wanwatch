@@ -17,6 +17,7 @@ let
   inherit (internal.primitives)
     check
     checkIdentifier
+    checkUnknownFields
     isPositiveInt
     tryErr
     tryOk
@@ -28,6 +29,12 @@ let
     weight = 100;
     priority = 1;
   };
+
+  knownFields = [
+    "wan"
+    "weight"
+    "priority"
+  ];
 
   validateWeight =
     weight:
@@ -46,8 +53,9 @@ let
   };
 
   collectErrors =
-    fields:
-    checkIdentifier "memberInvalidWan" "wan" fields.wan
+    input: fields:
+    checkUnknownFields "memberUnknownField" "member" knownFields input
+    ++ checkIdentifier "memberInvalidWan" "wan" fields.wan
     ++ validateWeight fields.weight
     ++ validatePriority fields.priority;
 
@@ -60,6 +68,7 @@ let
 
     Returns a `tryResult` whose value is the member value. Error kinds:
 
+      memberUnknownField    — a field outside the Member fields
       memberInvalidWan      — wan is not a valid identifier
       memberInvalidWeight   — weight is not a positive integer
       memberInvalidPriority — priority is not a positive integer
@@ -68,7 +77,7 @@ let
     input:
     let
       fields = mergeWithDefaults input;
-      errors = collectErrors fields;
+      errors = collectErrors input fields;
     in
     if errors == [ ] then tryOk fields else tryErr (formatErrors errors);
 

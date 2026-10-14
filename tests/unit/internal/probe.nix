@@ -221,6 +221,26 @@ in
         rttMsUp = 250;
       };
     };
+
+    # `skeleton.nix` covers a misspelled top-level field.
+    probeUnknownField = {
+      misspelledThreshold = withThresholds { lossDown = 50; };
+      misspelledHysteresisCounter = minimal // {
+        hysteresis.consecutive = 2;
+      };
+      unknownTargetFamily.targets = {
+        v4 = [ "1.1.1.1" ];
+        v5 = [ ];
+      };
+    };
+  };
+
+  testUnknownFieldMessage = {
+    expr =
+      (probe.tryMake (withThresholds {
+        lossDown = 50;
+      })).error;
+    expected = "probe.make: [probeUnknownField] thresholds has unknown fields [\"lossDown\"]; known fields are [\"lossPctDown\",\"lossPctUp\",\"rttMsDown\",\"rttMsUp\"]";
   };
 
   testReportsEveryViolation = {
@@ -229,9 +249,11 @@ in
         targets = { };
         method = "tcp";
         intervalMs = 0;
+        interval = 1000;
       }
     );
     expected = [
+      "probeUnknownField"
       "probeInvalidMethod"
       "probeNoTargets"
       "probeNonPositiveInterval"

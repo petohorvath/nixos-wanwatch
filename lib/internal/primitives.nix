@@ -97,6 +97,29 @@ in
       "${field} must be a valid wanwatch identifier (matching ${identifierPattern}); got ${builtins.toJSON value}";
 
   /*
+    Check that an attrset has only known fields, so a misspelled
+    optional field fails instead of falling back to its default.
+
+    `kind`: the error kind, such as `"probeUnknownField"`.
+    `name`: the attrset's name in the message, such as `"thresholds"`.
+    `knownFields`: the field names the attrset may have.
+    `attrs`: the attrset to check. Any other value passes, so the
+    caller can report it under its own kind.
+
+    Returns `[ ]` when every field is known; otherwise a one-element
+    list holding an error record that lists the unknown fields.
+  */
+  checkUnknownFields =
+    kind: name: knownFields: attrs:
+    let
+      unknownFields = lib.subtractLists knownFields (builtins.attrNames attrs);
+    in
+    lib.optionals (builtins.isAttrs attrs) (
+      check kind (unknownFields == [ ])
+        "${name} has unknown fields ${builtins.toJSON unknownFields}; known fields are ${builtins.toJSON knownFields}"
+    );
+
+  /*
     Apply a `tryResult`-returning parser to every item and keep both
     outcomes, so validators can report errors while constructors use
     the parsed values.

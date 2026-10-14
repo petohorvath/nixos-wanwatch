@@ -24,6 +24,7 @@
 let
   inherit (internal.primitives)
     check
+    checkUnknownFields
     isPositiveInt
     partitionTry
     tryErr
@@ -57,6 +58,29 @@ let
     "all"
     "any"
   ];
+
+  # The fields `tryMake` reads from its input and from each nested
+  # attrset; any other field is reported as `probeUnknownField`.
+  knownFields = {
+    probe = [
+      "method"
+      "targets"
+      "intervalMs"
+      "timeoutMs"
+      "windowSize"
+      "thresholds"
+      "hysteresis"
+      "familyHealthPolicy"
+    ];
+    targets = [
+      "v4"
+      "v6"
+    ];
+    thresholds = builtins.attrNames defaults.thresholds;
+    hysteresis = builtins.attrNames defaults.hysteresis;
+  };
+
+  checkFields = name: checkUnknownFields "probeUnknownField" name knownFields.${name};
 
   isPercentage = value: builtins.isInt value && value >= 0 && value <= 100;
 
@@ -95,9 +119,10 @@ let
       let
         v4 = targets.v4 or [ ];
         v6 = targets.v6 or [ ];
-        hasNoTargets = builtins.isList v4 && builtins.isList v6 && v4 == [ ] && v6 == [ ];
+        hasTargets = !(builtins.isList v4 && builtins.isList v6 && v4 == [ ] && v6 == [ ]);
       in
-      check "probeNoTargets" (!hasNoTargets) "at least one of targets.v4 or targets.v6 must be non-empty"
+      checkFields "targets" targets
+      ++ check "probeNoTargets" hasTargets "at least one of targets.v4 or targets.v6 must be non-empty"
       ++ validateTargetFamily "v4" libnet.ip.isIpv4 v4
       ++ validateTargetFamily "v6" libnet.ip.isIpv6 v6;
 
@@ -155,7 +180,9 @@ let
     if !(builtins.isAttrs thresholds) then
       check "probeInvalidThresholds" false "thresholds must be an attrset"
     else
-      validateLossThresholds thresholds ++ validateRttThresholds thresholds;
+      checkFields "thresholds" thresholds
+      ++ validateLossThresholds thresholds
+      ++ validateRttThresholds thresholds;
 
   validateHysteresis =
     hysteresis:
@@ -166,8 +193,10 @@ let
     if !(builtins.isAttrs hysteresis) then
       check "probeInvalidHysteresis" false "hysteresis must be an attrset"
     else
-      check "probeNonPositiveHysteresis" (isPositiveInt down)
-        "hysteresis.consecutiveDown must be a positive integer; got ${builtins.toJSON down}"
+      checkFields "hysteresis" hysteresis
+      ++
+        check "probeNonPositiveHysteresis" (isPositiveInt down)
+          "hysteresis.consecutiveDown must be a positive integer; got ${builtins.toJSON down}"
       ++
         check "probeNonPositiveHysteresis" (isPositiveInt up)
           "hysteresis.consecutiveUp must be a positive integer; got ${builtins.toJSON up}";
@@ -178,7 +207,8 @@ let
       "familyHealthPolicy must be one of ${builtins.toJSON validFamilyHealthPolicies}; got ${builtins.toJSON policy}";
 
   # Non-attrset `targets`, `thresholds`, and `hysteresis` pass through
-  # unchanged so their validators can report them.
+  # unchanged, and attrsets keep unknown fields, so their validators
+  # can report them.
   mergeWithDefaults =
     input:
     let
@@ -191,9 +221,10 @@ let
       targets =
         if builtins.isAttrs targets then
           {
-            v4 = targets.v4 or [ ];
-            v6 = targets.v6 or [ ];
+            v4 = [ ];
+            v6 = [ ];
           }
+          // targets
         else
           targets;
       intervalMs = input.intervalMs or defaults.intervalMs;
@@ -205,8 +236,9 @@ let
     };
 
   collectErrors =
-    fields:
-    validateMethod fields.method
+    input: fields:
+    checkFields "probe" input
+    ++ validateMethod fields.method
     ++ validateTargets fields.targets
     ++ validateInterval fields.intervalMs
     ++ validateTimeout fields.timeoutMs
@@ -226,6 +258,9 @@ let
     Returns a `tryResult` whose value is the probe value, with each
     target parsed into a libnet IP value. Error kinds:
 
+      probeUnknownField              — a field outside the probe fields,
+                                       or in `targets`, `thresholds`,
+                                       or `hysteresis`
       probeNoTargets                 — `targets.v4` and `targets.v6` empty
       probeInvalidTarget             — malformed targets attrset or list,
                                        or a target that is not an IP
@@ -252,7 +287,7 @@ let
     input:
     let
       fields = mergeWithDefaults input;
-      errors = collectErrors fields;
+      errors = collectErrors input fields;
     in
     if errors == [ ] then
       tryOk (

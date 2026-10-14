@@ -145,7 +145,7 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 | Layer | Catches |
 |---|---|
 | Option types (`lib/types/`) | Wrong field types, enum mismatches, malformed IP literals (via libnet). |
-| `wanwatch.<type>.tryMake` | Cross-field invariants: Family coupling, duplicate Members, threshold ordering. |
+| `wanwatch.<type>.tryMake` | Unknown fields, which a direct library caller could otherwise misspell unnoticed, and cross-field invariants: Family coupling, duplicate Members, threshold ordering. |
 | `config.assertUniqueMarksAndTables` | Marks or tables shared across Groups. |
 | `daemon/internal/config/Validate` | Unknown keys and trailing data at parse time, then the first failing check of: empty paths or non-positive `hookTimeoutMs` in `global`; name/key disagreement; empty `interface`; `method` other than `icmp`; no Targets; non-positive `intervalMs`, `timeoutMs`, or `windowSize`; `familyHealthPolicy` other than `all` or `any`; loss thresholds outside `0..100` or not ordered up < down; RTT thresholds not positive or not ordered up < down; Hysteresis counters below 1; unknown `strategy`; non-positive `table` or `mark`; no Members; dangling `member.wan` references. |
 

@@ -21,12 +21,21 @@ let
   inherit (internal.primitives)
     check
     checkIdentifier
+    checkUnknownFields
     partitionTry
     tryErr
     tryOk
     ;
 
   formatErrors = internal.primitives.formatErrors "group.make";
+
+  knownFields = [
+    "name"
+    "members"
+    "strategy"
+    "table"
+    "mark"
+  ];
 
   # `table` and `mark` are required, so they have no defaults.
   defaults = {
@@ -94,12 +103,13 @@ let
   };
 
   collectErrors =
-    fields: parsedMembers:
+    input: fields: parsedMembers:
     let
       hasCleanMembers =
         builtins.isList fields.members && fields.members != [ ] && parsedMembers.errors == [ ];
     in
-    checkIdentifier "groupInvalidName" "name" fields.name
+    checkUnknownFields "groupUnknownField" "group" knownFields input
+    ++ checkIdentifier "groupInvalidName" "name" fields.name
     ++ validateMembers fields.members parsedMembers
     ++ validateStrategy fields.strategy
     ++ validateTable fields.table
@@ -116,6 +126,7 @@ let
 
     Returns a `tryResult` whose value is the group value. Error kinds:
 
+      groupUnknownField    — a field outside the Group fields
       groupInvalidName     — name is not a valid identifier
       groupNoMembers       — members is empty
       groupInvalidMember   — members is not a list, or
@@ -130,7 +141,7 @@ let
     let
       fields = mergeWithDefaults input;
       parsedMembers = parseMembers (if builtins.isList fields.members then fields.members else [ ]);
-      errors = collectErrors fields parsedMembers;
+      errors = collectErrors input fields parsedMembers;
     in
     if errors == [ ] then
       tryOk (fields // { members = parsedMembers.parsed; })

@@ -2,12 +2,18 @@
   Fixtures shared by the unit suites; `default.nix` passes them to
   every suite as `fixtures`.
 
-    inputs — a minimal and a full valid input per value type. Each
-             `full` input sets every field in its serialized form, so
-             `toJSONValue (make full)` equals it.
-    cases  — valid and invalid values per domain. The predicates, the
-             option types, and the `tryMake` fields that share a
-             domain all test the same table, so the two layers agree.
+    inputs           — a minimal and a full valid input per value type.
+                       Each `full` input sets every field in its
+                       serialized form, so `toJSONValue (make full)`
+                       equals it.
+    misspelledFields — one misspelled optional field per value type.
+                       Added to the `minimal` input, `tryMake` and the
+                       option type must both reject it rather than
+                       fall back to the field's default.
+    cases            — valid and invalid values per domain. The
+                       predicates, the option types, and the `tryMake`
+                       fields that share a domain all test the same
+                       table, so the two layers agree.
 */
 let
   probe = {
@@ -88,6 +94,13 @@ in
         table = 1001;
       };
     };
+  };
+
+  misspelledFields = {
+    probe.interval = 1000;
+    member.priorty = 2;
+    wan.pointtopoint = true;
+    group.stratgy = "primary-backup";
   };
 
   cases = {

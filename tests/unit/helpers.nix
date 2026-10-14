@@ -33,23 +33,36 @@ let
     }).config.value;
 
   /*
-    Test whether an option type accepts a value. The result is forced
-    with `builtins.deepSeq` because `builtins.tryEval` is shallow:
-    element checks inside `listOf` would otherwise escape it.
+    Evaluate a submodule type as `services.wanwatch` does, under an
+    attribute key, so a read-only `name` option takes the key.
+
+    `type`: a submodule option type, such as `types.wan`.
+    `input`: a value-type input; its `name`, if any, becomes the key
+    and the rest the definition.
+
+    Returns the merged submodule value.
+  */
+  evalSubmodule =
+    type: input:
+    let
+      key = input.name or "value";
+    in
+    (evalType (lib.types.attrsOf type) { ${key} = removeAttrs input [ "name" ]; }).${key};
+
+  # Forces the whole value with `builtins.deepSeq` because
+  # `builtins.tryEval` is shallow: element checks inside `listOf` would
+  # otherwise escape it.
+  evaluatesCompletely = value: (builtins.tryEval (builtins.deepSeq value value)).success;
+
+  /*
+    Test whether an option type accepts a value.
 
     `type`: the option type under test.
     `value`: the definition to merge into an option of that type.
 
     Returns true when `evalType type value` evaluates completely.
   */
-  isAcceptedByType =
-    type: value:
-    (builtins.tryEval (
-      let
-        result = evalType type value;
-      in
-      builtins.deepSeq result result
-    )).success;
+  isAcceptedByType = type: value: evaluatesCompletely (evalType type value);
 
   /*
     List the error kinds of a `tryResult`. `formatErrors` renders each
@@ -129,6 +142,7 @@ let
 in
 {
   inherit
+    evalSubmodule
     evalType
     getErrorKinds
     isAcceptedByType
@@ -136,21 +150,15 @@ in
     ;
 
   /*
-    Evaluate a submodule type as `services.wanwatch` does, under an
-    attribute key, so a read-only `name` option takes the key.
+    Test whether a submodule type accepts a value-type input, evaluated
+    as `evalSubmodule` does.
 
     `type`: a submodule option type, such as `types.wan`.
-    `input`: a value-type input; its `name`, if any, becomes the key
-    and the rest the definition.
+    `input`: a value-type input.
 
-    Returns the merged submodule value.
+    Returns true when `evalSubmodule type input` evaluates completely.
   */
-  evalSubmodule =
-    type: input:
-    let
-      key = input.name or "value";
-    in
-    (evalType (lib.types.attrsOf type) { ${key} = removeAttrs input [ "name" ]; }).${key};
+  isAcceptedBySubmodule = type: input: evaluatesCompletely (evalSubmodule type input);
 
   /*
     Build case tests for an option type.
