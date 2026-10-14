@@ -75,11 +75,11 @@ let
     wans: groups:
     lib.concatLists (
       lib.mapAttrsToList (
-        name: group:
-        lib.pipe group.members [
+        groupName: groupValue:
+        lib.pipe groupValue.members [
           builtins.attrNames
-          (builtins.filter (wan: !(wans ? ${wan})))
-          (map (wan: "group '${name}' references wan '${wan}'"))
+          (builtins.filter (wanName: !(wans ? ${wanName})))
+          (map (wanName: "group '${groupName}' references wan '${wanName}'"))
         ]
       ) groups
     );

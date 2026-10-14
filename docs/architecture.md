@@ -13,7 +13,7 @@ Three layers, bottom-up: pure-Nix library, NixOS module, Go daemon. The library 
 │ lib/ — pure Nix                                            │
 │   internal/{wan,probe,group,member,global}.make / .tryMake │
 │   types/primitives.{fwmark,routingTableId} validation      │
-│   internal/config.render → JSON (+ duplicate assertions)   │
+│   internal/config.render → JSON (+ consistency checks)     │
 └──────────────────┬─────────────────────────────────────────┘
                    │ rendered config.json
                    ▼

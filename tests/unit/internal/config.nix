@@ -17,9 +17,10 @@ let
     wan
     ;
 
-  # One-member Groups keyed by name, each with the given mark and table.
+  # Groups keyed by name: the minimal Group, one Member on `primary`,
+  # with the given fields, such as mark and table, overridden.
   makeGroups = lib.mapAttrs (
-    name: markAndTable: group.make (fixtures.inputs.group.minimal // markAndTable // { inherit name; })
+    name: overrides: group.make (fixtures.inputs.group.minimal // overrides // { inherit name; })
   );
 
   distinctGroups = makeGroups {
@@ -228,6 +229,10 @@ in
           a = {
             mark = 1500;
             table = 1500;
+            members = {
+              primary = { };
+              backup = { };
+            };
           };
           b = {
             mark = 1600;
@@ -237,7 +242,7 @@ in
       };
       expectedError = {
         type = "ThrownError";
-        msg = "group 'a' references wan 'primary'; group 'b' references wan 'primary'";
+        msg = "group 'a' references wan 'backup'; group 'a' references wan 'primary'; group 'b' references wan 'primary'";
       };
     };
   };
