@@ -5,8 +5,6 @@
   declare a WAN with that name. A member value carries:
 
     wan      — wanwatch identifier of the referenced WAN
-    weight   — positive integer, default 100; unused until multi-active
-               strategies exist
     priority — positive integer, default 1; primary-backup picks the
                healthy Member with the lowest priority
 */
@@ -26,20 +24,13 @@ let
   formatErrors = internal.primitives.formatErrors "member.make";
 
   defaults = {
-    weight = 100;
     priority = 1;
   };
 
   knownFields = [
     "wan"
-    "weight"
     "priority"
   ];
-
-  validateWeight =
-    weight:
-    check "memberInvalidWeight" (isPositiveInt weight)
-      "weight must be a positive integer; got ${builtins.toJSON weight}";
 
   validatePriority =
     priority:
@@ -48,7 +39,6 @@ let
 
   mergeWithDefaults = input: {
     wan = input.wan or null;
-    weight = input.weight or defaults.weight;
     priority = input.priority or defaults.priority;
   };
 
@@ -56,21 +46,19 @@ let
     input: fields:
     checkUnknownFields "memberUnknownField" "member" knownFields input
     ++ checkIdentifier "memberInvalidWan" "wan" fields.wan
-    ++ validateWeight fields.weight
     ++ validatePriority fields.priority;
 
   /*
     Validate Member input without throwing, reporting every violation
     in one message.
 
-    `input`: an attrset with `wan` and optional `weight` and
-    `priority`; missing optional fields take `defaults`.
+    `input`: an attrset with `wan` and optional `priority`, which
+    defaults to `defaults.priority`.
 
     Returns a `tryResult` whose value is the member value. Error kinds:
 
       memberUnknownField    — a field outside the Member fields
       memberInvalidWan      — wan is not a valid identifier
-      memberInvalidWeight   — weight is not a positive integer
       memberInvalidPriority — priority is not a positive integer
   */
   tryMake =
@@ -104,7 +92,7 @@ let
     Returns the JSON-shaped attrset embedded by `group.toJSONValue`.
   */
   toJSONValue = member: {
-    inherit (member) priority wan weight;
+    inherit (member) priority wan;
   };
 in
 {

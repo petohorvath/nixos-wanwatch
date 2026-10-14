@@ -107,7 +107,7 @@ A Family without a full Window yet counts as healthy. See [`selector.md`](./sele
 
 ## Groups and Strategies
 
-A Group is an ordered list of Members under a Strategy. Each Member references a WAN by name and carries per-Group attributes (`priority`, `weight`).
+A Group is an ordered list of Members under a Strategy. Each Member references a WAN by name and carries its per-Group `priority`.
 
 ```nix
 services.wanwatch.groups.home-uplink = {
@@ -122,7 +122,7 @@ services.wanwatch.groups.home-uplink = {
 
 `mark` and `table` are required integers in `[1000, 32767]`, typed as `wanwatch.types.fwmark` and `routingTableId`. At startup the daemon installs `ip rule add fwmark <mark> table <table>` and then owns that table's contents. The module re-exposes both values as `services.wanwatch.marks.<group>` and `services.wanwatch.tables.<group>`, so firewall modules reference them by name. See [ADR 0003](./adr/0003-user-declared-marks-and-tables.md).
 
-The only Strategy is `primary-backup`: the healthy Member with the lowest `priority` wins, and ties go to the lexicographically first WAN name. `weight` is reserved for multi-active Strategies and is ignored.
+The only Strategy is `primary-backup`: the healthy Member with the lowest `priority` wins, and ties go to the lexicographically first WAN name.
 
 When no Member is healthy, the Group has no Selection and `state.json` shows `active: null`. The daemon writes no routes, so the previous default route and the fwmark rule stay in place until a Member recovers.
 

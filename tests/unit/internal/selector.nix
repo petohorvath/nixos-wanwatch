@@ -116,28 +116,6 @@ in
       expected = "aaa";
     };
 
-    # Despite `backup`'s far larger weight, primary-backup picks the
-    # Member with the lowest priority.
-    testIgnoresWeight = {
-      expr =
-        selectActive
-          [
-            {
-              wan = "primary";
-              weight = 1;
-            }
-            {
-              wan = "backup";
-              weight = 1000;
-            }
-          ]
-          {
-            primary = true;
-            backup = true;
-          };
-      expected = "primary";
-    };
-
     testReportsGroupName = {
       expr = (selector.compute (makeGroup primaryAndBackup) { primary = true; }).group;
       expected = "home";

@@ -49,7 +49,6 @@ let
     };
     full = {
       wan = "backup";
-      weight = 50;
       priority = 2;
     };
   };
@@ -95,7 +94,6 @@ in
         members = [
           {
             wan = "primary";
-            weight = 100;
             priority = 1;
           }
           member.full

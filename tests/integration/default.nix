@@ -159,12 +159,10 @@ in
           {
             wan = "primary";
             priority = 1;
-            weight = 100;
           }
           {
             wan = "backup";
             priority = 2;
-            weight = 100;
           }
         ];
       };

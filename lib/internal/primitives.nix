@@ -139,7 +139,7 @@ in
 
   /*
     Test the positive-integer fields shared by the value types, such
-    as `weight`, `priority`, and `intervalMs`.
+    as `priority` and `intervalMs`.
 
     `value`: any value.
 

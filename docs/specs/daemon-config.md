@@ -129,7 +129,6 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 ```json
 {
   "wan": "primary",
-  "weight": 100,
   "priority": 1
 }
 ```
@@ -137,7 +136,6 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `wan` | string | yes | Key in the top-level `wans` map. |
-| `weight` | int | yes | `1..1000`. Reserved for v2 multi-active Strategies; ignored under `primary-backup`. |
 | `priority` | int | yes | `1..1000`. Lower is preferred under `primary-backup`. |
 
 ## Validation layers

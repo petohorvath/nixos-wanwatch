@@ -45,7 +45,7 @@ const validConfig = `{
       "table": 100,
       "mark": 100,
       "members": [
-        { "wan": "primary", "weight": 100, "priority": 1 }
+        { "wan": "primary", "priority": 1 }
       ]
     }
   }
@@ -118,17 +118,29 @@ func TestParseRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+// TestParseRejectsUnknownFields covers the keys DisallowUnknownFields
+// exists to catch. Each is a JSON-decode error, neither sentinel.
 func TestParseRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
-	// "globl" instead of "global" — the typo'd key DisallowUnknownFields
-	// exists to catch. It's a JSON-decode error, neither sentinel.
-	bad := `{"schema":1,"globl":{},"wans":{},"groups":{}}`
-	_, err := Parse([]byte(bad))
-	if err == nil {
-		t.Fatal("Parse(unknown field) err = nil")
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{"typo'd top-level key", `{"schema":1,"globl":{},"wans":{},"groups":{}}`},
+		// Member has no weight; a stale config must not pass silently.
+		{"member weight", strings.Replace(validConfig, `"priority": 1`, `"priority": 1, "weight": 100`, 1)},
 	}
-	if errors.Is(err, ErrSchemaMismatch) || errors.Is(err, ErrInvalidConfig) {
-		t.Errorf("err wrapped unexpected sentinel: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Parse([]byte(tt.config))
+			if err == nil {
+				t.Fatal("Parse(unknown field) err = nil")
+			}
+			if errors.Is(err, ErrSchemaMismatch) || errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("err wrapped unexpected sentinel: %v", err)
+			}
+		})
 	}
 }
 

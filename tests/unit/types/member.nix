@@ -16,14 +16,14 @@ let
 in
 {
   memberWan = typeTests types.memberWan cases.identifiers;
-  memberWeight = typeTests types.memberWeight cases.positiveInts;
   memberPriority = typeTests types.memberPriority cases.positiveInts;
 
   member = typeTests types.member {
     invalid = [
       { }
       (minimal // { wan = "1bad"; })
-      (minimal // { weight = 0; })
+      # Member has no `weight` until a Strategy reads one.
+      (minimal // { weight = 100; })
       (minimal // { priority = 0; })
     ];
   };

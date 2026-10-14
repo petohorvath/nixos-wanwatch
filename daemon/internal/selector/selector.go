@@ -40,7 +40,6 @@ type Group struct {
 // Member is the daemon-side view of a Member value.
 type Member struct {
 	Wan      string `json:"wan"`
-	Weight   int    `json:"weight"`
 	Priority int    `json:"priority"`
 }
 

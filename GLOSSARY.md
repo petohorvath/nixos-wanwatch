@@ -43,7 +43,7 @@ An ordered set of Members with a Strategy, a mark, and a routing table; the unit
 _Avoid_: pool, policy
 
 **Member**:
-A WAN's membership in one Group, carrying per-Group attributes such as priority and weight.
+A WAN's membership in one Group, carrying per-Group attributes such as priority.
 _Avoid_: WAN (when the per-Group attributes matter)
 
 **Strategy**:

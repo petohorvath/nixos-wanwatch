@@ -9,7 +9,7 @@
 }:
 let
   # Lowest priority among healthy Members wins; ties go to the
-  # lexicographically smaller WAN name. Weight is ignored. Matches
+  # lexicographically smaller WAN name. Matches
   # `daemon/internal/selector/primarybackup.go`.
   primaryBackup =
     group: memberHealth:

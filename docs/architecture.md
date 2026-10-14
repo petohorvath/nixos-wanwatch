@@ -53,7 +53,7 @@ lib/internal/
   primitives.nix     — tryOk/tryErr, check, formatErrors
   probe.nix          — value type + threshold/hysteresis sub-types
   wan.nix            — value type; Families derived from probe.targets
-  member.nix         — per-Group attributes (priority, weight)
+  member.nix         — per-Group attributes (priority)
   group.nix          — value type, Strategy enum, mark/table validators
   global.nix         — value type for the daemon's global settings
   selector.nix       — pure Nix mirror of the Go selector

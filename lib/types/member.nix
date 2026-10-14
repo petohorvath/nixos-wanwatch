@@ -3,7 +3,6 @@
 
     memberWan      — wanwatch identifier of a declared WAN; the daemon
                      checks the reference when it loads its config
-    memberWeight   — positive integer, default 100
     memberPriority — positive integer, default 1; lower is preferred
     member         — the complete Member submodule
 */
@@ -17,7 +16,6 @@ let
   inherit (lib) mkOption types;
 
   memberWan = primitives.identifier;
-  memberWeight = primitives.positiveInt;
   memberPriority = primitives.positiveInt;
 
   member = types.submodule {
@@ -28,15 +26,6 @@ let
         description = ''
           Name of the WAN this Member references. It must name a WAN
           declared in the same `services.wanwatch` configuration.
-        '';
-      };
-      weight = mkOption {
-        type = memberWeight;
-        default = defaults.weight;
-        description = ''
-          Tiebreaker among Members with equal priority. The
-          primary-backup strategy ignores it; it matters once
-          multi-active strategies exist.
         '';
       };
       priority = mkOption {
@@ -55,6 +44,5 @@ in
     member
     memberPriority
     memberWan
-    memberWeight
     ;
 }
