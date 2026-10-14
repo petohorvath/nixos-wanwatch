@@ -146,9 +146,11 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 | `wanwatch.<type>.tryMake` | Unknown fields, which a direct library caller could otherwise misspell unnoticed, and cross-field invariants: Family coupling, Member `wan`/key disagreement, threshold ordering. |
 | `config.render` | Invalid `global` settings, through `wanwatch.global.make`: unknown fields, empty or whitespace-only paths, an unknown `logLevel`, or a non-positive `hookTimeoutMs`. |
 | `config.assertUniqueMarksAndTables` | Marks or tables shared across Groups. |
-| `daemon/internal/config/Validate` | Unknown keys and trailing data at parse time, then the first failing check of: empty paths or non-positive `hookTimeoutMs` in `global`; name/key or Member `wan`/key disagreement; empty `interface`; `method` other than `icmp`; no Targets; non-positive `intervalMs`, `timeoutMs`, or `windowSize`; `familyHealthPolicy` other than `all` or `any`; loss thresholds outside `0..100` or not ordered up < down; RTT thresholds not positive or not ordered up < down; Hysteresis counters below 1; unknown `strategy`; non-positive `table` or `mark`; no Members; dangling `member.wan` references. |
+| `daemon/internal/config/Validate` | Unknown keys and trailing data at parse time, then the first failing check of: empty paths or non-positive `hookTimeoutMs` in `global`; name/key disagreement; empty `interface`; `method` other than `icmp`; no Targets; non-positive `intervalMs`, `timeoutMs`, or `windowSize`; `familyHealthPolicy` other than `all` or `any`; loss thresholds outside `0..100` or not ordered up < down; RTT thresholds not positive or not ordered up < down; Hysteresis counters below 1; unknown `strategy`; non-positive `table` or `mark`; no Members; Member `wan`/key disagreement; dangling `member.wan` references. |
 
 ## Compatibility policy
+
+Pre-release, `schemaVersion` and `SupportedSchema` stay at 1; the renderer and the daemon ship together, so in-tree shape changes do not bump them. The rules below apply from the first tagged release.
 
 The schema version is bumped only when an existing field changes meaning or a required field is added without a default. An optional field with a backwards-compatible default needs no bump.
 

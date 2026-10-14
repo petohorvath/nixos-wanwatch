@@ -23,9 +23,9 @@ import (
 )
 
 // SupportedSchema is the daemon-config schema version this build
-// understands. Bumped in lockstep with `lib/internal/config.nix`'s
-// `schemaVersion` whenever the on-disk shape changes
-// incompatibly.
+// understands. Pinned at 1 until the first tagged release; after
+// that, bumped in lockstep with `lib/internal/config.nix`'s
+// `schemaVersion` whenever the on-disk shape changes incompatibly.
 const SupportedSchema = 1
 
 // Sentinel errors. Callers match with `errors.Is`.

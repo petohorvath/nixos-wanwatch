@@ -59,7 +59,7 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
 | `operstate` | string | IFLA_OPERSTATE text: `up`, `down`, `dormant`, `lowerlayerdown`, `notpresent`, `testing`, `unknown`. |
 | `healthy` | bool | WAN Health, aggregated under `probe.familyHealthPolicy`. |
 | `gateways.v4` | string \| null | Discovered v4 Gateway, or `null` when the kernel has no v4 default on this interface or the route is scope-link (`pointToPoint`). |
-| `gateways.v6` | string | Same for v6. |
+| `gateways.v6` | string \| null | Same for v6. |
 | `families` | object | One entry per Family present in `probe.targets`. |
 
 ## `wans.<name>.families.<v4|v6>`

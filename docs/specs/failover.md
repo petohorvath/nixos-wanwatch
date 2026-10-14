@@ -18,8 +18,7 @@ A Group always has exactly one Selection, which may be `null`. The selector emit
 |---|---|---|
 | `ProbeResult` flips a Family's Health | `wan.healthy` aggregate changes | `health` |
 | `LinkEvent` flips `carrierUp()` | rtnl carrier or operstate change | `carrier` |
-| Daemon startup | Initial Selection from cold-start carrier-only Health | none yet; `startup` reserved |
-| `wanwatchctl set <group> <wan>` | Manual override | `manual`, reserved for post-v1 |
+| Daemon startup | Initial Selection from cold-start carrier-only Health | `carrier`, from the startup link dump |
 
 An event recomputes every Group containing the affected WAN. Each `decision.Group` owns its Selection independently, so one Group's pending Decision never blocks another's commit.
 

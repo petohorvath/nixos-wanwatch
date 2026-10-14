@@ -23,8 +23,9 @@ let
   # stays qualified as `internal.global`.
   inherit (internal) group wan;
 
-  # Bumped on every incompatible change to the daemon-config shape; the
-  # daemon rejects configs with another version.
+  # Pinned at 1 until the first tagged release, then bumped on every
+  # incompatible change to the daemon-config shape; the daemon rejects
+  # configs with another version.
   schemaVersion = 1;
 
   # Returns one message per `field` value that several groups share.

@@ -103,8 +103,8 @@ in
       type = lib.types.attrsOf wanwatch.types.group;
       default = { };
       description = ''
-        Groups, each a set of Members under a Strategy. Each
-        attribute name is the Group's identifier.
+        Groups, each a set of Members under a Strategy. Each attribute
+        name is the Group's identifier.
       '';
     };
 
