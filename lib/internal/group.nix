@@ -20,7 +20,7 @@ let
   inherit (internal) member;
   inherit (internal.primitives)
     check
-    isValidName
+    checkIdentifier
     partitionTry
     tryErr
     tryOk
@@ -44,11 +44,6 @@ let
   validStrategies = [ "primary-backup" ];
 
   parseMembers = partitionTry member.tryMake;
-
-  validateName =
-    name:
-    check "groupInvalidName" (isValidName name)
-      "name must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON name}";
 
   # Takes `tryMake`'s parsed members so each member is parsed once.
   validateMembers =
@@ -104,7 +99,7 @@ let
       hasCleanMembers =
         builtins.isList fields.members && fields.members != [ ] && parsedMembers.errors == [ ];
     in
-    validateName fields.name
+    checkIdentifier "groupInvalidName" "name" fields.name
     ++ validateMembers fields.members parsedMembers
     ++ validateStrategy fields.strategy
     ++ validateTable fields.table

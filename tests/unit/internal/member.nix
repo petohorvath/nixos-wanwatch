@@ -46,6 +46,12 @@ in
     memberInvalidWan.missingWan = { };
   };
 
+  # WANs, Groups, and Members report invalid identifiers alike.
+  testInvalidWanMessage = {
+    expr = (member.tryMake (minimal // { wan = "1bad"; })).error;
+    expected = "member.make: [memberInvalidWan] wan must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got \"1bad\"";
+  };
+
   testReportsEveryViolation = {
     expr = getErrorKinds (
       member.tryMake {

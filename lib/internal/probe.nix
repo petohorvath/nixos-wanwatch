@@ -113,7 +113,7 @@ let
 
   validateWindowSize =
     windowSize:
-    check "probeNonPositiveWindow" (isPositiveInt windowSize)
+    check "probeNonPositiveWindowSize" (isPositiveInt windowSize)
       "windowSize must be a positive integer; got ${builtins.toJSON windowSize}";
 
   validateLossThresholds =
@@ -141,13 +141,13 @@ let
       isDownValid = isPositiveInt down;
       isUpValid = isPositiveInt up;
     in
-    check "probeNonPositiveRTT" isDownValid
+    check "probeNonPositiveRtt" isDownValid
       "thresholds.rttMsDown must be a positive integer; got ${builtins.toJSON down}"
     ++
-      check "probeNonPositiveRTT" isUpValid
+      check "probeNonPositiveRtt" isUpValid
         "thresholds.rttMsUp must be a positive integer; got ${builtins.toJSON up}"
     ++
-      check "probeRTTThresholdsInverted" (!(isDownValid && isUpValid && up >= down))
+      check "probeRttThresholdsInverted" (!(isDownValid && isUpValid && up >= down))
         "thresholds.rttMsUp (${builtins.toJSON up}) must be strictly less than thresholds.rttMsDown (${builtins.toJSON down}); recovery threshold must sit below failure threshold to avoid flapping";
 
   validateThresholds =
@@ -174,7 +174,7 @@ let
 
   validateFamilyHealthPolicy =
     policy:
-    check "probeInvalidFamilyPolicy" (builtins.elem policy validFamilyHealthPolicies)
+    check "probeInvalidFamilyHealthPolicy" (builtins.elem policy validFamilyHealthPolicies)
       "familyHealthPolicy must be one of ${builtins.toJSON validFamilyHealthPolicies}; got ${builtins.toJSON policy}";
 
   # Non-attrset `targets`, `thresholds`, and `hysteresis` pass through
@@ -226,24 +226,24 @@ let
     Returns a `tryResult` whose value is the probe value, with each
     target parsed into a libnet IP value. Error kinds:
 
-      probeNoTargets              — `targets.v4` and `targets.v6` empty
-      probeInvalidTarget          — malformed targets attrset or list,
-                                    or a target that is not an IP
-      probeTargetFamilyMismatch   — v4 literal in `targets.v6`, or v6
-                                    literal in `targets.v4`
-      probeInvalidThresholds      — `thresholds` is not an attrset
-      probeInvalidHysteresis      — `hysteresis` is not an attrset
-      probeInvalidMethod          — method not in `validMethods`
-      probeNonPositiveInterval    — intervalMs ≤ 0
-      probeNonPositiveTimeout     — timeoutMs ≤ 0
-      probeNonPositiveWindow      — windowSize ≤ 0
-      probeLossPctOutOfRange      — lossPct{Up,Down} outside [0, 100]
-      probeLossThresholdsInverted — lossPctUp ≥ lossPctDown
-      probeNonPositiveRTT         — rttMs{Up,Down} ≤ 0
-      probeRTTThresholdsInverted  — rttMsUp ≥ rttMsDown
-      probeNonPositiveHysteresis  — a hysteresis counter ≤ 0
-      probeInvalidFamilyPolicy    — familyHealthPolicy not in
-                                    `validFamilyHealthPolicies`
+      probeNoTargets                 — `targets.v4` and `targets.v6` empty
+      probeInvalidTarget             — malformed targets attrset or list,
+                                       or a target that is not an IP
+      probeTargetFamilyMismatch      — v4 literal in `targets.v6`, or v6
+                                       literal in `targets.v4`
+      probeInvalidThresholds         — `thresholds` is not an attrset
+      probeInvalidHysteresis         — `hysteresis` is not an attrset
+      probeInvalidMethod             — method not in `validMethods`
+      probeNonPositiveInterval       — intervalMs ≤ 0
+      probeNonPositiveTimeout        — timeoutMs ≤ 0
+      probeNonPositiveWindowSize     — windowSize ≤ 0
+      probeLossPctOutOfRange         — lossPct{Up,Down} outside [0, 100]
+      probeLossThresholdsInverted    — lossPctUp ≥ lossPctDown
+      probeNonPositiveRtt            — rttMs{Up,Down} ≤ 0
+      probeRttThresholdsInverted     — rttMsUp ≥ rttMsDown
+      probeNonPositiveHysteresis     — a hysteresis counter ≤ 0
+      probeInvalidFamilyHealthPolicy — familyHealthPolicy not in
+                                       `validFamilyHealthPolicies`
 
     Each recovery threshold must sit strictly below its failure
     threshold; otherwise a marginal WAN flaps on every Sample.

@@ -136,7 +136,7 @@ in
     method = probeFieldTests "method" "probeInvalidMethod" cases.methods;
     intervalMs = probeFieldTests "intervalMs" "probeNonPositiveInterval" cases.positiveInts;
     timeoutMs = probeFieldTests "timeoutMs" "probeNonPositiveTimeout" cases.positiveInts;
-    windowSize = probeFieldTests "windowSize" "probeNonPositiveWindow" cases.positiveInts;
+    windowSize = probeFieldTests "windowSize" "probeNonPositiveWindowSize" cases.positiveInts;
     consecutiveDown =
       probeFieldTests "hysteresis.consecutiveDown" "probeNonPositiveHysteresis"
         cases.positiveInts;
@@ -144,7 +144,7 @@ in
       probeFieldTests "hysteresis.consecutiveUp" "probeNonPositiveHysteresis"
         cases.positiveInts;
     familyHealthPolicy =
-      probeFieldTests "familyHealthPolicy" "probeInvalidFamilyPolicy"
+      probeFieldTests "familyHealthPolicy" "probeInvalidFamilyHealthPolicy"
         cases.familyHealthPolicies;
   };
 
@@ -206,12 +206,12 @@ in
       };
     };
 
-    probeNonPositiveRTT = {
+    probeNonPositiveRtt = {
       zeroDown = withThresholds { rttMsDown = 0; };
       zeroUp = withThresholds { rttMsUp = 0; };
     };
 
-    probeRTTThresholdsInverted = {
+    probeRttThresholdsInverted = {
       upAboveDown = withThresholds {
         rttMsDown = 100;
         rttMsUp = 200;

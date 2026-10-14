@@ -78,6 +78,12 @@ in
     wanInvalidInterface.missingInterface = removeAttrs minimal [ "interface" ];
   };
 
+  # WANs, Groups, and Members report invalid identifiers alike.
+  testInvalidNameMessage = {
+    expr = (wan.tryMake (minimal // { name = "1bad"; })).error;
+    expected = "wan.make: [wanInvalidName] name must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got \"1bad\"";
+  };
+
   # The Probe's own error kinds follow the wrapping kind.
   testForwardsProbeErrors = {
     expr = getErrorKinds (wan.tryMake (minimal // { probe.targets = { }; }));

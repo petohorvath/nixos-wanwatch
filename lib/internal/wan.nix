@@ -23,17 +23,12 @@ let
   inherit (internal) probe;
   inherit (internal.primitives)
     check
-    isValidName
+    checkIdentifier
     tryErr
     tryOk
     ;
 
   formatErrors = internal.primitives.formatErrors "wan.make";
-
-  validateName =
-    name:
-    check "wanInvalidName" (isValidName name)
-      "name must match [a-zA-Z][a-zA-Z0-9-]*; got ${builtins.toJSON name}";
 
   validateInterface =
     interface:
@@ -67,7 +62,7 @@ let
 
   collectErrors =
     fields: probeResult:
-    validateName fields.name
+    checkIdentifier "wanInvalidName" "name" fields.name
     ++ validateInterface fields.interface
     ++ validatePointToPoint fields.pointToPoint
     ++ validateProbeResult probeResult;

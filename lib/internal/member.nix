@@ -16,8 +16,8 @@
 let
   inherit (internal.primitives)
     check
+    checkIdentifier
     isPositiveInt
-    isValidName
     tryErr
     tryOk
     ;
@@ -28,11 +28,6 @@ let
     weight = 100;
     priority = 1;
   };
-
-  validateWan =
-    wan:
-    check "memberInvalidWan" (isValidName wan)
-      "wan must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON wan}";
 
   validateWeight =
     weight:
@@ -51,7 +46,10 @@ let
   };
 
   collectErrors =
-    fields: validateWan fields.wan ++ validateWeight fields.weight ++ validatePriority fields.priority;
+    fields:
+    checkIdentifier "memberInvalidWan" "wan" fields.wan
+    ++ validateWeight fields.weight
+    ++ validatePriority fields.priority;
 
   /*
     Validate Member input without throwing, reporting every violation
