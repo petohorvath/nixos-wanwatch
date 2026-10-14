@@ -60,7 +60,7 @@ let
 
   # One WAN in one Group, faulty only in the given probe targets or
   # Members.
-  evaluateBroken =
+  evaluateOneWan =
     {
       targets ? {
         v4 = [ "1.1.1.1" ];
@@ -211,7 +211,7 @@ in
 
   rejections = {
     testProbeNoTargets = {
-      expr = renderConfig (evaluateBroken {
+      expr = renderConfig (evaluateOneWan {
         targets = {
           v4 = [ ];
           v6 = [ ];
@@ -224,7 +224,7 @@ in
     };
 
     testProbeFamilyMismatch = {
-      expr = renderConfig (evaluateBroken {
+      expr = renderConfig (evaluateOneWan {
         targets.v4 = [ "2606:4700:4700::1111" ];
       });
       expectedError = {
@@ -234,7 +234,7 @@ in
     };
 
     testGroupNoMembers = {
-      expr = renderConfig (evaluateBroken {
+      expr = renderConfig (evaluateOneWan {
         members = { };
       });
       expectedError = {

@@ -84,25 +84,20 @@ func TestGatewayCacheFormats(t *testing.T) {
 	c.set("wg0", rtnl.RouteFamilyV4, nil) // scope-link
 
 	tests := []struct {
-		name, iface, want string
-		absent            bool
+		name, iface, wantString, wantAddress string
 	}{
-		{name: "next-hop", iface: "eth0", want: "192.0.2.1"},
-		{name: "scope-link", iface: "wg0", absent: true},
-		{name: "missing", iface: "missing", absent: true},
+		{name: "next-hop", iface: "eth0", wantString: "192.0.2.1", wantAddress: "192.0.2.1"},
+		{name: "scope-link", iface: "wg0", wantString: "", wantAddress: "<nil>"},
+		{name: "missing", iface: "missing", wantString: "", wantAddress: "<nil>"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := c.string(tt.iface, rtnl.RouteFamilyV4); got != tt.want {
-				t.Errorf("string(%s/v4) = %q, want %q", tt.iface, got, tt.want)
+			if got := c.string(tt.iface, rtnl.RouteFamilyV4); got != tt.wantString {
+				t.Errorf("string(%s/v4) = %q, want %q", tt.iface, got, tt.wantString)
 			}
-			got := c.address(tt.iface, rtnl.RouteFamilyV4)
-			switch {
-			case tt.absent && got != nil:
-				t.Errorf("address(%s/v4) = %q, want nil", tt.iface, *got)
-			case !tt.absent && (got == nil || *got != tt.want):
-				t.Errorf("address(%s/v4) = %v, want %q", tt.iface, got, tt.want)
+			if got := gatewayText(c.address(tt.iface, rtnl.RouteFamilyV4)); got != tt.wantAddress {
+				t.Errorf("address(%s/v4) = %s, want %s", tt.iface, got, tt.wantAddress)
 			}
 		})
 	}

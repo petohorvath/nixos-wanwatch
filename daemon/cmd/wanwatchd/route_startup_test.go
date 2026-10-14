@@ -123,8 +123,8 @@ func testRouteStartupHistory(t *testing.T, family int, delayed bool) {
 		if family == unix.AF_INET {
 			gateway = snapshot.Wans["primary"].Gateways.V4
 		}
-		if gateway == nil || *gateway != current.Gw.String() {
-			t.Errorf("State Gateway = %v after %+v; want %s", gateway, event, current.Gw)
+		if got := gatewayText(gateway); got != current.Gw.String() {
+			t.Errorf("State Gateway = %s after %+v; want %s", got, event, current.Gw)
 		}
 		if active := snapshot.Groups["home"].Active; active == nil || *active != "primary" {
 			t.Errorf("Selection = %v; want primary", active)

@@ -86,6 +86,15 @@ func countWrites(d *daemon) *int {
 	return &n
 }
 
+// gatewayText renders a State Gateway for failure messages: the
+// address, or "<nil>" when the Gateway is absent.
+func gatewayText(gw *string) string {
+	if gw == nil {
+		return "<nil>"
+	}
+	return *gw
+}
+
 func testCfg() *config.Config {
 	return &config.Config{
 		Wans: map[string]config.Wan{
