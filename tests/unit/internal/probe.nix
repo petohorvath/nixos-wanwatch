@@ -136,7 +136,7 @@ in
     method = probeFieldTests "method" "probeInvalidMethod" cases.methods;
     intervalMs = probeFieldTests "intervalMs" "probeNonPositiveInterval" cases.positiveInts;
     timeoutMs = probeFieldTests "timeoutMs" "probeNonPositiveTimeout" cases.positiveInts;
-    windowSize = probeFieldTests "windowSize" "probeNonPositiveWindow" cases.positiveInts;
+    windowSize = probeFieldTests "windowSize" "probeNonPositiveWindowSize" cases.positiveInts;
     consecutiveDown =
       probeFieldTests "hysteresis.consecutiveDown" "probeNonPositiveHysteresis"
         cases.positiveInts;
@@ -144,7 +144,7 @@ in
       probeFieldTests "hysteresis.consecutiveUp" "probeNonPositiveHysteresis"
         cases.positiveInts;
     familyHealthPolicy =
-      probeFieldTests "familyHealthPolicy" "probeInvalidFamilyPolicy"
+      probeFieldTests "familyHealthPolicy" "probeInvalidFamilyHealthPolicy"
         cases.familyHealthPolicies;
   };
 
@@ -206,12 +206,12 @@ in
       };
     };
 
-    probeNonPositiveRTT = {
+    probeNonPositiveRtt = {
       zeroDown = withThresholds { rttMsDown = 0; };
       zeroUp = withThresholds { rttMsUp = 0; };
     };
 
-    probeRTTThresholdsInverted = {
+    probeRttThresholdsInverted = {
       upAboveDown = withThresholds {
         rttMsDown = 100;
         rttMsUp = 200;
@@ -221,6 +221,26 @@ in
         rttMsUp = 250;
       };
     };
+
+    # `skeleton.nix` covers a misspelled top-level field.
+    probeUnknownField = {
+      misspelledThreshold = withThresholds { lossDown = 50; };
+      misspelledHysteresisCounter = minimal // {
+        hysteresis.consecutive = 2;
+      };
+      unknownTargetFamily.targets = {
+        v4 = [ "1.1.1.1" ];
+        v5 = [ ];
+      };
+    };
+  };
+
+  testUnknownFieldMessage = {
+    expr =
+      (probe.tryMake (withThresholds {
+        lossDown = 50;
+      })).error;
+    expected = "probe.make: [probeUnknownField] thresholds has unknown fields [\"lossDown\"]; known fields are [\"lossPctDown\",\"lossPctUp\",\"rttMsDown\",\"rttMsUp\"]";
   };
 
   testReportsEveryViolation = {
@@ -229,9 +249,11 @@ in
         targets = { };
         method = "tcp";
         intervalMs = 0;
+        interval = 1000;
       }
     );
     expected = [
+      "probeUnknownField"
       "probeInvalidMethod"
       "probeNoTargets"
       "probeNonPositiveInterval"

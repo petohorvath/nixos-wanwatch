@@ -29,4 +29,5 @@ lib.mergeAttrsList [
     inherit internal lib primitives;
     memberTypes = member;
   })
+  (import ./global.nix { inherit internal lib primitives; })
 ]

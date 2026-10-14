@@ -8,7 +8,7 @@ Contributor instructions for people and automated agents working in this reposit
 
 It has three layers, with dependencies pointing bottom-up only:
 
-- `lib/`: a pure-Nix library of validated WAN, Probe, Member, and Group values, option types, the selector mirror, and daemon-config rendering. It never depends on the module or the daemon.
+- `lib/`: a pure-Nix library of validated WAN, Probe, Member, Group, and global-settings values, option types, the selector mirror, and daemon-config rendering. It never depends on the module or the daemon.
 - `nixos/`: the thin `services.wanwatch` NixOS module and the optional Telegraf integration.
 - `daemon/`: the Linux-only Go `wanwatchd`, packaged by `packages/wanwatchd/package.nix`. Its packages under `daemon/internal/` stay private, and `daemon/vendor/` is vendored code that is never edited or reformatted by hand.
 
@@ -103,7 +103,7 @@ nix run github:petohorvath/nixos-project-policy/v0.6 -- test . --nixpkgs unstabl
 
 ## Conventions
 
-Every Nix value type (`wan`, `probe`, `group`, `member`) implements the `make`, `tryMake`, and `toJSONValue` skeleton that `tests/unit/skeleton.nix` asserts. Pure-function modules such as `selector` and `config` use purpose-specific APIs.
+Every Nix value type (`wan`, `probe`, `group`, `member`, `global`) implements the `make`, `tryMake`, and `toJSONValue` skeleton that `tests/unit/skeleton.nix` asserts. Pure-function modules such as `selector` and `config` use purpose-specific APIs.
 
 Nix tests are nix-unit attrsets of `testFoo = { expr; expected; }` (or `expectedError`), nested by module. Shared inputs and the valid and invalid cases of each value domain live in `tests/unit/fixtures.nix`; reuse a case table wherever an option type and a validator check the same domain, so the two layers stay in agreement.
 

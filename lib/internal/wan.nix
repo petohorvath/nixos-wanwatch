@@ -23,17 +23,20 @@ let
   inherit (internal) probe;
   inherit (internal.primitives)
     check
-    isValidName
+    checkIdentifier
+    checkUnknownFields
     tryErr
     tryOk
     ;
 
   formatErrors = internal.primitives.formatErrors "wan.make";
 
-  validateName =
-    name:
-    check "wanInvalidName" (isValidName name)
-      "name must match [a-zA-Z][a-zA-Z0-9-]*; got ${builtins.toJSON name}";
+  knownFields = [
+    "name"
+    "interface"
+    "pointToPoint"
+    "probe"
+  ];
 
   validateInterface =
     interface:
@@ -66,8 +69,9 @@ let
   };
 
   collectErrors =
-    fields: probeResult:
-    validateName fields.name
+    input: fields: probeResult:
+    checkUnknownFields "wanUnknownField" "wan" knownFields input
+    ++ checkIdentifier "wanInvalidName" "name" fields.name
     ++ validateInterface fields.interface
     ++ validatePointToPoint fields.pointToPoint
     ++ validateProbeResult probeResult;
@@ -81,6 +85,7 @@ let
 
     Returns a `tryResult` whose value is the WAN value. Error kinds:
 
+      wanUnknownField        — a field outside the WAN fields
       wanInvalidName         — name missing or not a valid identifier
       wanInvalidInterface    — interface fails the kernel name check
       wanInvalidPointToPoint — pointToPoint is not a bool
@@ -91,7 +96,7 @@ let
     let
       fields = mergeWithDefaults input;
       probeResult = probe.tryMake fields.probeInput;
-      errors = collectErrors fields probeResult;
+      errors = collectErrors input fields probeResult;
     in
     if errors == [ ] then
       tryOk {

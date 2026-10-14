@@ -11,6 +11,7 @@
     expr = builtins.attrNames wanwatch;
     expected = [
       "config"
+      "global"
       "group"
       "internal"
       "member"
@@ -26,6 +27,7 @@
     expr = builtins.attrNames wanwatch.internal;
     expected = [
       "config"
+      "global"
       "group"
       "member"
       "primitives"

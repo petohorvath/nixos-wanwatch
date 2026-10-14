@@ -20,13 +20,22 @@ let
   inherit (internal) member;
   inherit (internal.primitives)
     check
-    isValidName
+    checkIdentifier
+    checkUnknownFields
     partitionTry
     tryErr
     tryOk
     ;
 
   formatErrors = internal.primitives.formatErrors "group.make";
+
+  knownFields = [
+    "name"
+    "members"
+    "strategy"
+    "table"
+    "mark"
+  ];
 
   # `table` and `mark` are required, so they have no defaults.
   defaults = {
@@ -44,11 +53,6 @@ let
   validStrategies = [ "primary-backup" ];
 
   parseMembers = partitionTry member.tryMake;
-
-  validateName =
-    name:
-    check "groupInvalidName" (isValidName name)
-      "name must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON name}";
 
   # Takes `tryMake`'s parsed members so each member is parsed once.
   validateMembers =
@@ -99,12 +103,13 @@ let
   };
 
   collectErrors =
-    fields: parsedMembers:
+    input: fields: parsedMembers:
     let
       hasCleanMembers =
         builtins.isList fields.members && fields.members != [ ] && parsedMembers.errors == [ ];
     in
-    validateName fields.name
+    checkUnknownFields "groupUnknownField" "group" knownFields input
+    ++ checkIdentifier "groupInvalidName" "name" fields.name
     ++ validateMembers fields.members parsedMembers
     ++ validateStrategy fields.strategy
     ++ validateTable fields.table
@@ -121,6 +126,7 @@ let
 
     Returns a `tryResult` whose value is the group value. Error kinds:
 
+      groupUnknownField    — a field outside the Group fields
       groupInvalidName     — name is not a valid identifier
       groupNoMembers       — members is empty
       groupInvalidMember   — members is not a list, or
@@ -135,7 +141,7 @@ let
     let
       fields = mergeWithDefaults input;
       parsedMembers = parseMembers (if builtins.isList fields.members then fields.members else [ ]);
-      errors = collectErrors fields parsedMembers;
+      errors = collectErrors input fields parsedMembers;
     in
     if errors == [ ] then
       tryOk (fields // { members = parsedMembers.parsed; })

@@ -18,9 +18,13 @@ let
     inherit lib;
     internal = { inherit member primitives; };
   };
+  global = import ./global.nix {
+    internal = { inherit primitives; };
+  };
 in
 {
   inherit
+    global
     group
     member
     primitives
@@ -30,6 +34,6 @@ in
   selector = import ./selector.nix { inherit lib; };
   config = import ./config.nix {
     inherit lib;
-    internal = { inherit group wan; };
+    internal = { inherit global group wan; };
   };
 }

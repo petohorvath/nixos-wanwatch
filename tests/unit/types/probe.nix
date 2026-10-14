@@ -41,6 +41,7 @@ in
     invalid = [
       { lossPctDown = 150; }
       { rttMsDown = 0; }
+      { lossDown = 50; }
     ];
   };
 
@@ -55,6 +56,7 @@ in
   // typeTests types.probeHysteresis {
     invalid = [
       { consecutiveDown = 0; }
+      { consecutive = 2; }
     ];
   };
 
@@ -65,6 +67,12 @@ in
       { targets.v4 = [ "not-an-ip" ]; }
       # The former flat-list shape; per-family buckets are mandatory.
       { targets = [ "1.1.1.1" ]; }
+      {
+        targets = {
+          v4 = [ "1.1.1.1" ];
+          v5 = [ ];
+        };
+      }
     ];
   };
 }

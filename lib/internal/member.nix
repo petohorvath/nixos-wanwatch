@@ -16,8 +16,9 @@
 let
   inherit (internal.primitives)
     check
+    checkIdentifier
+    checkUnknownFields
     isPositiveInt
-    isValidName
     tryErr
     tryOk
     ;
@@ -29,10 +30,11 @@ let
     priority = 1;
   };
 
-  validateWan =
-    wan:
-    check "memberInvalidWan" (isValidName wan)
-      "wan must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got ${builtins.toJSON wan}";
+  knownFields = [
+    "wan"
+    "weight"
+    "priority"
+  ];
 
   validateWeight =
     weight:
@@ -51,7 +53,11 @@ let
   };
 
   collectErrors =
-    fields: validateWan fields.wan ++ validateWeight fields.weight ++ validatePriority fields.priority;
+    input: fields:
+    checkUnknownFields "memberUnknownField" "member" knownFields input
+    ++ checkIdentifier "memberInvalidWan" "wan" fields.wan
+    ++ validateWeight fields.weight
+    ++ validatePriority fields.priority;
 
   /*
     Validate Member input without throwing, reporting every violation
@@ -62,6 +68,7 @@ let
 
     Returns a `tryResult` whose value is the member value. Error kinds:
 
+      memberUnknownField    — a field outside the Member fields
       memberInvalidWan      — wan is not a valid identifier
       memberInvalidWeight   — weight is not a positive integer
       memberInvalidPriority — priority is not a positive integer
@@ -70,7 +77,7 @@ let
     input:
     let
       fields = mergeWithDefaults input;
-      errors = collectErrors fields;
+      errors = collectErrors input fields;
     in
     if errors == [ ] then tryOk fields else tryErr (formatErrors errors);
 

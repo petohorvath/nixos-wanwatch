@@ -1,39 +1,31 @@
 /*
-  Daemon-config renderer, exposed as `wanwatch.config`. Combines WAN
-  and Group values with global settings into the JSON document the
-  daemon reads at startup (`docs/specs/daemon-config.md`):
+  Daemon-config renderer, exposed as `wanwatch.config`. Combines global
+  settings with WAN and Group values into the JSON document the daemon
+  reads at startup (`docs/specs/daemon-config.md`):
 
     {
       "schema": 1,
-      "global": { statePath, hooksDir, metricsSocket, logLevel,
-                  hookTimeoutMs },
+      "global": <global.toJSONValue>,
       "wans":   { "<name>": <wan.toJSONValue>, ... },
       "groups": { "<name>": <group.toJSONValue>, ... }
     }
 
-  Rendering also rejects Groups that share a mark or a table, because
-  their traffic would be routed through the wrong table.
+  Rendering also validates the global settings with `global.make` and
+  rejects Groups that share a mark or a table, because their traffic
+  would be routed through the wrong table.
 */
 {
   lib,
   internal,
 }:
 let
+  # `render` takes an argument named `global`, so the global value type
+  # stays qualified as `internal.global`.
   inherit (internal) group wan;
 
   # Bumped on every incompatible change to the daemon-config shape; the
   # daemon rejects configs with another version.
   schemaVersion = 1;
-
-  # Also the module's option defaults; `render` merges caller settings
-  # over them.
-  defaultGlobal = {
-    statePath = "/run/wanwatch/state.json";
-    hooksDir = "/etc/wanwatch/hooks";
-    metricsSocket = "/run/wanwatch/metrics.sock";
-    logLevel = "info";
-    hookTimeoutMs = 5000;
-  };
 
   # Returns one message per `field` value that several groups share.
   describeSharedValues =
@@ -70,13 +62,15 @@ let
   /*
     Render the daemon configuration.
 
-    `global`: settings merged over `defaultGlobal`; default `{ }`.
+    `global`: an input for `global.make`, such as a global value;
+    default `{ }`. Unset fields take `global.defaults`.
     `wans`: an attrset of WAN values from `wan.make`; default `{ }`.
     `groups`: an attrset of group values from `group.make`; default
     `{ }`.
 
-    Returns the JSON-shaped attrset. Throws when Groups share a mark or
-    a table.
+    Returns the JSON-shaped attrset. Throws the `global.make` error when
+    the global settings are invalid, and throws when Groups share a mark
+    or a table.
   */
   render =
     {
@@ -86,7 +80,7 @@ let
     }:
     {
       schema = schemaVersion;
-      global = defaultGlobal // global;
+      global = internal.global.toJSONValue (internal.global.make global);
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
       groups = builtins.mapAttrs (_: group.toJSONValue) (assertUniqueMarksAndTables groups);
     };
@@ -103,7 +97,6 @@ in
 {
   inherit
     assertUniqueMarksAndTables
-    defaultGlobal
     render
     schemaVersion
     toJSON

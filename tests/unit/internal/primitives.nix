@@ -106,6 +106,45 @@ in
     };
   };
 
+  checkIdentifier = {
+    testValidReturnsNothing = {
+      expr = primitives.checkIdentifier "kind" "name" "primary";
+      expected = [ ];
+    };
+
+    testInvalidMessageNamesField = {
+      expr = primitives.checkIdentifier "kind" "wan" "1bad";
+      expected = [
+        (lib.nameValuePair "kind" "wan must be a valid wanwatch identifier (matching [a-zA-Z][a-zA-Z0-9-]*); got \"1bad\"")
+      ];
+    };
+  };
+
+  checkUnknownFields = {
+    testKnownFieldsReturnNothing = {
+      expr = primitives.checkUnknownFields "kind" "probe" [ "method" "targets" ] { method = "icmp"; };
+      expected = [ ];
+    };
+
+    testListsEveryUnknownField = {
+      expr = primitives.checkUnknownFields "kind" "thresholds" [ "lossPctDown" ] {
+        lossDown = 50;
+        lossPctDown = 50;
+        rttDown = 500;
+      };
+      expected = [
+        (lib.nameValuePair "kind" "thresholds has unknown fields [\"lossDown\",\"rttDown\"]; known fields are [\"lossPctDown\"]")
+      ];
+    };
+
+    # Callers report a value that is not an attrset under their own
+    # kind.
+    testIgnoresNonAttrset = {
+      expr = primitives.checkUnknownFields "kind" "thresholds" [ "lossPctDown" ] 5;
+      expected = [ ];
+    };
+  };
+
   partitionTry = {
     testEmpty = {
       expr = primitives.partitionTry parsePositive [ ];

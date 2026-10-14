@@ -1,10 +1,11 @@
 /*
-  Skeleton tests: every value type (probe, member, wan, group)
+  Skeleton tests: every value type (probe, member, wan, group, global)
   implements the common `make` / `tryMake` / `toJSONValue` contract,
   and its submodule option type in `wanwatch.types` evaluates an input
-  to what `make` builds from it, defaults included. The per-type suites
-  test what is specific to each type. Add each new value type to
-  `invalidInputs`.
+  to what `make` builds from it, defaults included. Both layers reject
+  unknown fields. The per-type suites test what is specific to each
+  type. Add each new value type to `invalidInputs` and
+  `fixtures.misspelledFields`.
 
   Pure-function modules (selector, config) use purpose-specific APIs
   and are not checked here.
@@ -17,7 +18,7 @@
   ...
 }:
 let
-  inherit (helpers) evalSubmodule getErrorKinds;
+  inherit (helpers) evalSubmodule getErrorKinds isAcceptedBySubmodule;
 
   # One rejected input per value type and the single kind it reports.
   invalidInputs = {
@@ -41,6 +42,10 @@ let
       };
       kind = "groupNoMembers";
     };
+    global = {
+      input.logLevel = "verbose";
+      kind = "globalInvalidLogLevel";
+    };
   };
 
   contractTests =
@@ -48,6 +53,7 @@ let
     let
       valueType = wanwatch.${typeName};
       inherit (fixtures.inputs.${typeName}) full minimal;
+      misspelled = minimal // fixtures.misspelledFields.${typeName};
       serialize = input: valueType.toJSONValue (valueType.make input);
     in
     {
@@ -73,6 +79,13 @@ let
           value = null;
           kinds = [ invalid.kind ];
         };
+      };
+
+      # A misspelled optional field must not silently fall back to its
+      # default.
+      testTryMakeRejectsUnknownField = {
+        expr = getErrorKinds (valueType.tryMake misspelled);
+        expected = [ "${typeName}UnknownField" ];
       };
 
       testMakeReturnsTryMakeValue = {
@@ -109,6 +122,11 @@ let
       testOptionTypeMatchesMakeFull = {
         expr = evalSubmodule wanwatch.types.${typeName} full;
         expected = full;
+      };
+
+      testOptionTypeRejectsUnknownField = {
+        expr = isAcceptedBySubmodule wanwatch.types.${typeName} misspelled;
+        expected = false;
       };
     };
 in

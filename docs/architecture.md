@@ -11,7 +11,7 @@ Three layers, bottom-up: pure-Nix library, NixOS module, Go daemon. The library 
                    ▼
 ┌────────────────────────────────────────────────────────────┐
 │ lib/ — pure Nix                                            │
-│   internal/{wan,probe,group,member}.make / .tryMake        │
+│   internal/{wan,probe,group,member,global}.make / .tryMake │
 │   types/primitives.{fwmark,routingTableId} validation      │
 │   internal/config.render → JSON (+ duplicate assertions)   │
 └──────────────────┬─────────────────────────────────────────┘
@@ -55,6 +55,7 @@ lib/internal/
   wan.nix            — value type; Families derived from probe.targets
   member.nix         — per-Group attributes (priority, weight)
   group.nix          — value type, Strategy enum, mark/table validators
+  global.nix         — value type for the daemon's global settings
   selector.nix       — pure Nix mirror of the Go selector
   config.nix         — JSON renderer + duplicate-mark/table assertion
 ```

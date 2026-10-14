@@ -5,7 +5,41 @@
   type-specific.
 */
 { lib }:
+let
+  # Shared by `isValidName` and `checkIdentifier`, so the predicate and
+  # its message agree.
+  identifierPattern = "[a-zA-Z][a-zA-Z0-9-]*";
+
+  /*
+    Turn one validation rule into an error list, so a validator is a
+    `++` chain of `check` calls.
+
+    `kind`: the error kind, such as `"probeInvalidMethod"`.
+    `condition`: true when the rule holds.
+    `message`: the explanation reported when the rule fails.
+
+    Returns `[ ]` when `condition` holds; otherwise a one-element list
+    holding the `{ name = kind; value = message; }` error record.
+  */
+  check =
+    kind: condition: message:
+    if condition then [ ] else [ (lib.nameValuePair kind message) ];
+
+  /*
+    Test the wanwatch identifier shape used for WAN, Group, and Member
+    references. It is stricter than libnet's interface-name check so
+    identifiers stay valid unquoted attribute names.
+
+    `value`: any value.
+
+    Returns true when `value` is a string matching
+    `[a-zA-Z][a-zA-Z0-9-]*`.
+  */
+  isValidName = value: builtins.isString value && builtins.match identifierPattern value != null;
+in
 {
+  inherit check isValidName;
+
   /*
     Build a successful `tryResult`, the shape every `tryMake` returns.
     It matches libnet's `tryParse` results, so the two interoperate.
@@ -47,19 +81,43 @@
     "${context}: " + lib.concatMapStringsSep "; " (error: "[${error.name}] ${error.value}") errors;
 
   /*
-    Turn one validation rule into an error list, so a validator is a
-    `++` chain of `check` calls.
+    Check one identifier field, so WANs, Groups, and Members report an
+    invalid identifier with the same message.
 
-    `kind`: the error kind, such as `"probeInvalidMethod"`.
-    `condition`: true when the rule holds.
-    `message`: the explanation reported when the rule fails.
+    `kind`: the error kind, such as `"wanInvalidName"`.
+    `field`: the field name the message reports, such as `"name"`.
+    `value`: the field's value.
 
-    Returns `[ ]` when `condition` holds; otherwise a one-element list
-    holding the `{ name = kind; value = message; }` error record.
+    Returns `[ ]` when `value` is a valid identifier (`isValidName`);
+    otherwise a one-element list holding the error record.
   */
-  check =
-    kind: condition: message:
-    if condition then [ ] else [ (lib.nameValuePair kind message) ];
+  checkIdentifier =
+    kind: field: value:
+    check kind (isValidName value)
+      "${field} must be a valid wanwatch identifier (matching ${identifierPattern}); got ${builtins.toJSON value}";
+
+  /*
+    Check that an attrset has only known fields, so a misspelled
+    optional field fails instead of falling back to its default.
+
+    `kind`: the error kind, such as `"probeUnknownField"`.
+    `name`: the attrset's name in the message, such as `"thresholds"`.
+    `knownFields`: the field names the attrset may have.
+    `attrs`: the attrset to check. Any other value passes, so the
+    caller can report it under its own kind.
+
+    Returns `[ ]` when every field is known; otherwise a one-element
+    list holding an error record that lists the unknown fields.
+  */
+  checkUnknownFields =
+    kind: name: knownFields: attrs:
+    let
+      unknownFields = lib.subtractLists knownFields (builtins.attrNames attrs);
+    in
+    lib.optionals (builtins.isAttrs attrs) (
+      check kind (unknownFields == [ ])
+        "${name} has unknown fields ${builtins.toJSON unknownFields}; known fields are ${builtins.toJSON knownFields}"
+    );
 
   /*
     Apply a `tryResult`-returning parser to every item and keep both
@@ -81,19 +139,6 @@
       parsed = map (result: result.value) results.right;
       errors = map (result: result.error) results.wrong;
     };
-
-  /*
-    Test the wanwatch identifier shape used for WAN, Group, and Member
-    references. It is stricter than libnet's interface-name check so
-    identifiers stay valid unquoted attribute names.
-
-    `value`: any value.
-
-    Returns true when `value` is a string matching
-    `[a-zA-Z][a-zA-Z0-9-]*`.
-  */
-  isValidName =
-    value: builtins.isString value && builtins.match "[a-zA-Z][a-zA-Z0-9-]*" value != null;
 
   /*
     Test the positive-integer fields shared by the value types, such

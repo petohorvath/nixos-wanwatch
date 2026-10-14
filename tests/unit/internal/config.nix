@@ -1,6 +1,6 @@
 /*
   Tests for `lib/internal/config.nix`, the daemon-config renderer:
-  global defaults and overrides, cross-Group mark and table checks, the
+  global-settings validation, cross-Group mark and table checks, the
   rendered shape, and the JSON string form.
 */
 {
@@ -12,6 +12,7 @@
 let
   inherit (wanwatch)
     config
+    global
     group
     wan
     ;
@@ -118,17 +119,6 @@ let
   };
 in
 {
-  testDefaultGlobal = {
-    expr = config.defaultGlobal;
-    expected = {
-      statePath = "/run/wanwatch/state.json";
-      hooksDir = "/etc/wanwatch/hooks";
-      metricsSocket = "/run/wanwatch/metrics.sock";
-      logLevel = "info";
-      hookTimeoutMs = 5000;
-    };
-  };
-
   testSchemaVersion = {
     expr = config.schemaVersion;
     expected = 1;
@@ -141,23 +131,30 @@ in
       expr = config.render { };
       expected = {
         schema = config.schemaVersion;
-        global = config.defaultGlobal;
+        global = global.defaults;
         wans = { };
         groups = { };
       };
     };
 
-    testMergesGlobalOverDefaults = {
-      expr =
-        (config.render {
-          global = {
-            logLevel = "debug";
-            hookTimeoutMs = 9000;
-          };
-        }).global;
-      expected = config.defaultGlobal // {
+    testFillsGlobalDefaults = {
+      expr = (config.render { global.logLevel = "debug"; }).global;
+      expected = global.defaults // {
         logLevel = "debug";
-        hookTimeoutMs = 9000;
+      };
+    };
+
+    # A global value is also valid input.
+    testSerializesGlobalValue = {
+      expr = (config.render { global = global.make fixtures.inputs.global.full; }).global;
+      expected = fixtures.inputs.global.full;
+    };
+
+    testRejectsInvalidGlobal = {
+      expr = config.render { global.logLevel = "verbose"; };
+      expectedError = {
+        type = "ThrownError";
+        msg = "global.make: \\[globalInvalidLogLevel]";
       };
     };
 

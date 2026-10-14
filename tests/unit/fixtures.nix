@@ -2,12 +2,18 @@
   Fixtures shared by the unit suites; `default.nix` passes them to
   every suite as `fixtures`.
 
-    inputs — a minimal and a full valid input per value type. Each
-             `full` input sets every field in its serialized form, so
-             `toJSONValue (make full)` equals it.
-    cases  — valid and invalid values per domain. The predicates, the
-             option types, and the `tryMake` fields that share a
-             domain all test the same table, so the two layers agree.
+    inputs           — a minimal and a full valid input per value type.
+                       Each `full` input sets every field in its
+                       serialized form, so `toJSONValue (make full)`
+                       equals it.
+    misspelledFields — one misspelled optional field per value type.
+                       Added to the `minimal` input, `tryMake` and the
+                       option type must both reject it rather than
+                       fall back to the field's default.
+    cases            — valid and invalid values per domain. The
+                       predicates, the option types, and the `tryMake`
+                       fields that share a domain all test the same
+                       table, so the two layers agree.
 */
 let
   probe = {
@@ -66,6 +72,17 @@ in
       };
     };
 
+    global = {
+      minimal = { };
+      full = {
+        statePath = "/run/wanwatch-test/state.json";
+        hooksDir = "/etc/wanwatch-test/hooks";
+        metricsSocket = "/run/wanwatch-test/metrics.sock";
+        logLevel = "debug";
+        hookTimeoutMs = 2000;
+      };
+    };
+
     group = {
       minimal = {
         name = "home-uplink";
@@ -88,6 +105,14 @@ in
         table = 1001;
       };
     };
+  };
+
+  misspelledFields = {
+    probe.interval = 1000;
+    member.priorty = 2;
+    wan.pointtopoint = true;
+    group.stratgy = "primary-backup";
+    global.loglevel = "debug";
   };
 
   cases = {
@@ -219,6 +244,38 @@ in
       invalid = [
         "round-robin"
         "load-balance"
+      ];
+    };
+
+    # The levels the daemon's `-log-level` flag also accepts.
+    logLevels = {
+      valid = [
+        "debug"
+        "info"
+        "warn"
+        "error"
+      ];
+      invalid = [
+        "verbose"
+        "warning"
+        "INFO"
+      ];
+    };
+
+    # The global paths. Whitespace-only strings fail like empty ones,
+    # as in `lib.types.nonEmptyStr`.
+    nonEmptyStrings = {
+      valid = [
+        "/run/wanwatch/state.json"
+        "a"
+        " a "
+      ];
+      invalid = [
+        ""
+        " "
+        "\t\n"
+        42
+        null
       ];
     };
   };
