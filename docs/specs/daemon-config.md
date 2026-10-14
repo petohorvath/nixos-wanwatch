@@ -109,8 +109,8 @@ The Nix-side validator enforces `lossPctUp < lossPctDown` and `rttMsUp < rttMsDo
   "name": "home-uplink",
   "members": { "<wan>": { ... }, ... },
   "strategy": "primary-backup",
-  "table": 100,
-  "mark": 100
+  "table": 1000,
+  "mark": 1000
 }
 ```
 
@@ -136,7 +136,7 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
 | `wan` | string | yes | Must match the attribute key, which must be a key in the top-level `wans` map. |
-| `priority` | int | yes | `1..1000`. Lower is preferred under `primary-backup`. |
+| `priority` | int | yes | Positive integer. Lower is preferred under `primary-backup`. |
 
 ## Validation layers
 

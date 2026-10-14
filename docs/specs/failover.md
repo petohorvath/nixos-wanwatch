@@ -40,8 +40,8 @@ Results that arrive before the Window fills update metrics and retry pending App
 ```text
 t=0      primary healthy, backup healthy
          active = primary
-         table 100 v4 default = via primary's gw, dev wan0
-         table 100 v6 default = via primary's gw, dev wan0
+         table 1000 v4 default = via primary's gw, dev wan0
+         table 1000 v6 default = via primary's gw, dev wan0
 
 t=1      carrier drops on wan0
          rtnl emits LinkEvent{Name: wan0, Carrier: down}
@@ -49,13 +49,13 @@ t=1      carrier drops on wan0
          Wans.MemberHealth: primary unhealthy, backup healthy
          selector.Select: active = backup
 
-         apply.WriteDefault(family=v4, table=100, gw=backup.v4, ifindex=wan1)
-         apply.WriteDefault(family=v6, table=100, gw=backup.v6, ifindex=wan1)
+         apply.WriteDefault(family=v4, table=1000, gw=backup.v4, ifindex=wan1)
+         apply.WriteDefault(family=v6, table=1000, gw=backup.v6, ifindex=wan1)
          state.Writer.Write: active=backup, activeSince=t1
          state.HookNotifier.Notify queues the switch notification
          wanwatch_group_decisions_total{reason=carrier}++
 
-t=2      table 100 reflects backup; marked traffic routes via wan1
+t=2      table 1000 reflects backup; marked traffic routes via wan1
 ```
 
 The `t=1` steps run sequentially on one goroutine. Apply never races with itself, and `state.json` readers always see a complete snapshot.
