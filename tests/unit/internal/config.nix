@@ -44,12 +44,25 @@ let
     groups = distinctGroups;
   };
 
-  # The deprecated alias must behave like the new name.
-  uniquenessChecks = {
-    inherit (config) assertUniqueMarksAndTables resolveAllocations;
+  assertUnique = config.assertUniqueMarksAndTables;
+in
+{
+  testSchemaVersion = {
+    expr = config.schemaVersion;
+    expected = 1;
   };
 
-  uniquenessTests = _: assertUnique: {
+  testExports = {
+    expr = builtins.attrNames config;
+    expected = [
+      "assertUniqueMarksAndTables"
+      "render"
+      "schemaVersion"
+      "toJSON"
+    ];
+  };
+
+  assertUniqueMarksAndTables = {
     testEmptyInput = {
       expr = assertUnique { };
       expected = { };
@@ -117,14 +130,6 @@ let
       };
     };
   };
-in
-{
-  testSchemaVersion = {
-    expr = config.schemaVersion;
-    expected = 1;
-  };
-
-  uniqueness = lib.mapAttrs uniquenessTests uniquenessChecks;
 
   render = {
     testEmptyInput = {
@@ -190,13 +195,6 @@ in
   toJSON = {
     testParsesBackToRender = {
       expr = builtins.fromJSON (config.toJSON renderInput);
-      expected = config.render renderInput;
-    };
-  };
-
-  toJSONValue = {
-    testIsRender = {
-      expr = config.toJSONValue renderInput;
       expected = config.render renderInput;
     };
   };
