@@ -1,7 +1,7 @@
 /*
   Tests for `lib/internal/config.nix`, the daemon-config renderer:
-  global defaults and overrides, cross-Group mark and table checks, the
-  rendered shape, and the JSON string form.
+  cross-Group mark and table checks, the rendered shape, and the JSON
+  string form.
 */
 {
   fixtures,
@@ -12,6 +12,7 @@
 let
   inherit (wanwatch)
     config
+    global
     group
     wan
     ;
@@ -38,7 +39,7 @@ let
   };
 
   renderInput = {
-    global.logLevel = "warn";
+    global = global.make { logLevel = "warn"; };
     inherit wans;
     groups = distinctGroups;
   };
@@ -118,17 +119,6 @@ let
   };
 in
 {
-  testDefaultGlobal = {
-    expr = config.defaultGlobal;
-    expected = {
-      statePath = "/run/wanwatch/state.json";
-      hooksDir = "/etc/wanwatch/hooks";
-      metricsSocket = "/run/wanwatch/metrics.sock";
-      logLevel = "info";
-      hookTimeoutMs = 5000;
-    };
-  };
-
   testSchemaVersion = {
     expr = config.schemaVersion;
     expected = 1;
@@ -141,24 +131,15 @@ in
       expr = config.render { };
       expected = {
         schema = config.schemaVersion;
-        global = config.defaultGlobal;
+        global = global.defaults;
         wans = { };
         groups = { };
       };
     };
 
-    testMergesGlobalOverDefaults = {
-      expr =
-        (config.render {
-          global = {
-            logLevel = "debug";
-            hookTimeoutMs = 9000;
-          };
-        }).global;
-      expected = config.defaultGlobal // {
-        logLevel = "debug";
-        hookTimeoutMs = 9000;
-      };
+    testSerializesGlobal = {
+      expr = (config.render { global = global.make fixtures.inputs.global.full; }).global;
+      expected = fixtures.inputs.global.full;
     };
 
     testSerializesWansAndGroups = {

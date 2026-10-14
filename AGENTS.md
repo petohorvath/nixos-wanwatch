@@ -103,7 +103,7 @@ nix run github:petohorvath/nixos-project-policy/v0.6 -- test . --nixpkgs unstabl
 
 ## Conventions
 
-Every Nix value type (`wan`, `probe`, `group`, `member`) implements the `make`, `tryMake`, and `toJSONValue` skeleton that `tests/unit/skeleton.nix` asserts. Pure-function modules such as `selector` and `config` use purpose-specific APIs.
+Every Nix value type (`wan`, `probe`, `group`, `member`, `global`) implements the `make`, `tryMake`, and `toJSONValue` skeleton that `tests/unit/skeleton.nix` asserts. Pure-function modules such as `selector` and `config` use purpose-specific APIs.
 
 Nix tests are nix-unit attrsets of `testFoo = { expr; expected; }` (or `expectedError`), nested by module. Shared inputs and the valid and invalid cases of each value domain live in `tests/unit/fixtures.nix`; reuse a case table wherever an option type and a validator check the same domain, so the two layers stay in agreement.
 

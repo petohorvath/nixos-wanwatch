@@ -18,7 +18,7 @@ The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `schema` | int | yes | Always `1` in this spec. |
-| `global` | object | yes | Process-wide settings. The Nix renderer merges user settings over `defaultGlobal`, so the rendered file always has every key; the daemon applies no defaults and rejects missing or empty values. |
+| `global` | object | yes | Process-wide settings. `wanwatch.global.make` fills unset fields from `wanwatch.global.defaults`, so the rendered file always has every key; the daemon applies no defaults and rejects missing or empty values. |
 | `wans` | object | yes | Map from WAN name to WAN object. May be empty. |
 | `groups` | object | yes | Map from Group name to Group object. May be empty. |
 

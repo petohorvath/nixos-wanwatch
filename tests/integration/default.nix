@@ -103,6 +103,26 @@ in
       expected = 1;
     };
 
+    testRendersGlobalDefaults = {
+      expr = rendered.global;
+      expected = {
+        statePath = "/run/wanwatch/state.json";
+        hooksDir = "/etc/wanwatch/hooks";
+        metricsSocket = "/run/wanwatch/metrics.sock";
+        logLevel = "info";
+        hookTimeoutMs = 5000;
+      };
+    };
+
+    testRendersGlobalSettings = {
+      expr =
+        (renderConfig (evaluate [
+          primaryAndBackup
+          { services.wanwatch.global.logLevel = "debug"; }
+        ])).global.logLevel;
+      expected = "debug";
+    };
+
     testRendersWans = {
       expr = builtins.mapAttrs (_: wan: {
         inherit (wan) interface pointToPoint;

@@ -41,69 +41,16 @@ let
 
   # The renderer takes value-type values, and `make` also applies the
   # cross-field checks that option types cannot express.
+  globalValue = wanwatch.global.make cfg.global;
   wanValues = lib.mapAttrs (_: wanwatch.wan.make) cfg.wans;
   groupValues = lib.mapAttrs (_: wanwatch.group.make) cfg.groups;
 
   validatedGroups = wanwatch.config.assertUniqueMarksAndTables groupValues;
 
   renderedConfig = wanwatch.config.toJSON {
-    inherit (cfg) global;
+    global = globalValue;
     wans = wanValues;
     groups = groupValues;
-  };
-
-  globalSubmodule = lib.types.submodule {
-    options = {
-      statePath = lib.mkOption {
-        type = lib.types.str;
-        default = wanwatch.config.defaultGlobal.statePath;
-        description = ''
-          File the daemon atomically rewrites with its State on every
-          Decision. The default lives in the service's
-          RuntimeDirectory under `/run`.
-        '';
-      };
-      hooksDir = lib.mkOption {
-        type = lib.types.str;
-        default = wanwatch.config.defaultGlobal.hooksDir;
-        description = ''
-          Root of the hook-script tree. On every Decision the daemon
-          runs the scripts in `<hooksDir>/{up,down,switch}.d/`
-          (docs/specs/daemon-state.md).
-        '';
-      };
-      metricsSocket = lib.mkOption {
-        type = lib.types.str;
-        default = wanwatch.config.defaultGlobal.metricsSocket;
-        description = ''
-          Unix socket on which the daemon serves Prometheus metrics.
-          The socket has mode 0660, so scrapers need membership in
-          the daemon's group.
-        '';
-      };
-      logLevel = lib.mkOption {
-        type = lib.types.enum [
-          "debug"
-          "info"
-          "warn"
-          "error"
-        ];
-        default = wanwatch.config.defaultGlobal.logLevel;
-        description = ''
-          Minimum slog level emitted by the daemon. The `-log-level`
-          flag overrides this at runtime.
-        '';
-      };
-      hookTimeoutMs = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = wanwatch.config.defaultGlobal.hookTimeoutMs;
-        description = ''
-          Deadline in milliseconds for each script under `hooksDir`.
-          When it expires, the daemon sends SIGKILL to the hook's
-          process group and reports a timeout.
-        '';
-      };
-    };
   };
 in
 {
@@ -136,11 +83,11 @@ in
     };
 
     global = lib.mkOption {
-      type = globalSubmodule;
+      type = wanwatch.types.global;
       default = { };
       description = ''
         Global daemon settings: paths, log level, and hook timeout.
-        Each field defaults to `wanwatch.config.defaultGlobal`.
+        Each field defaults to `wanwatch.global.defaults`.
       '';
     };
 

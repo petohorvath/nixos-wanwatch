@@ -21,6 +21,7 @@ in
 
   internal = {
     config = import ./internal/config.nix testContext;
+    global = import ./internal/global.nix testContext;
     group = import ./internal/group.nix testContext;
     member = import ./internal/member.nix testContext;
     primitives = import ./internal/primitives.nix testContext;
@@ -30,6 +31,7 @@ in
   };
 
   types = {
+    global = import ./types/global.nix testContext;
     group = import ./types/group.nix testContext;
     member = import ./types/member.nix testContext;
     primitives = import ./types/primitives.nix testContext;

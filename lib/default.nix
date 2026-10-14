@@ -24,6 +24,7 @@ in
   inherit internal;
   inherit (internal)
     config
+    global
     group
     member
     probe

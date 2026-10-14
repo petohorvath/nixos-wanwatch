@@ -72,6 +72,17 @@ in
       };
     };
 
+    global = {
+      minimal = { };
+      full = {
+        statePath = "/run/wanwatch-test/state.json";
+        hooksDir = "/etc/wanwatch-test/hooks";
+        metricsSocket = "/run/wanwatch-test/metrics.sock";
+        logLevel = "debug";
+        hookTimeoutMs = 2000;
+      };
+    };
+
     group = {
       minimal = {
         name = "home-uplink";
@@ -101,6 +112,7 @@ in
     member.priorty = 2;
     wan.pointtopoint = true;
     group.stratgy = "primary-backup";
+    global.loglevel = "debug";
   };
 
   cases = {
@@ -232,6 +244,38 @@ in
       invalid = [
         "round-robin"
         "load-balance"
+      ];
+    };
+
+    # The levels the daemon's `-log-level` flag also accepts.
+    logLevels = {
+      valid = [
+        "debug"
+        "info"
+        "warn"
+        "error"
+      ];
+      invalid = [
+        "verbose"
+        "warning"
+        "INFO"
+      ];
+    };
+
+    # The global paths. Whitespace-only strings fail like empty ones,
+    # as in `lib.types.nonEmptyStr`.
+    nonEmptyStrings = {
+      valid = [
+        "/run/wanwatch/state.json"
+        "a"
+        " a "
+      ];
+      invalid = [
+        ""
+        " "
+        "\t\n"
+        42
+        null
       ];
     };
   };

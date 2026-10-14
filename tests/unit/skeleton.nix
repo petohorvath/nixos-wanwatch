@@ -1,5 +1,5 @@
 /*
-  Skeleton tests: every value type (probe, member, wan, group)
+  Skeleton tests: every value type (probe, member, wan, group, global)
   implements the common `make` / `tryMake` / `toJSONValue` contract,
   and its submodule option type in `wanwatch.types` evaluates an input
   to what `make` builds from it, defaults included. Both layers reject
@@ -41,6 +41,10 @@ let
         members = [ ];
       };
       kind = "groupNoMembers";
+    };
+    global = {
+      input.logLevel = "verbose";
+      kind = "globalInvalidLogLevel";
     };
   };
 

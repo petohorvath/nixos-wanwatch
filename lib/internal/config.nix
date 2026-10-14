@@ -1,12 +1,11 @@
 /*
-  Daemon-config renderer, exposed as `wanwatch.config`. Combines WAN
-  and Group values with global settings into the JSON document the
+  Daemon-config renderer, exposed as `wanwatch.config`. Combines a
+  global value and WAN and Group values into the JSON document the
   daemon reads at startup (`docs/specs/daemon-config.md`):
 
     {
       "schema": 1,
-      "global": { statePath, hooksDir, metricsSocket, logLevel,
-                  hookTimeoutMs },
+      "global": <global.toJSONValue>,
       "wans":   { "<name>": <wan.toJSONValue>, ... },
       "groups": { "<name>": <group.toJSONValue>, ... }
     }
@@ -19,21 +18,13 @@
   internal,
 }:
 let
+  # `render` takes an argument named `global`, so the global value type
+  # stays qualified as `internal.global`.
   inherit (internal) group wan;
 
   # Bumped on every incompatible change to the daemon-config shape; the
   # daemon rejects configs with another version.
   schemaVersion = 1;
-
-  # Also the module's option defaults; `render` merges caller settings
-  # over them.
-  defaultGlobal = {
-    statePath = "/run/wanwatch/state.json";
-    hooksDir = "/etc/wanwatch/hooks";
-    metricsSocket = "/run/wanwatch/metrics.sock";
-    logLevel = "info";
-    hookTimeoutMs = 5000;
-  };
 
   # Returns one message per `field` value that several groups share.
   describeSharedValues =
@@ -70,7 +61,8 @@ let
   /*
     Render the daemon configuration.
 
-    `global`: settings merged over `defaultGlobal`; default `{ }`.
+    `global`: a global value from `global.make`; default
+    `global.make { }`.
     `wans`: an attrset of WAN values from `wan.make`; default `{ }`.
     `groups`: an attrset of group values from `group.make`; default
     `{ }`.
@@ -80,13 +72,13 @@ let
   */
   render =
     {
-      global ? { },
+      global ? internal.global.make { },
       wans ? { },
       groups ? { },
     }:
     {
       schema = schemaVersion;
-      global = defaultGlobal // global;
+      global = internal.global.toJSONValue global;
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
       groups = builtins.mapAttrs (_: group.toJSONValue) (assertUniqueMarksAndTables groups);
     };
@@ -103,7 +95,6 @@ in
 {
   inherit
     assertUniqueMarksAndTables
-    defaultGlobal
     render
     schemaVersion
     toJSON
