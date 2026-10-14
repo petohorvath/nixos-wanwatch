@@ -1,0 +1,7 @@
+# The module owns the service's identity and paths
+
+The `services.wanwatch` module runs the daemon as the `wanwatch` user and group, and renders fixed paths: State at `/run/wanwatch/state.json`, the metrics socket at `/run/wanwatch/metrics.sock`, and Hooks under `/etc/wanwatch/hooks`. The service's systemd sandbox (`ProtectSystem=strict`, `PrivateTmp`) leaves its RuntimeDirectory, `/run/wanwatch`, as the only writable directory that other processes can see, so the former `global.statePath` and `global.metricsSocket` options accepted paths the daemon could not write. Honoring them would have needed `ReadWritePaths` plus tmpfiles rules that create and own each parent directory, with no use case for another location. `hooksDir` needs only read access, but one fixed Hook tree keeps the documented `environment.etc` pattern correct on every host. A custom user gains nothing inside the same sandbox, and the former `group` option sat beside the failover `groups`.
+
+## Consequences
+
+The library owns the fixed values as `wanwatch.config.paths`, which `config.render` always writes; `wanwatch.global` and its option type hold only `logLevel` and `hookTimeoutMs`, so a path setting fails as an unknown field. The daemon-config JSON keeps `statePath`, `hooksDir`, and `metricsSocket`, so only a hand-written `config.json`, run outside the module, can point the daemon elsewhere. Hooks that need more access get it from groups added to `users.users.wanwatch.extraGroups`, and metrics scrapers join the `wanwatch` group. A declarative Hooks option is tracked in `TODO.md`.

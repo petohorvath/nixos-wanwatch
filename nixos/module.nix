@@ -2,7 +2,8 @@
   `services.wanwatch`: multi-WAN monitoring and failover. Renders the
   declared WANs and Groups into the daemon configuration, creates the
   `wanwatch` system user and group, and runs wanwatchd as a hardened
-  systemd service.
+  systemd service. The user, the group, and the daemon's paths are
+  fixed (docs/adr/0014-module-owns-identity-and-paths.md).
 
   Example:
 
@@ -63,30 +64,12 @@ in
       description = "The wanwatchd derivation to run.";
     };
 
-    user = lib.mkOption {
-      type = lib.types.str;
-      default = "wanwatch";
-      description = ''
-        User the daemon runs as. The module creates the default
-        `wanwatch` user; any other user must be managed elsewhere.
-      '';
-    };
-
-    group = lib.mkOption {
-      type = lib.types.str;
-      default = "wanwatch";
-      description = ''
-        Group the daemon runs as. The module creates the default
-        `wanwatch` group; metrics scrapers such as Telegraf join it.
-      '';
-    };
-
     global = lib.mkOption {
       type = wanwatch.types.global;
       default = { };
       description = ''
-        Global daemon settings: paths, log level, and Hook timeout.
-        Each field defaults to `wanwatch.global.defaults`.
+        Global daemon settings: log level and Hook timeout. Each field
+        defaults to `wanwatch.global.defaults`.
       '';
     };
 
@@ -155,17 +138,16 @@ in
       ManageForeignRoutes = lib.mkDefault false;
     };
 
-    users.users = lib.mkIf (cfg.user == "wanwatch") {
-      wanwatch = {
-        isSystemUser = true;
-        inherit (cfg) group;
-        description = "wanwatch multi-WAN failover daemon";
-      };
+    # Hooks run as this user; grant them extra access through
+    # `users.users.wanwatch.extraGroups`.
+    users.users.wanwatch = {
+      isSystemUser = true;
+      group = "wanwatch";
+      description = "wanwatch multi-WAN failover daemon";
     };
 
-    users.groups = lib.mkIf (cfg.group == "wanwatch") {
-      wanwatch = { };
-    };
+    # Metrics scrapers such as Telegraf join this group.
+    users.groups.wanwatch = { };
 
     systemd.services.wanwatch = {
       description = "wanwatch multi-WAN failover daemon";
@@ -192,8 +174,8 @@ in
         RestartSec = "5s";
         WatchdogSec = "30s";
 
-        User = cfg.user;
-        Group = cfg.group;
+        User = "wanwatch";
+        Group = "wanwatch";
 
         # CAP_NET_ADMIN for route/rule writes; CAP_NET_RAW for the
         # ICMP probe socket binding (docs/specs/probe-algorithm.md).
@@ -206,8 +188,9 @@ in
           "CAP_NET_RAW"
         ];
 
-        # Holds the default statePath and metricsSocket; systemd creates
-        # it for the service user and removes it on stop.
+        # Holds state.json and the metrics socket; ProtectSystem=strict
+        # leaves no other writable place that other processes can see.
+        # systemd creates it for the service user and removes it on stop.
         RuntimeDirectory = "wanwatch";
         RuntimeDirectoryMode = "0755";
 

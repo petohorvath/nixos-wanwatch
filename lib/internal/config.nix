@@ -5,14 +5,15 @@
 
     {
       "schema": 1,
-      "global": <global.toJSONValue>,
+      "global": <global.toJSONValue> // paths,
       "wans":   { "<name>": <wan.toJSONValue>, ... },
       "groups": { "<name>": <group.toJSONValue>, ... }
     }
 
-  Rendering also validates the global settings with `global.make` and
-  rejects Groups that share a mark or a table, because their traffic
-  would be routed through the wrong table.
+  Rendering also validates the global settings with `global.make`,
+  rejects Members that reference an undeclared WAN, which the daemon
+  would refuse, and rejects Groups that share a mark or a table,
+  because their traffic would be routed through the wrong table.
 */
 {
   lib,
@@ -27,6 +28,15 @@ let
   # incompatible change to the daemon-config shape; the daemon rejects
   # configs with another version.
   schemaVersion = 1;
+
+  # The daemon's paths, which are fixed rather than settings: the NixOS
+  # module's sandbox lets the daemon write only under /run/wanwatch
+  # (docs/adr/0014-module-owns-identity-and-paths.md).
+  paths = {
+    statePath = "/run/wanwatch/state.json";
+    hooksDir = "/etc/wanwatch/hooks";
+    metricsSocket = "/run/wanwatch/metrics.sock";
+  };
 
   # Returns one message per `field` value that several groups share.
   describeSharedValues =
@@ -60,6 +70,41 @@ let
     else
       throw "wanwatch: duplicate mark or table across groups: ${lib.concatStringsSep "; " messages}";
 
+  # Returns one message per Member whose `wan` is not a key of `wans`.
+  describeUndeclaredMemberWans =
+    wans: groups:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        groupName: groupValue:
+        lib.pipe groupValue.members [
+          builtins.attrNames
+          (builtins.filter (wanName: !(wans ? ${wanName})))
+          (map (wanName: "group '${groupName}' references wan '${wanName}'"))
+        ]
+      ) groups
+    );
+
+  /*
+    Reject Members that reference a WAN `wans` does not declare. The
+    daemon refuses such a config at startup, so a typo would otherwise
+    surface as a failed unit instead of an evaluation error.
+
+    `wans`: an attrset of WAN values keyed by name.
+    `groups`: an attrset of group values keyed by name.
+
+    Returns `groups` unchanged. Throws a message listing every
+    undeclared reference.
+  */
+  assertDeclaredMemberWans =
+    wans: groups:
+    let
+      messages = describeUndeclaredMemberWans wans groups;
+    in
+    if messages == [ ] then
+      groups
+    else
+      throw "wanwatch: group members reference undeclared WANs: ${lib.concatStringsSep "; " messages}";
+
   /*
     Render the daemon configuration.
 
@@ -69,9 +114,10 @@ let
     `groups`: an attrset of group values from `group.make`; default
     `{ }`.
 
-    Returns the JSON-shaped attrset. Throws the `global.make` error when
-    the global settings are invalid, and throws when Groups share a mark
-    or a table.
+    Returns the JSON-shaped attrset, whose `global` also carries
+    `paths`. Throws the `global.make` error when the global settings
+    are invalid, and throws when a Member references a WAN that `wans`
+    does not declare or when Groups share a mark or a table.
   */
   render =
     {
@@ -81,9 +127,13 @@ let
     }:
     {
       schema = schemaVersion;
-      global = internal.global.toJSONValue (internal.global.make global);
+      global = internal.global.toJSONValue (internal.global.make global) // paths;
       wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
-      groups = builtins.mapAttrs (_: group.toJSONValue) (assertUniqueMarksAndTables groups);
+      groups = lib.pipe groups [
+        (assertDeclaredMemberWans wans)
+        assertUniqueMarksAndTables
+        (builtins.mapAttrs (_: group.toJSONValue))
+      ];
     };
 
   /*
@@ -98,6 +148,7 @@ in
 {
   inherit
     assertUniqueMarksAndTables
+    paths
     render
     schemaVersion
     toJSON

@@ -13,7 +13,7 @@ Three layers, bottom-up: pure-Nix library, NixOS module, Go daemon. The library 
 │ lib/ — pure Nix                                            │
 │   internal/{wan,probe,group,member,global}.make / .tryMake │
 │   types/primitives.{fwmark,routingTableId} validation      │
-│   internal/config.render → JSON (+ duplicate assertions)   │
+│   internal/config.render → JSON (+ consistency checks)     │
 └──────────────────┬─────────────────────────────────────────┘
                    │ rendered config.json
                    ▼
@@ -57,14 +57,14 @@ lib/internal/
   group.nix          — value type, Strategy enum, mark/table validators
   global.nix         — value type for the daemon's global settings
   selector.nix       — pure Nix mirror of the Go selector
-  config.nix         — JSON renderer + duplicate-mark/table assertion
+  config.nix         — JSON renderer, fixed paths, consistency checks
 ```
 
 `lib/types/<name>.nix` exposes a NixOS option type for each value type, flattened as `wanwatch.types.<name>`. `wanwatch.types.fwmark` and `routingTableId` restrict the integers each Group declares to `[1000, 32767]`.
 
 ## `nixos/`
 
-`module.nix` declares `services.wanwatch.*`, passes user input through `wanwatch.<type>.make`, runs `config.assertUniqueMarksAndTables` so no two Groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json`.
+`module.nix` declares `services.wanwatch.*`, passes user input through `wanwatch.<type>.make`, runs `config.assertUniqueMarksAndTables` so no two Groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json` with `config.render`, which rejects Members that reference an undeclared WAN.
 
 It also publishes two read-only outputs that downstream consumers such as nftzones reference by name:
 

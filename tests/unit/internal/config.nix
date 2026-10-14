@@ -17,9 +17,10 @@ let
     wan
     ;
 
-  # One-member Groups keyed by name, each with the given mark and table.
+  # Groups keyed by name: the minimal Group, one Member on `primary`,
+  # with the given fields, such as mark and table, overridden.
   makeGroups = lib.mapAttrs (
-    name: markAndTable: group.make (fixtures.inputs.group.minimal // markAndTable // { inherit name; })
+    name: overrides: group.make (fixtures.inputs.group.minimal // overrides // { inherit name; })
   );
 
   distinctGroups = makeGroups {
@@ -56,10 +57,22 @@ in
     expr = builtins.attrNames config;
     expected = [
       "assertUniqueMarksAndTables"
+      "paths"
       "render"
       "schemaVersion"
       "toJSON"
     ];
+  };
+
+  # The module's sandbox lets the daemon write only under /run/wanwatch
+  # (ADR-0014).
+  testPaths = {
+    expr = config.paths;
+    expected = {
+      statePath = "/run/wanwatch/state.json";
+      hooksDir = "/etc/wanwatch/hooks";
+      metricsSocket = "/run/wanwatch/metrics.sock";
+    };
   };
 
   assertUniqueMarksAndTables = {
@@ -136,7 +149,7 @@ in
       expr = config.render { };
       expected = {
         schema = config.schemaVersion;
-        global = global.defaults;
+        global = global.defaults // config.paths;
         wans = { };
         groups = { };
       };
@@ -144,15 +157,13 @@ in
 
     testFillsGlobalDefaults = {
       expr = (config.render { global.logLevel = "debug"; }).global;
-      expected = global.defaults // {
-        logLevel = "debug";
-      };
+      expected = global.defaults // config.paths // { logLevel = "debug"; };
     };
 
     # A global value is also valid input.
     testSerializesGlobalValue = {
       expr = (config.render { global = global.make fixtures.inputs.global.full; }).global;
-      expected = fixtures.inputs.global.full;
+      expected = fixtures.inputs.global.full // config.paths;
     };
 
     testRejectsInvalidGlobal = {
@@ -174,6 +185,7 @@ in
 
     testRejectsSharedMark = {
       expr = config.render {
+        inherit wans;
         groups = makeGroups {
           a = {
             mark = 1500;
@@ -188,6 +200,49 @@ in
       expectedError = {
         type = "ThrownError";
         msg = "mark 1500 is shared";
+      };
+    };
+
+    # The daemon would reject the file and fail its unit.
+    testRejectsUndeclaredMemberWan = {
+      expr = config.render {
+        inherit wans;
+        groups.home-uplink = group.make (
+          fixtures.inputs.group.minimal
+          // {
+            members = {
+              primary = { };
+              backup = { };
+            };
+          }
+        );
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = "group 'home-uplink' references wan 'backup'";
+      };
+    };
+
+    testNamesEveryUndeclaredMemberWan = {
+      expr = config.render {
+        groups = makeGroups {
+          a = {
+            mark = 1500;
+            table = 1500;
+            members = {
+              primary = { };
+              backup = { };
+            };
+          };
+          b = {
+            mark = 1600;
+            table = 1600;
+          };
+        };
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = "group 'a' references wan 'backup'; group 'a' references wan 'primary'; group 'b' references wan 'primary'";
       };
     };
   };

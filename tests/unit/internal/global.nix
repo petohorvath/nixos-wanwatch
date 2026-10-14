@@ -25,9 +25,6 @@ in
     testValues = {
       expr = global.defaults;
       expected = {
-        statePath = "/run/wanwatch/state.json";
-        hooksDir = "/etc/wanwatch/hooks";
-        metricsSocket = "/run/wanwatch/metrics.sock";
         logLevel = "info";
         hookTimeoutMs = 5000;
       };
@@ -47,9 +44,6 @@ in
   };
 
   fields = {
-    statePath = globalFieldTests "statePath" "globalInvalidStatePath" cases.nonEmptyStrings;
-    hooksDir = globalFieldTests "hooksDir" "globalInvalidHooksDir" cases.nonEmptyStrings;
-    metricsSocket = globalFieldTests "metricsSocket" "globalInvalidMetricsSocket" cases.nonEmptyStrings;
     logLevel = globalFieldTests "logLevel" "globalInvalidLogLevel" cases.logLevels;
     hookTimeoutMs = globalFieldTests "hookTimeoutMs" "globalNonPositiveHookTimeout" cases.positiveInts;
   };
@@ -57,9 +51,6 @@ in
   testReportsEveryViolation = {
     expr = getErrorKinds (
       global.tryMake {
-        statePath = "";
-        hooksDir = "";
-        metricsSocket = "";
         logLevel = "verbose";
         hookTimeoutMs = 0;
         loglevel = "debug";
@@ -67,11 +58,15 @@ in
     );
     expected = [
       "globalUnknownField"
-      "globalInvalidStatePath"
-      "globalInvalidHooksDir"
-      "globalInvalidMetricsSocket"
       "globalInvalidLogLevel"
       "globalNonPositiveHookTimeout"
     ];
+  };
+
+  # `config.paths` fixes the paths (ADR-0014), so they are not
+  # settings.
+  testRejectsPathField = {
+    expr = getErrorKinds (global.tryMake { statePath = "/var/lib/wanwatch/state.json"; });
+    expected = [ "globalUnknownField" ];
   };
 }

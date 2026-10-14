@@ -74,9 +74,6 @@ in
     global = {
       minimal = { };
       full = {
-        statePath = "/run/wanwatch-test/state.json";
-        hooksDir = "/etc/wanwatch-test/hooks";
-        metricsSocket = "/run/wanwatch-test/metrics.sock";
         logLevel = "debug";
         hookTimeoutMs = 2000;
       };
@@ -259,23 +256,6 @@ in
         "verbose"
         "warning"
         "INFO"
-      ];
-    };
-
-    # The global paths. Whitespace-only strings fail like empty ones,
-    # as in `lib.types.nonEmptyStr`.
-    nonEmptyStrings = {
-      valid = [
-        "/run/wanwatch/state.json"
-        "a"
-        " a "
-      ];
-      invalid = [
-        ""
-        " "
-        "\t\n"
-        42
-        null
       ];
     };
   };

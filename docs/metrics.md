@@ -1,6 +1,6 @@
 # Metrics catalog
 
-The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock`, configurable with `services.wanwatch.global.metricsSocket`. The socket has mode `0660` and owner `wanwatch:wanwatch`; Telegraf reads it through supplementary group membership.
+The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock`. The socket has mode `0660` and owner `wanwatch:wanwatch`; Telegraf reads it through supplementary group membership.
 
 This catalog matches the series registered in `daemon/internal/metrics/metrics.go`. Every name has the `wanwatch_` prefix.
 
@@ -55,11 +55,13 @@ WAN flapping:
 rate(wanwatch_wan_carrier_changes_total[5m]) > 0.05
 ```
 
-Time since the last switch per Group:
+Decisions per Group over the last hour:
 
 ```promql
-time() - max by (group) (wanwatch_group_decisions_total)
+sum by (group) (increase(wanwatch_group_decisions_total[1h]))
 ```
+
+No metric records when a Decision happened. `state.json` records when each Group's active Member took over, as `groups.<name>.activeSince`.
 
 Group without a healthy active Member:
 
@@ -92,7 +94,7 @@ It adds the equivalent of:
 
 ```toml
 [[inputs.prometheus]]
-  urls = [ "unix:///run/wanwatch/metrics.sock:/metrics" ]
+  urls = [ "unix:///run/wanwatch/metrics.sock" ]
   interval = "10s"
   namepass = [ "wanwatch_*" ]
 ```

@@ -86,6 +86,19 @@ let
       }
     ];
 
+  # ADR-0014: the module owns the daemon's identity and paths, so
+  # setting a former option fails evaluation.
+  rejectsRemovedOption = optionPattern: definition: {
+    expr = renderConfig (evaluate [
+      primaryAndBackup
+      { services.wanwatch = definition; }
+    ]);
+    expectedError = {
+      type = "ThrownError";
+      msg = "${optionPattern}' does not exist";
+    };
+  };
+
   baseConfig = evaluate [ primaryAndBackup ];
   rendered = renderConfig baseConfig;
 
@@ -181,6 +194,17 @@ in
       };
     };
 
+    testServiceIdentity = {
+      expr = {
+        inherit (baseConfig.systemd.services.wanwatch.serviceConfig) User Group RuntimeDirectory;
+      };
+      expected = {
+        User = "wanwatch";
+        Group = "wanwatch";
+        RuntimeDirectory = "wanwatch";
+      };
+    };
+
     testServiceCapabilities = {
       expr = baseConfig.systemd.services.wanwatch.serviceConfig.AmbientCapabilities;
       expected = [
@@ -240,6 +264,35 @@ in
       expectedError = {
         type = "ThrownError";
         msg = "\\[groupNoMembers]";
+      };
+    };
+
+    removedOptions = {
+      testUser = rejectsRemovedOption "wanwatch\\.user" { user = "root"; };
+      testGroup = rejectsRemovedOption "wanwatch\\.group" { group = "network"; };
+      testStatePath = rejectsRemovedOption "global\\.statePath" {
+        global.statePath = "/var/lib/wanwatch/state.json";
+      };
+      testHooksDir = rejectsRemovedOption "global\\.hooksDir" {
+        global.hooksDir = "/var/lib/wanwatch/hooks";
+      };
+      testMetricsSocket = rejectsRemovedOption "global\\.metricsSocket" {
+        global.metricsSocket = "/var/lib/wanwatch/metrics.sock";
+      };
+    };
+
+    # A typo in a Member's WAN fails here rather than as a daemon
+    # restart loop.
+    testMemberUndeclaredWan = {
+      expr = renderConfig (evaluate [
+        primaryAndBackup
+        {
+          services.wanwatch.groups.home-uplink.members.bakcup = { };
+        }
+      ]);
+      expectedError = {
+        type = "ThrownError";
+        msg = "group 'home-uplink' references wan 'bakcup'";
       };
     };
   };
