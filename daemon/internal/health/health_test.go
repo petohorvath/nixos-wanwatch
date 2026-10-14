@@ -440,10 +440,10 @@ func TestMemberHealth(t *testing.T) {
 		wanCfg("backup", "eth1", 1, 1, probe.FamilyV4),
 	), metrics.New())
 	w.Link(*up("eth1").link)
-	g := selector.Group{Name: "home", Members: []selector.Member{
-		{Wan: "primary", Priority: 1},
-		{Wan: "ghost", Priority: 2},
-		{Wan: "backup", Priority: 3},
+	g := selector.Group{Name: "home", Members: map[string]selector.Member{
+		"primary": {Wan: "primary", Priority: 1},
+		"ghost":   {Wan: "ghost", Priority: 2},
+		"backup":  {Wan: "backup", Priority: 3},
 	}}
 	want := []selector.MemberHealth{
 		{Member: selector.Member{Wan: "backup", Priority: 3}, Healthy: true},

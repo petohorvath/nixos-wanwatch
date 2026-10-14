@@ -2,7 +2,7 @@
   Tests for `lib/types/group.nix`: only what the type system enforces.
   `skeleton.nix` checks that the `group` submodule evaluates inputs to
   what `group.make` builds; `internal/group.nix` covers cross-field
-  checks such as non-empty members and duplicate WAN references.
+  checks such as non-empty members.
 */
 {
   fixtures,
@@ -29,7 +29,8 @@ in
     invalid = [
       (removeAttrs minimal [ "mark" ])
       (removeAttrs minimal [ "table" ])
-      (minimal // { members = [ { wan = "1bad"; } ]; })
+      (minimal // { members."1bad" = { }; })
+      (minimal // { members = [ { wan = "primary"; } ]; })
       (minimal // { strategy = "magic"; })
       (minimal // { mark = 0; })
       (minimal // { table = 0; })

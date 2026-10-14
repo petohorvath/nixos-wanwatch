@@ -175,9 +175,9 @@ func testCfgWithGroup() *config.Config {
 			Strategy: "primary-backup",
 			Table:    100,
 			Mark:     0x100,
-			Members: []selector.Member{
-				{Wan: "primary", Priority: 1},
-				{Wan: "backup", Priority: 2},
+			Members: map[string]selector.Member{
+				"primary": {Wan: "primary", Priority: 1},
+				"backup":  {Wan: "backup", Priority: 2},
 			},
 		},
 	}
@@ -389,15 +389,15 @@ func TestRecomputeAffectedGroupsFansOut(t *testing.T) {
 	cfg.Groups = map[string]selector.Group{
 		"home": {
 			Name: "home", Strategy: "primary-backup", Table: 100, Mark: 0x100,
-			Members: []selector.Member{
-				{Wan: "primary", Priority: 1},
-				{Wan: "backup", Priority: 2},
+			Members: map[string]selector.Member{
+				"primary": {Wan: "primary", Priority: 1},
+				"backup":  {Wan: "backup", Priority: 2},
 			},
 		},
 		"guest": {
 			Name: "guest", Strategy: "primary-backup", Table: 200, Mark: 0x200,
-			Members: []selector.Member{
-				{Wan: "backup", Priority: 1},
+			Members: map[string]selector.Member{
+				"backup": {Wan: "backup", Priority: 1},
 			},
 		},
 	}

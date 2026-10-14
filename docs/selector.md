@@ -10,7 +10,7 @@ type Group struct {
     Strategy string
     Table    int
     Mark     int
-    Members  []Member
+    Members  map[string]Member // keyed by Member.Wan
 }
 
 type Member struct {

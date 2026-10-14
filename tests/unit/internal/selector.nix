@@ -8,33 +8,31 @@
 let
   inherit (wanwatch) group selector;
 
-  # Members take their 1-based list position as priority unless they
-  # set one, so list order is priority order by default.
   makeGroup =
     members:
     group.make {
       name = "home";
-      members = lib.imap1 (position: member: { priority = position; } // member) members;
+      inherit members;
       mark = 1000;
       table = 1000;
     };
 
   selectActive = members: memberHealth: (selector.compute (makeGroup members) memberHealth).active;
 
-  primaryAndBackup = [
-    { wan = "primary"; }
-    { wan = "backup"; }
-  ];
+  primaryAndBackup = {
+    primary.priority = 1;
+    backup.priority = 2;
+  };
 in
 {
   compute = {
     testSingleHealthyMember = {
-      expr = selectActive [ { wan = "primary"; } ] { primary = true; };
+      expr = selectActive { primary = { }; } { primary = true; };
       expected = "primary";
     };
 
     testSingleUnhealthyMember = {
-      expr = selectActive [ { wan = "primary"; } ] { primary = false; };
+      expr = selectActive { primary = { }; } { primary = false; };
       expected = null;
     };
 
@@ -69,23 +67,15 @@ in
       expected = "backup";
     };
 
-    testPriorityOutranksListOrder = {
+    # `primary` sorts last by name but has the lowest priority.
+    testPriorityOutranksWanName = {
       expr =
         selectActive
-          [
-            {
-              wan = "backup";
-              priority = 5;
-            }
-            {
-              wan = "primary";
-              priority = 1;
-            }
-            {
-              wan = "middle";
-              priority = 3;
-            }
-          ]
+          {
+            backup.priority = 5;
+            primary.priority = 1;
+            middle.priority = 3;
+          }
           {
             primary = true;
             middle = true;
@@ -97,16 +87,15 @@ in
     testEqualPrioritiesBrokenByWanName = {
       expr =
         selectActive
-          (map
-            (wan: {
-              inherit wan;
-              priority = 1;
-            })
+          (lib.genAttrs
             [
               "zzz"
               "aaa"
               "mmm"
             ]
+            (_: {
+              priority = 1;
+            })
           )
           {
             aaa = true;
@@ -129,7 +118,7 @@ in
             b = true;
             c = true;
           };
-          members = map (wan: { inherit wan; }) (builtins.attrNames memberHealth);
+          members = builtins.mapAttrs (_: _: { }) memberHealth;
         in
         lib.unique (builtins.genList (_: selectActive members memberHealth) 50);
       expected = [ "a" ];

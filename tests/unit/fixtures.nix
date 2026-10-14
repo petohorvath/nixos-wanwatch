@@ -85,19 +85,21 @@ in
     group = {
       minimal = {
         name = "home-uplink";
-        members = [ member.minimal ];
+        # The attribute key names the WAN, so a Member input may omit
+        # `wan`.
+        members.primary = { };
         mark = 1000;
         table = 1000;
       };
       full = {
         name = "guest-uplink";
-        members = [
-          {
+        members = {
+          primary = {
             wan = "primary";
             priority = 1;
-          }
-          member.full
-        ];
+          };
+          backup = member.full;
+        };
         strategy = "primary-backup";
         mark = 1001;
         table = 1001;

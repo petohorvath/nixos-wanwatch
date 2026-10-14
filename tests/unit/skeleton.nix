@@ -20,6 +20,13 @@
 let
   inherit (helpers) evalSubmodule getErrorKinds isAcceptedBySubmodule;
 
+  # Attribute keys set the read-only `name` and `wan` options, so a
+  # definition leaves out its key field, and a Group's Members leave
+  # out their `wan`.
+  keyFields.member = "wan";
+  toDefinitions.group =
+    input: input // { members = lib.mapAttrs (_: member: removeAttrs member [ "wan" ]) input.members; };
+
   # One rejected input per value type and the single kind it reports.
   invalidInputs = {
     probe = {
@@ -38,7 +45,7 @@ let
     };
     group = {
       input = fixtures.inputs.group.minimal // {
-        members = [ ];
+        members = { };
       };
       kind = "groupNoMembers";
     };
@@ -55,6 +62,10 @@ let
       inherit (fixtures.inputs.${typeName}) full minimal;
       misspelled = minimal // fixtures.misspelledFields.${typeName};
       serialize = input: valueType.toJSONValue (valueType.make input);
+      optionType = wanwatch.types.${typeName};
+      keyField = keyFields.${typeName} or "name";
+      toDefinition = toDefinitions.${typeName} or lib.id;
+      evalOptionType = input: evalSubmodule keyField optionType (toDefinition input);
     in
     {
       testTryMakeSucceeds = {
@@ -115,17 +126,17 @@ let
       };
 
       testOptionTypeMatchesMakeMinimal = {
-        expr = evalSubmodule wanwatch.types.${typeName} minimal;
+        expr = evalOptionType minimal;
         expected = serialize minimal;
       };
 
       testOptionTypeMatchesMakeFull = {
-        expr = evalSubmodule wanwatch.types.${typeName} full;
+        expr = evalOptionType full;
         expected = full;
       };
 
       testOptionTypeRejectsUnknownField = {
-        expr = isAcceptedBySubmodule wanwatch.types.${typeName} misspelled;
+        expr = isAcceptedBySubmodule keyField optionType (toDefinition misspelled);
         expected = false;
       };
     };

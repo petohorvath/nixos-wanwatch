@@ -107,14 +107,14 @@ A Family without a full Window yet counts as healthy. See [`selector.md`](./sele
 
 ## Groups and Strategies
 
-A Group is an ordered list of Members under a Strategy. Each Member references a WAN by name and carries its per-Group `priority`.
+A Group is a set of Members under a Strategy, keyed by the name of the WAN each Member references. Each Member carries its per-Group `priority`.
 
 ```nix
 services.wanwatch.groups.home-uplink = {
-  members = [
-    { wan = "primary"; priority = 1; }
-    { wan = "backup";  priority = 2; }
-  ];
+  members = {
+    primary.priority = 1;
+    backup.priority = 2;
+  };
   mark  = 1000;
   table = 1000;
 };

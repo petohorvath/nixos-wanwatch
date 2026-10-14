@@ -193,4 +193,4 @@ A full queue drops the newest event, so slow Hooks cannot stall routing or watch
 | Change a metric | `daemon/internal/metrics/metrics.go`, `docs/metrics.md` |
 | Add a Hook env var | `daemon/internal/state/hooks.go` (`Env*` constants), `docs/specs/daemon-state.md` |
 | Tune Probe defaults | `lib/internal/probe.nix` (`defaults`) |
-| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`; bump `schemaVersion` in both and update `docs/specs/daemon-config.md` |
+| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`, and `docs/specs/daemon-config.md`; after the first release, also bump `schemaVersion` in both |

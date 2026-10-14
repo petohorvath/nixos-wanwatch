@@ -14,14 +14,14 @@ let
   inherit (fixtures) cases;
   inherit (fixtures.inputs.group) full minimal;
   inherit (helpers) getErrorKinds;
-  inherit (wanwatch) group member;
+  inherit (wanwatch) group;
 
   groupFieldTests = helpers.fieldTests {
     inherit (group) tryMake;
     input = minimal;
   };
 
-  withMembers = wans: minimal // { members = map (wan: { inherit wan; }) wans; };
+  withMembers = members: minimal // { inherit members; };
 in
 {
   defaults = {
@@ -41,14 +41,34 @@ in
 
   testParsesMembers = {
     expr = (group.make full).members;
-    expected = map member.make full.members;
+    expected = {
+      primary = {
+        wan = "primary";
+        priority = 1;
+      };
+      backup = {
+        wan = "backup";
+        priority = 2;
+      };
+    };
   };
 
-  testWansInMemberOrder = {
+  testMemberWanTakesAttributeKey = {
+    expr =
+      (group.make (withMembers {
+        backup.priority = 2;
+      })).members;
+    expected.backup = {
+      wan = "backup";
+      priority = 2;
+    };
+  };
+
+  testWansSortedByName = {
     expr = group.wans (group.make full);
     expected = [
-      "primary"
       "backup"
+      "primary"
     ];
   };
 
@@ -63,15 +83,13 @@ in
     groupInvalidName.missingName = removeAttrs minimal [ "name" ];
     groupNoMembers = {
       missingMembers = removeAttrs minimal [ "members" ];
-      emptyMembers = withMembers [ ];
+      emptyMembers = withMembers { };
     };
-    groupInvalidMember.membersNotAList = minimal // {
-      members = "primary";
+    groupInvalidMember = {
+      membersNotAnAttrset = withMembers "primary";
+      membersAsList = withMembers [ { wan = "primary"; } ];
+      wanDisagreesWithKey = withMembers { primary.wan = "backup"; };
     };
-    groupDuplicateMember.repeatedWan = withMembers [
-      "primary"
-      "primary"
-    ];
     groupInvalidTable.missingTable = removeAttrs minimal [ "table" ];
     groupInvalidMark.missingMark = removeAttrs minimal [ "mark" ];
   };
@@ -84,48 +102,50 @@ in
 
   # The Member's own error kinds follow the wrapping kind.
   testForwardsMemberErrors = {
-    expr = getErrorKinds (group.tryMake (withMembers [ "1bad" ]));
+    expr = getErrorKinds (
+      group.tryMake (withMembers {
+        "1bad" = { };
+      })
+    );
     expected = [
       "groupInvalidMember"
       "memberInvalidWan"
     ];
   };
 
-  testReportsEachDuplicateWan = {
+  testReportsEachInvalidMember = {
     expr =
       let
-        result = group.tryMake (withMembers [
-          "primary"
-          "backup"
-          "primary"
-          "backup"
-        ]);
+        result = group.tryMake (withMembers {
+          "1bad" = { };
+          primary.priority = 0;
+        });
       in
       {
         kinds = getErrorKinds result;
-        namesBoth = lib.all (wan: lib.hasInfix "'${wan}'" result.error) [
+        namesBoth = lib.all (key: lib.hasInfix "members.${key}:" result.error) [
+          "1bad"
           "primary"
-          "backup"
         ];
       };
     expected = {
       kinds = [
-        "groupDuplicateMember"
-        "groupDuplicateMember"
+        "groupInvalidMember"
+        "memberInvalidWan"
+        "groupInvalidMember"
+        "memberInvalidPriority"
       ];
       namesBoth = true;
     };
   };
 
-  # An invalid member has no reliable WAN name, so duplicates go
-  # unchecked until every member parses.
-  testSkipsDuplicateCheckForInvalidMembers = {
+  # A Member that fails to parse reports only its own errors, not a
+  # disagreement between its `wan` and its key.
+  testSkipsKeyCheckForInvalidMembers = {
     expr = getErrorKinds (
-      group.tryMake (withMembers [
-        "primary"
-        "1bad"
-        "primary"
-      ])
+      group.tryMake (withMembers {
+        primary.wan = "1bad";
+      })
     );
     expected = [
       "groupInvalidMember"

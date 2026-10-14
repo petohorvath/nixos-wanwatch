@@ -34,20 +34,26 @@ let
 
   /*
     Evaluate a submodule type as `services.wanwatch` does, under an
-    attribute key, so a read-only `name` option takes the key.
+    attribute key, so the read-only option that holds the key takes
+    it.
 
+    `keyField`: the option the key sets, such as `"name"` for a WAN
+    or `"wan"` for a Member.
     `type`: a submodule option type, such as `types.wan`.
-    `input`: a value-type input; its `name`, if any, becomes the key
-    and the rest the definition.
+    `input`: a value-type input; its `keyField`, if any, becomes the
+    key and the rest the definition.
 
     Returns the merged submodule value.
+
+      evalSubmodule "wan" types.member { wan = "backup"; }
+      # => { wan = "backup"; priority = 1; }
   */
   evalSubmodule =
-    type: input:
+    keyField: type: input:
     let
-      key = input.name or "value";
+      key = input.${keyField} or "value";
     in
-    (evalType (lib.types.attrsOf type) { ${key} = removeAttrs input [ "name" ]; }).${key};
+    (evalType (lib.types.attrsOf type) { ${key} = removeAttrs input [ keyField ]; }).${key};
 
   # Forces the whole value with `builtins.deepSeq` because
   # `builtins.tryEval` is shallow: element checks inside `listOf` would
@@ -153,12 +159,16 @@ in
     Test whether a submodule type accepts a value-type input, evaluated
     as `evalSubmodule` does.
 
+    `keyField`: the option the key sets, as for `evalSubmodule`.
     `type`: a submodule option type, such as `types.wan`.
     `input`: a value-type input.
 
-    Returns true when `evalSubmodule type input` evaluates completely.
+    Returns true when `evalSubmodule keyField type input` evaluates
+    completely.
   */
-  isAcceptedBySubmodule = type: input: evaluatesCompletely (evalSubmodule type input);
+  isAcceptedBySubmodule =
+    keyField: type: input:
+    evaluatesCompletely (evalSubmodule keyField type input);
 
   /*
     Build case tests for an option type.

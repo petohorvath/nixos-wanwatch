@@ -35,10 +35,10 @@ One table ID serves both Families: the same `table <table>` exists in the IPv4 a
       probe.targets.v4 = [ "8.8.8.8" ];
     };
     groups.home-uplink = {
-      members = [
-        { wan = "primary"; priority = 1; }
-        { wan = "backup";  priority = 2; }
-      ];
+      members = {
+        primary.priority = 1;
+        backup.priority = 2;
+      };
       mark  = 1000;
       table = 1000;
     };

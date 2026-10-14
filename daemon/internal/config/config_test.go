@@ -44,9 +44,9 @@ const validConfig = `{
       "strategy": "primary-backup",
       "table": 100,
       "mark": 100,
-      "members": [
-        { "wan": "primary", "priority": 1 }
-      ]
+      "members": {
+        "primary": { "wan": "primary", "priority": 1 }
+      }
     }
   }
 }`
@@ -252,7 +252,20 @@ func TestValidateRejectsDanglingMemberWan(t *testing.T) {
 	t.Parallel()
 	cfg := mustParse(t, validConfig)
 	g := cfg.Groups["home"]
-	g.Members[0].Wan = "phantom"
+	g.Members = map[string]selector.Member{"phantom": {Wan: "phantom", Priority: 1}}
+	cfg.Groups["home"] = g
+	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("err = %v, want wrap of ErrInvalidConfig", err)
+	}
+}
+
+func TestValidateRejectsMemberWanKeyMismatch(t *testing.T) {
+	t.Parallel()
+	cfg := mustParse(t, validConfig)
+	g := cfg.Groups["home"]
+	m := g.Members["primary"]
+	m.Wan = "renamed"
+	g.Members["primary"] = m
 	cfg.Groups["home"] = g
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("err = %v, want wrap of ErrInvalidConfig", err)

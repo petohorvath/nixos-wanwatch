@@ -29,7 +29,7 @@ in
       (
         field:
         predicateTests (
-          value: isAcceptedBySubmodule types.global { ${field} = value; }
+          value: isAcceptedBySubmodule "name" types.global { ${field} = value; }
         ) cases.nonEmptyStrings
       );
 

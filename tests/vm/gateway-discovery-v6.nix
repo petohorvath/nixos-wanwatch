@@ -66,12 +66,9 @@ pkgs.testers.runNixOSTest {
           };
         };
         groups.home = {
-          members = [
-            {
-              wan = "uplink";
-              priority = 1;
-            }
-          ];
+          members = {
+            uplink.priority = 1;
+          };
           mark = 1000;
           table = 1000;
         };

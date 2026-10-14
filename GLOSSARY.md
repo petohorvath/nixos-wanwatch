@@ -39,7 +39,7 @@ _Avoid_: debounce, damping, Window
 ## Selection
 
 **Group**:
-An ordered set of Members with a Strategy, a mark, and a routing table; the unit of failover.
+A set of Members with a Strategy, a mark, and a routing table; the unit of failover.
 _Avoid_: pool, policy
 
 **Member**:

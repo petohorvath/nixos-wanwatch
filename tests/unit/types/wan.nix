@@ -24,7 +24,7 @@ in
 
   wan = {
     testNameTakesAttributeKey = {
-      expr = (evalSubmodule types.wan (minimal // { name = "backup"; })).name;
+      expr = (evalSubmodule "name" types.wan (minimal // { name = "backup"; })).name;
       expected = "backup";
     };
   }

@@ -295,7 +295,7 @@ func validateHysteresis(wanKey string, h Hysteresis) error {
 
 // validateGroup checks one group's structural fields, that its
 // strategy is one the selector actually implements, and that every
-// member references a declared WAN.
+// member is keyed by its own WAN name and references a declared WAN.
 func validateGroup(key string, g selector.Group, wans map[string]Wan) error {
 	if g.Name != key {
 		return invalidf("groups[%q].name = %q (mismatch)", key, g.Name)
@@ -312,9 +312,12 @@ func validateGroup(key string, g selector.Group, wans map[string]Wan) error {
 	if len(g.Members) == 0 {
 		return invalidf("groups[%q] has no members", key)
 	}
-	for i, m := range g.Members {
-		if _, ok := wans[m.Wan]; !ok {
-			return invalidf("groups[%q].members[%d].wan = %q is not declared in wans", key, i, m.Wan)
+	for wan, m := range g.Members {
+		if m.Wan != wan {
+			return invalidf("groups[%q].members[%q].wan = %q (mismatch)", key, wan, m.Wan)
+		}
+		if _, ok := wans[wan]; !ok {
+			return invalidf("groups[%q].members[%q] is not declared in wans", key, wan)
 		}
 	}
 	return nil

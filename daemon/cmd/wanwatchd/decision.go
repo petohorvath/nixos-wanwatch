@@ -7,12 +7,8 @@ import (
 
 // groupContainsWAN reports whether `wan` is a member of `g`.
 func groupContainsWAN(g selector.Group, wan string) bool {
-	for _, m := range g.Members {
-		if m.Wan == wan {
-			return true
-		}
-	}
-	return false
+	_, ok := g.Members[wan]
+	return ok
 }
 
 // decisionReason names the trigger for a Decision; emitted as a
