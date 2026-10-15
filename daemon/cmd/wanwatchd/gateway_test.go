@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"net"
 	"testing"
 
@@ -88,8 +89,8 @@ func TestGatewayCacheFormats(t *testing.T) {
 		name, iface, wantString, wantAddress string
 	}{
 		{name: "next-hop", iface: "eth0", wantString: "192.0.2.1", wantAddress: "192.0.2.1"},
-		{name: "scope-link", iface: "wg0", wantString: "", wantAddress: "<nil>"},
-		{name: "missing", iface: "missing", wantString: "", wantAddress: "<nil>"},
+		{name: "scope-link", iface: "wg0", wantString: "", wantAddress: nilGateway},
+		{name: "missing", iface: "missing", wantString: "", wantAddress: nilGateway},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,25 +131,22 @@ func assertGateways(tb testing.TB, h *harness, want map[string]gatewayPair) {
 	wans := h.State().Wans
 	for wan, pair := range want {
 		gws := wans[wan].Gateways
-		got := gatewayPair{v4: gatewayString(gws.V4), v6: gatewayString(gws.V6)}
+		got := gatewayPair{v4: gatewayText(gws.V4), v6: gatewayText(gws.V6)}
+		pair = gatewayPair{v4: cmp.Or(pair.v4, nilGateway), v6: cmp.Or(pair.v6, nilGateway)}
 		if got != pair {
 			tb.Errorf("State Gateways of %s = %+v, want %+v", wan, got, pair)
 		}
 	}
 }
 
-func gatewayString(gw *string) string {
-	if gw == nil {
-		return ""
-	}
-	return *gw
-}
+// nilGateway is how gatewayText renders an absent Gateway.
+const nilGateway = "<nil>"
 
-// gatewayText renders a State Gateway for failure messages: the
-// address, or "<nil>" when the Gateway is absent.
+// gatewayText renders a State Gateway: the address, or nilGateway
+// when the Gateway is absent, so an empty address still shows.
 func gatewayText(gw *string) string {
 	if gw == nil {
-		return "<nil>"
+		return nilGateway
 	}
 	return *gw
 }

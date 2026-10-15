@@ -200,8 +200,8 @@ func TestStartupRouteHistory(t *testing.T) {
 				if fam == probe.FamilyV6 {
 					gw = wan.Gateways.V6
 				}
-				if gw == nil || *gw != current {
-					t.Errorf("State Gateway = %s, want %s", gatewayText(gw), current)
+				if got := gatewayText(gw); got != current {
+					t.Errorf("State Gateway = %s, want %s", got, current)
 				}
 			})
 		}
