@@ -145,9 +145,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 
 	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
 
-	hooks := state.NewHookNotifier(ctx, cfg.Global.HooksDir,
-		time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger)
-	d := newDaemon(&cfg, netlinkKernel{}, hooks, mreg, logger)
+	d := newDaemon(&cfg, netlinkKernel{}, newHookNotifier(ctx, &cfg, mreg, logger), mreg, logger)
 	if err := d.bootstrap(ctx); err != nil {
 		cancel(fmt.Errorf("bootstrap: %w", err))
 		return exitError(ctx, metricsDone, logger)
@@ -183,6 +181,13 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 
 	serve(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
 	return exitError(ctx, metricsDone, logger)
+}
+
+// newHookNotifier wires Hook delivery to the configured Hook directory
+// and per-Hook timeout, bound to the daemon's lifetime context.
+func newHookNotifier(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *state.HookNotifier {
+	return state.NewHookNotifier(ctx, cfg.Global.HooksDir,
+		time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger)
 }
 
 // errShutdown is the context cancellation cause recorded for an

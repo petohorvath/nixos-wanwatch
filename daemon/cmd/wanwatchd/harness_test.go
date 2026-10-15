@@ -53,6 +53,19 @@ type harness struct {
 // shared with another harness or changed afterwards.
 func newHarness(tb testing.TB, cfg *config.Config) *harness {
 	tb.Helper()
+	return buildHarness(tb, cfg, false)
+}
+
+// newScriptHarness is newHarness with Hook delivery wired as run()
+// wires it: real scripts from cfg's Hook directory. Hooks reach
+// neither the trace nor hooks().
+func newScriptHarness(tb testing.TB, cfg *config.Config) *harness {
+	tb.Helper()
+	return buildHarness(tb, cfg, true)
+}
+
+func buildHarness(tb testing.TB, cfg *config.Config, scripts bool) *harness {
+	tb.Helper()
 	cfg.Global.StatePath = filepath.Join(tb.TempDir(), "state.json")
 	cfg.Global.HooksDir = tb.TempDir()
 	tr := &trace{}
@@ -70,7 +83,12 @@ func newHarness(tb testing.TB, cfg *config.Config) *harness {
 	}
 	h.ctx, h.cancel = context.WithCancel(tb.Context())
 	tb.Cleanup(h.cancel)
-	h.d = newDaemon(cfg, h.kernel, h.recorder, h.metrics, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var hooks hookSink = h.recorder
+	if scripts {
+		hooks = newHookNotifier(h.ctx, cfg, h.metrics, logger)
+	}
+	h.d = newDaemon(cfg, h.kernel, hooks, h.metrics, logger)
 	return h
 }
 
