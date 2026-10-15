@@ -53,7 +53,7 @@ type harness struct {
 // shared with another harness or changed afterwards.
 func newHarness(tb testing.TB, cfg *config.Config) *harness {
 	tb.Helper()
-	return buildHarness(tb, cfg, false)
+	return buildHarness(tb, cfg, func(h *harness, _ *slog.Logger) hookSink { return h.recorder })
 }
 
 // newScriptHarness is newHarness with Hook delivery wired as run()
@@ -61,10 +61,14 @@ func newHarness(tb testing.TB, cfg *config.Config) *harness {
 // neither the trace nor hooks().
 func newScriptHarness(tb testing.TB, cfg *config.Config) *harness {
 	tb.Helper()
-	return buildHarness(tb, cfg, true)
+	return buildHarness(tb, cfg, func(h *harness, logger *slog.Logger) hookSink {
+		return newHookNotifier(h.ctx, cfg, h.metrics, logger)
+	})
 }
 
-func buildHarness(tb testing.TB, cfg *config.Config, scripts bool) *harness {
+// buildHarness builds the harness and its daemon, which delivers
+// Hooks to the sink that hooks returns for the harness.
+func buildHarness(tb testing.TB, cfg *config.Config, hooks func(*harness, *slog.Logger) hookSink) *harness {
 	tb.Helper()
 	cfg.Global.StatePath = filepath.Join(tb.TempDir(), "state.json")
 	cfg.Global.HooksDir = tb.TempDir()
@@ -84,11 +88,7 @@ func buildHarness(tb testing.TB, cfg *config.Config, scripts bool) *harness {
 	h.ctx, h.cancel = context.WithCancel(tb.Context())
 	tb.Cleanup(h.cancel)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	var hooks hookSink = h.recorder
-	if scripts {
-		hooks = newHookNotifier(h.ctx, cfg, h.metrics, logger)
-	}
-	h.d = newDaemon(cfg, h.kernel, hooks, h.metrics, logger)
+	h.d = newDaemon(cfg, h.kernel, hooks(h, logger), h.metrics, logger)
 	return h
 }
 
