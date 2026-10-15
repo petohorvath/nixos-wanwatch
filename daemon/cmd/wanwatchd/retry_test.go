@@ -85,11 +85,11 @@ func TestPendingDecisionRetry(t *testing.T) {
 					"hook switch home primary→backup",
 				},
 				active: "backup",
+				// The retry follows the result's State republication.
+				decisionLast: true,
 			}),
 			check: func(tb testing.TB, h *harness) {
 				tb.Helper()
-				// The retry follows the result's State republication.
-				assertDecisionTimes(tb, h, true)
 				if got := h.State().Groups["home"].DecisionsTotal; got != 2 {
 					tb.Errorf("decisionsTotal = %d, want 2", got)
 				}

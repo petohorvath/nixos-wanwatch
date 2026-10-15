@@ -13,18 +13,22 @@ import (
 )
 
 // step is one harness action with the trace it must produce and the
-// Selection State must show afterwards ("" for none).
+// Selection State must show afterwards ("" for none). decisionLast
+// marks a step whose Decision is its last State publication, so
+// State's updatedAt carries the Decision's Hook timestamp exactly.
 type step struct {
-	name   string
-	do     func(*harness)
-	want   []string
-	active string
+	name         string
+	do           func(*harness)
+	want         []string
+	active       string
+	decisionLast bool
 }
 
-// runSteps runs each step and asserts its trace and published
-// Selection.
+// runSteps runs each step and asserts its trace, the published
+// Selection, and the times of each Decision the step made.
 func runSteps(tb testing.TB, h *harness, steps []step) {
 	tb.Helper()
+	seen := len(h.hooks())
 	for _, s := range steps {
 		s.do(h)
 		if got := h.Trace(); !slices.Equal(got, s.want) {
@@ -37,6 +41,9 @@ func runSteps(tb testing.TB, h *harness, steps []step) {
 		if active != s.active {
 			tb.Errorf("step %q: State Selection = %q, want %q", s.name, active, s.active)
 		}
+		hooks := h.hooks()
+		assertDecisionTimes(tb, h, s, hooks[seen:])
+		seen = len(hooks)
 	}
 }
 
@@ -79,26 +86,40 @@ func cachedGateways(h *harness) {
 	h.kernel.setAddrs("wwan0", "198.51.100.10", "2001:db8:1::10")
 }
 
-// assertDecisionTimes checks that the Selection in State started when
-// the last Hook was stamped. With exact, State's updatedAt must carry
-// the same stamp: the Decision was the step's last State publication.
-// Otherwise a later Health publication in the same step restamped it.
-func assertDecisionTimes(tb testing.TB, h *harness, exact bool) {
+// assertDecisionTimes checks the State published after step s against
+// the Hooks of the Decisions s made. An up or switch Decision starts
+// its Group's Selection at its Hook timestamp, and no Decision is
+// stamped after State's updatedAt: a later Health or Gateway
+// publication in the same step may restamp it. With s.decisionLast,
+// updatedAt equals the step's last Hook timestamp. Each Group may make
+// one Decision per step, so each is checked before the next replaces
+// its Selection.
+func assertDecisionTimes(tb testing.TB, h *harness, s step, decisions []state.HookContext) {
 	tb.Helper()
-	hooks := h.hooks()
-	if len(hooks) == 0 {
-		tb.Fatal("no Hook delivered")
+	if len(decisions) == 0 {
+		if s.decisionLast {
+			tb.Errorf("step %q made no Decision", s.name)
+		}
+		return
 	}
-	stamp := hooks[len(hooks)-1].Timestamp
-	s := h.State()
-	if since := s.Groups["home"].ActiveSince; since == nil || !since.Equal(stamp) {
-		tb.Errorf("activeSince = %v, want the Hook timestamp %v", since, stamp)
+	st := h.State()
+	groups := make(map[string]bool, len(decisions))
+	for _, d := range decisions {
+		if groups[d.Group] {
+			tb.Errorf("step %q made more than one Decision in Group %q; split it so each is checked", s.name, d.Group)
+		}
+		groups[d.Group] = true
+		if d.Event != state.EventDown {
+			if since := st.Groups[d.Group].ActiveSince; since == nil || !since.Equal(d.Timestamp) {
+				tb.Errorf("step %q: %s activeSince = %v, want the Hook timestamp %v", s.name, d.Group, since, d.Timestamp)
+			}
+		}
+		if st.UpdatedAt.Before(d.Timestamp) {
+			tb.Errorf("step %q: updatedAt = %v precedes the %s Decision at %v", s.name, st.UpdatedAt, d.Group, d.Timestamp)
+		}
 	}
-	if exact && !s.UpdatedAt.Equal(stamp) {
-		tb.Errorf("updatedAt = %v, want the Hook timestamp %v", s.UpdatedAt, stamp)
-	}
-	if s.UpdatedAt.Before(stamp) {
-		tb.Errorf("updatedAt = %v precedes the Decision at %v", s.UpdatedAt, stamp)
+	if last := decisions[len(decisions)-1].Timestamp; s.decisionLast && !st.UpdatedAt.Equal(last) {
+		tb.Errorf("step %q: updatedAt = %v, want the Hook timestamp %v", s.name, st.UpdatedAt, last)
 	}
 }
 
@@ -111,7 +132,7 @@ func TestDecisionPublication(t *testing.T) {
 		name   string
 		config func(*config.Config) // changes baseConfig; nil keeps it
 		steps  []step
-		check  func(testing.TB, *harness)
+		check  func(testing.TB, *harness) // nil checks nothing more
 	}{
 		{
 			name: "cold-start up",
@@ -127,11 +148,6 @@ func TestDecisionPublication(t *testing.T) {
 					},
 					active: "primary",
 				},
-			},
-			check: func(tb testing.TB, h *harness) {
-				tb.Helper()
-				// The carrier change republishes State after the Decision.
-				assertDecisionTimes(tb, h, false)
 			},
 		},
 		{
@@ -181,11 +197,6 @@ func TestDecisionPublication(t *testing.T) {
 					want:   []string{"hooks closed"},
 					active: "primary",
 				},
-			},
-			check: func(tb testing.TB, h *harness) {
-				tb.Helper()
-				// The Family verdict change republishes State after the Decision.
-				assertDecisionTimes(tb, h, false)
 			},
 		},
 		{
@@ -260,7 +271,6 @@ func TestDecisionPublication(t *testing.T) {
 				if n := readCounter(tb, h.metrics.ApplyOpErrors.WithLabelValues("home", "conntrack_flush")); n != 1 {
 					tb.Errorf("apply_op_errors_total{home,conntrack_flush} = %v, want 1", n)
 				}
-				assertDecisionTimes(tb, h, false)
 			},
 		},
 		{
@@ -301,7 +311,6 @@ func TestDecisionPublication(t *testing.T) {
 				if n := readCounter(tb, h.metrics.ApplyOpErrors.WithLabelValues("home", "conntrack_flush")); n != 1 {
 					tb.Errorf("apply_op_errors_total{home,conntrack_flush} = %v, want 1", n)
 				}
-				assertDecisionTimes(tb, h, false)
 			},
 		},
 		{
@@ -428,8 +437,6 @@ func TestDecisionPublication(t *testing.T) {
 			},
 			check: func(tb testing.TB, h *harness) {
 				tb.Helper()
-				// The Gateway cache change republishes State after the Decision.
-				assertDecisionTimes(tb, h, false)
 				if n := readCounter(tb, h.metrics.ApplyOpErrors.WithLabelValues("home", "ifindex_lookup")); n != 1 {
 					tb.Errorf("apply_op_errors_total{home,ifindex_lookup} = %v, want 1", n)
 				}
@@ -483,8 +490,6 @@ func TestDecisionPublication(t *testing.T) {
 			},
 			check: func(tb testing.TB, h *harness) {
 				tb.Helper()
-				// The first full Window republishes State after the Decision.
-				assertDecisionTimes(tb, h, false)
 				if n := readCounter(tb, h.metrics.ApplyRouteErrors.WithLabelValues("home", "v4")); n != 1 {
 					tb.Errorf("apply_route_errors_total{home,v4} = %v, want 1", n)
 				}
@@ -539,12 +544,12 @@ func TestDecisionPublication(t *testing.T) {
 						"hook switch home backup→primary",
 					},
 					active: "primary",
+					// A partial Window: the retry's Decision is the step's last publication.
+					decisionLast: true,
 				},
 			},
 			check: func(tb testing.TB, h *harness) {
 				tb.Helper()
-				// The retry's Decision is the step's last publication.
-				assertDecisionTimes(tb, h, true)
 				if n := readCounter(tb, h.metrics.ApplyRouteErrors.WithLabelValues("home", "v4")); n != 2 {
 					tb.Errorf("apply_route_errors_total{home,v4} = %v, want 2", n)
 				}
@@ -587,7 +592,6 @@ func TestDecisionPublication(t *testing.T) {
 			},
 			check: func(tb testing.TB, h *harness) {
 				tb.Helper()
-				assertDecisionTimes(tb, h, false)
 				if got := h.State().Groups["home"].DecisionsTotal; got != 2 {
 					tb.Errorf("decisionsTotal = %d, want 2", got)
 				}
@@ -756,12 +760,12 @@ func TestDecisionPublication(t *testing.T) {
 						"hook switch home backup→primary",
 					},
 					active: "primary",
+					// The retry's Decision is the step's last publication.
+					decisionLast: true,
 				},
 			},
 			check: func(tb testing.TB, h *harness) {
 				tb.Helper()
-				// The retry's Decision is the step's last publication.
-				assertDecisionTimes(tb, h, true)
 				if n := readCounter(tb, h.metrics.ApplyRouteErrors.WithLabelValues("home", "v6")); n != 1 {
 					tb.Errorf("apply_route_errors_total{home,v6} = %v, want 1", n)
 				}
@@ -780,7 +784,9 @@ func TestDecisionPublication(t *testing.T) {
 			h := startHarness(t, cfg)
 			h.Trace() // the bootstrap rules belong to the startup tests
 			runSteps(t, h, tc.steps)
-			tc.check(t, h)
+			if tc.check != nil {
+				tc.check(t, h)
+			}
 		})
 	}
 }
