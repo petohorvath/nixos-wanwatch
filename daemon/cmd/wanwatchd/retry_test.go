@@ -37,10 +37,10 @@ var pendingBackup = []step{
 	},
 }
 
-// TestPendingDecisionRetry pins the order in which a Probe result
+// TestPendingDecisionRetry pins the order in which a probe result
 // reaches a pending Decision: the result's Health change recomputes
-// the Group first, so a retry never commits onto a WAN the same result
-// made unhealthy, and each result attempts Apply at most once.
+// the Group first, so a retry never moves the Selection onto a WAN the
+// same result made unhealthy, and each result attempts Apply at most once.
 func TestPendingDecisionRetry(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

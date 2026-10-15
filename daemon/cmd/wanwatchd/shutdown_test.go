@@ -71,7 +71,7 @@ func TestStopDropsQueuedEvents(t *testing.T) {
 		name  string
 		queue func(*harness)
 	}{
-		{"Probe result", func(h *harness) {
+		{"probe result", func(h *harness) {
 			queue(h, h.probes, lossy("primary", probe.FamilyV4))
 		}},
 		{"link event", func(h *harness) {

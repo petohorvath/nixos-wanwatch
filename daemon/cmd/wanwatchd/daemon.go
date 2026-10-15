@@ -95,9 +95,10 @@ func (d *daemon) bootstrap(ctx context.Context) error {
 // handleProbeResult forwards a per-cycle result to WAN Health, then
 // retries r.Wan's pending Decisions, including during cold start: a
 // probe result means the WAN is reachable. Health goes first so a
-// retry never commits onto a WAN this result made unhealthy. When r.Wan
-// flipped, the recompute has already settled its Decisions: it moved
-// away from an unhealthy WAN or attempted Apply onto a healthy one.
+// retry never moves a Selection onto a WAN this result made unhealthy.
+// When r.Wan flipped, the recompute has already settled its Decisions:
+// it moved away from an unhealthy WAN or attempted Apply onto a healthy
+// one.
 func (d *daemon) handleProbeResult(ctx context.Context, r probe.ProbeResult) {
 	change := d.health.Probe(r)
 	d.publishHealthChange(ctx, change, reasonHealth)

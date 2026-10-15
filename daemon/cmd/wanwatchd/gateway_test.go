@@ -186,7 +186,7 @@ func routeStep(name, active string, want []string, events ...rtnl.RouteEvent) st
 }
 
 // TestGatewayDiscovery pins how RouteEvents reach the Gateway cache,
-// State, and the active WAN's group-table routes: only a changed
+// State, and the Selection's group-table routes: only a changed
 // Gateway of a probed Family on the selected WAN is rewritten, and
 // no Gateway change alone moves the Selection or delivers a Hook.
 func TestGatewayDiscovery(t *testing.T) {
@@ -228,7 +228,7 @@ func TestGatewayDiscovery(t *testing.T) {
 			gateways: map[string]gatewayPair{"primary": {}},
 		},
 		{
-			name: "new Gateway on the active WAN refreshes only v4",
+			name: "new Gateway on the selected WAN refreshes only v4",
 			steps: []step{
 				primaryActive,
 				routeStep("v4 Gateway changes", "primary",
@@ -238,7 +238,7 @@ func TestGatewayDiscovery(t *testing.T) {
 			gateways: map[string]gatewayPair{"primary": {"192.0.2.2", "2001:db8::1"}},
 		},
 		{
-			name: "new Gateway on the active WAN refreshes only v6",
+			name: "new Gateway on the selected WAN refreshes only v6",
 			steps: []step{
 				primaryActive,
 				routeStep("v6 Gateway changes", "primary",
@@ -266,7 +266,7 @@ func TestGatewayDiscovery(t *testing.T) {
 			gateways: map[string]gatewayPair{"primary": {"192.0.2.1", "2001:db8::1"}},
 		},
 		{
-			name: "Gateway removed from the active WAN leaves the stale route",
+			name: "Gateway removed from the selected WAN leaves the stale route",
 			steps: []step{
 				primaryActive,
 				routeStep("v4 withdrawn", "primary", nil, gatewayGone("eth0", probe.FamilyV4)),
@@ -282,7 +282,7 @@ func TestGatewayDiscovery(t *testing.T) {
 			gateways: map[string]gatewayPair{"primary": {"192.0.2.1", "2001:db8::1"}, "backup": {}},
 		},
 		{
-			name: "inactive WAN writes no route",
+			name: "unselected WAN writes no route",
 			steps: []step{
 				primaryActive,
 				{
