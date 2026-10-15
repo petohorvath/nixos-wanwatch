@@ -8,6 +8,7 @@
   golangci-lint,
   gopls,
   gotools,
+  jq,
   mkShell,
   nil,
   nix,
@@ -30,5 +31,7 @@ mkShell {
     nix
     git
     nil
+    # Formats the regenerated daemon-config golden (docs/specs/daemon-config.md).
+    jq
   ];
 }

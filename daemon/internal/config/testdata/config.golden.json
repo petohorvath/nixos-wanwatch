@@ -1,0 +1,128 @@
+{
+  "global": {
+    "hookTimeoutMs": 2000,
+    "hooksDir": "/etc/wanwatch/hooks",
+    "logLevel": "debug",
+    "metricsSocket": "/run/wanwatch/metrics.sock",
+    "statePath": "/run/wanwatch/state.json"
+  },
+  "groups": {
+    "guest-uplink": {
+      "mark": 1001,
+      "members": {
+        "backup": {
+          "priority": 2,
+          "wan": "backup"
+        },
+        "primary": {
+          "priority": 1,
+          "wan": "primary"
+        }
+      },
+      "name": "guest-uplink",
+      "strategy": "primary-backup",
+      "table": 1001
+    },
+    "home-uplink": {
+      "mark": 1000,
+      "members": {
+        "primary": {
+          "priority": 1,
+          "wan": "primary"
+        }
+      },
+      "name": "home-uplink",
+      "strategy": "primary-backup",
+      "table": 1000
+    }
+  },
+  "schema": 1,
+  "wans": {
+    "backup": {
+      "interface": "wwan0",
+      "name": "backup",
+      "pointToPoint": false,
+      "probe": {
+        "familyHealthPolicy": "all",
+        "hysteresis": {
+          "consecutiveDown": 3,
+          "consecutiveUp": 5
+        },
+        "intervalMs": 500,
+        "method": "icmp",
+        "targets": {
+          "v4": [
+            "1.1.1.1"
+          ],
+          "v6": []
+        },
+        "thresholds": {
+          "lossPctDown": 30,
+          "lossPctUp": 10,
+          "rttMsDown": 500,
+          "rttMsUp": 250
+        },
+        "timeoutMs": 1000,
+        "windowSize": 10
+      }
+    },
+    "primary": {
+      "interface": "eth0",
+      "name": "primary",
+      "pointToPoint": false,
+      "probe": {
+        "familyHealthPolicy": "all",
+        "hysteresis": {
+          "consecutiveDown": 3,
+          "consecutiveUp": 5
+        },
+        "intervalMs": 500,
+        "method": "icmp",
+        "targets": {
+          "v4": [
+            "1.1.1.1"
+          ],
+          "v6": []
+        },
+        "thresholds": {
+          "lossPctDown": 30,
+          "lossPctUp": 10,
+          "rttMsDown": 500,
+          "rttMsUp": 250
+        },
+        "timeoutMs": 1000,
+        "windowSize": 10
+      }
+    },
+    "vpn": {
+      "interface": "wg0",
+      "name": "vpn",
+      "pointToPoint": true,
+      "probe": {
+        "familyHealthPolicy": "any",
+        "hysteresis": {
+          "consecutiveDown": 2,
+          "consecutiveUp": 4
+        },
+        "intervalMs": 250,
+        "method": "icmp",
+        "targets": {
+          "v4": [
+            "1.1.1.1"
+          ],
+          "v6": [
+            "2606:4700:4700::1111"
+          ]
+        },
+        "thresholds": {
+          "lossPctDown": 25,
+          "lossPctUp": 5,
+          "rttMsDown": 400,
+          "rttMsUp": 150
+        },
+        "timeoutMs": 200,
+        "windowSize": 20
+      }
+    }
+  }
+}
