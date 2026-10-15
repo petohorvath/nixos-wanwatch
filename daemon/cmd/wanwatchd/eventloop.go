@@ -11,6 +11,12 @@ import (
 // ProbeResult / LinkEvent / RouteEvent through `d`'s Decision
 // pipeline and acknowledges watchdog challenges only while this
 // goroutine is able to service its select loop.
+//
+// Once ctx is cancelled it dispatches nothing more: select picks
+// at random among ready cases, so an event still queued at
+// cancellation is dropped rather than handled with the cancelled
+// ctx, which would fail its route writes and publish State during
+// shutdown.
 func eventLoop(
 	ctx context.Context,
 	d *daemon,
@@ -26,10 +32,19 @@ func eventLoop(
 		case challenge := <-watchdogChallenges:
 			close(challenge.ack)
 		case r := <-probeResults:
+			if ctx.Err() != nil {
+				return
+			}
 			d.handleProbeResult(ctx, r)
 		case e := <-linkEvents:
+			if ctx.Err() != nil {
+				return
+			}
 			d.handleLinkEvent(ctx, e)
 		case e := <-routeEvents:
+			if ctx.Err() != nil {
+				return
+			}
 			d.handleRouteEvent(ctx, e)
 		}
 	}

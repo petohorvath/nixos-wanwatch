@@ -64,7 +64,9 @@ type kernelFailure struct {
 }
 
 // fakeKernel records mutations in the trace and fails the operations
-// scripted with fail. Lookups that succeed are not traced. Each
+// scripted with fail. Like internal/apply, it checks ctx on entry to a
+// mutation and fails it once ctx is cancelled. Lookups that succeed
+// are not traced. Each
 // interface name gets a stable ifindex that maps back to the name, and
 // each routing table maps back to its Group, so route lines read
 // `route <group> <family> <iface> via <gateway>`.
@@ -77,6 +79,14 @@ type fakeKernel struct {
 	ifname   map[int]string
 	addrs    map[string][]net.IP
 	failures []kernelFailure
+	holds    []kernelHold
+}
+
+// kernelHold pauses one lookup until release is closed.
+type kernelHold struct {
+	op      kernelOp
+	iface   string
+	release <-chan struct{}
 }
 
 func newFakeKernel(tr *trace, cfg *config.Config) *fakeKernel {
@@ -140,6 +150,31 @@ func (k *fakeKernel) setAddrs(iface string, ips ...string) {
 	k.addrs[iface] = parsed
 }
 
+// hold makes the next op lookup on iface return only once release is
+// closed, after its outcome is traced: the event loop stays inside
+// that handler, as in a kernel call still in progress.
+func (k *fakeKernel) hold(op kernelOp, iface string, release <-chan struct{}) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.holds = append(k.holds, kernelHold{op: op, iface: iface, release: release})
+}
+
+// pause blocks until the release of the first hold matching op and
+// iface, and consumes that hold. Callers do not hold k.mu, so the test
+// can script failures meanwhile.
+func (k *fakeKernel) pause(op kernelOp, iface string) {
+	k.mu.Lock()
+	i := slices.IndexFunc(k.holds, func(h kernelHold) bool { return h.op == op && h.iface == iface })
+	if i < 0 {
+		k.mu.Unlock()
+		return
+	}
+	release := k.holds[i].release
+	k.holds = slices.Delete(k.holds, i, i+1)
+	k.mu.Unlock()
+	<-release
+}
+
 // scripted reports whether op on iface and fam is scripted to fail.
 // Callers hold k.mu.
 func (k *fakeKernel) scripted(op kernelOp, iface string, fam probe.Family) bool {
@@ -148,9 +183,14 @@ func (k *fakeKernel) scripted(op kernelOp, iface string, fam probe.Family) bool 
 	})
 }
 
-// mutate records a mutation's line, marked when it is scripted to
-// fail, and returns the failure. Callers hold k.mu.
-func (k *fakeKernel) mutate(op kernelOp, iface string, fam probe.Family, line string) error {
+// mutate records a mutation's line, marked when ctx is cancelled or
+// the mutation is scripted to fail, and returns the failure. Callers
+// hold k.mu.
+func (k *fakeKernel) mutate(ctx context.Context, op kernelOp, iface string, fam probe.Family, line string) error {
+	if err := ctx.Err(); err != nil {
+		k.trace.add(line + failedMark)
+		return fmt.Errorf("%s %s: %w", op, iface, err)
+	}
 	if k.scripted(op, iface, fam) {
 		k.trace.add(line + failedMark)
 		return fmt.Errorf("%s %s: %w", op, iface, errScripted)
@@ -169,13 +209,14 @@ func (k *fakeKernel) lookup(op kernelOp, iface string) error {
 	return nil
 }
 
-func (k *fakeKernel) EnsureRule(_ context.Context, r apply.FwmarkRule) error {
+func (k *fakeKernel) EnsureRule(ctx context.Context, r apply.FwmarkRule) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	return k.mutate(opRule, "", r.Family, fmt.Sprintf("rule %s mark=%#x table=%d", r.Family, r.Mark, r.Table))
+	return k.mutate(ctx, opRule, "", r.Family, fmt.Sprintf("rule %s mark=%#x table=%d", r.Family, r.Mark, r.Table))
 }
 
 func (k *fakeKernel) IfIndex(name string) (int, error) {
+	defer k.pause(opIfIndex, name) // runs after the unlock below
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if err := k.lookup(opIfIndex, name); err != nil {
@@ -190,7 +231,7 @@ func (k *fakeKernel) IfIndex(name string) (int, error) {
 	return idx, nil
 }
 
-func (k *fakeKernel) WriteRoute(_ context.Context, r apply.DefaultRoute) error {
+func (k *fakeKernel) WriteRoute(ctx context.Context, r apply.DefaultRoute) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	iface, ok := k.ifname[r.IfIndex]
@@ -205,10 +246,11 @@ func (k *fakeKernel) WriteRoute(_ context.Context, r apply.DefaultRoute) error {
 	if r.PointToPoint {
 		via = "scope link"
 	}
-	return k.mutate(opRoute, iface, r.Family, fmt.Sprintf("route %s %s %s %s", group, r.Family, iface, via))
+	return k.mutate(ctx, opRoute, iface, r.Family, fmt.Sprintf("route %s %s %s %s", group, r.Family, iface, via))
 }
 
 func (k *fakeKernel) InterfaceAddrs(name string) ([]net.IP, error) {
+	defer k.pause(opAddrs, name) // runs after the unlock below
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if err := k.lookup(opAddrs, name); err != nil {
@@ -217,7 +259,7 @@ func (k *fakeKernel) InterfaceAddrs(name string) ([]net.IP, error) {
 	return slices.Clone(k.addrs[name]), nil
 }
 
-func (k *fakeKernel) FlushConntrack(_ context.Context, fam probe.Family, ip net.IP) (uint, error) {
+func (k *fakeKernel) FlushConntrack(ctx context.Context, fam probe.Family, ip net.IP) (uint, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	var iface string
@@ -226,7 +268,7 @@ func (k *fakeKernel) FlushConntrack(_ context.Context, fam probe.Family, ip net.
 			iface = name
 		}
 	}
-	if err := k.mutate(opFlush, iface, fam, fmt.Sprintf("flush %s %s", fam, ip)); err != nil {
+	if err := k.mutate(ctx, opFlush, iface, fam, fmt.Sprintf("flush %s %s", fam, ip)); err != nil {
 		return 0, err
 	}
 	return 1, nil
