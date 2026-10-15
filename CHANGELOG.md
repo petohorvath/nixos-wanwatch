@@ -8,6 +8,7 @@ No version has been released yet. This section describes the first release as it
 
 ### Fixed
 
+- A Probe result that makes a WAN with a pending Decision unhealthy no longer commits that Decision first. The daemon applied the retry before the Health change, so it switched onto the WAN and then made a second Decision away from it: two conntrack flushes and two Hooks. The Health change now goes first, and the Group recomputes away from the WAN. A result that keeps the WAN healthy still retries the Decision, and now publishes it after the result's State update, so `updatedAt` matches the Hook timestamp.
 - The daemon no longer handles a Probe result, link event, or route event that is still queued when it stops. Such an event was handled with the cancelled context, so its route writes failed, raised `wanwatch_apply_route_errors_total`, and could publish State, such as a `down` Decision, during shutdown. Queued Hooks are still discarded at shutdown.
 - `wanwatch.config.render`, and so module evaluation, rejects a Member whose `wan` names no declared WAN, listing every such reference. Only the daemon checked this before, so a typo in `groups.<name>.members` built, then failed the unit after its restart limit.
 - `docs/metrics.md` no longer subtracts the `wanwatch_group_decisions_total` counter from a timestamp; the example now counts Decisions per Group over the last hour. Its Telegraf example uses the bare `unix://` socket URL that the Telegraf module renders.

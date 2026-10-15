@@ -7,7 +7,6 @@ import (
 	"net"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -64,22 +63,6 @@ func testDaemonWithContext(ctx context.Context, t *testing.T, cfg *config.Config
 	d := newDaemon(cfg, newFakeKernel(&trace{}, cfg), hooks, mreg, logger)
 	t.Cleanup(d.hooks.Close)
 	return d
-}
-
-// fakeKernelOf returns the fake kernel testDaemon wired into d.
-func fakeKernelOf(d *daemon) *fakeKernel {
-	return d.kernel.(*fakeKernel)
-}
-
-// routeWrites counts the route writes d's fake kernel has attempted.
-func routeWrites(d *daemon) int {
-	n := 0
-	for _, line := range fakeKernelOf(d).trace.all() {
-		if strings.HasPrefix(line, "route ") {
-			n++
-		}
-	}
-	return n
 }
 
 // gatewayText renders a State Gateway for failure messages: the

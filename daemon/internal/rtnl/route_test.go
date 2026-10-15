@@ -586,103 +586,138 @@ func TestRouteSubscriberStartCapturesGatewayDuringSnapshot(t *testing.T) {
 	}
 }
 
+// TestRouteSubscriberStartReconcilesQueuedChanges: notifications
+// queued before or after the snapshot describe history it may already
+// include. Each is read as the interface's current default route, so
+// obsolete Gateways never reach out, whether the history was buffered
+// during the snapshot or delivered after Start returned.
 func TestRouteSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 	t.Parallel()
-	old := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET6, unix.RT_TABLE_MAIN, net.ParseIP("fd00:1::1"), 7, nil)
-	removed := old
-	removed.Type = unix.RTM_DELROUTE
-	replacement := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET6, unix.RT_TABLE_MAIN, net.ParseIP("fd00:1::3"), 7, nil)
-	for _, tc := range []struct {
-		name     string
-		snapshot []netlink.Route
-		current  []netlink.Route
-		queued   []netlink.RouteUpdate
-		want     []string
-	}{
-		{
-			name:     "delete after snapshot",
-			snapshot: []netlink.Route{old.Route},
-			queued:   []netlink.RouteUpdate{removed},
-			want:     []string{"add fd00:1::1", "del fd00:1::1"},
-		},
-		{
-			name:   "add then delete after empty snapshot",
-			queued: []netlink.RouteUpdate{old, removed},
-			want:   []string{"del fd00:1::1", "del fd00:1::1"},
-		},
-		{
-			name:     "replacement after snapshot",
-			snapshot: []netlink.Route{old.Route},
-			current:  []netlink.Route{replacement.Route},
-			queued:   []netlink.RouteUpdate{removed, replacement},
-			want:     []string{"add fd00:1::1", "add fd00:1::3", "add fd00:1::3"},
-		},
-		{
-			name:     "snapshot already includes queued changes",
-			snapshot: []netlink.Route{replacement.Route},
-			current:  []netlink.Route{replacement.Route},
-			queued:   []netlink.RouteUpdate{old, removed, replacement},
-			want:     []string{"add fd00:1::3", "add fd00:1::3", "add fd00:1::3", "add fd00:1::3"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{7: "eth0"})
-			var updates chan<- netlink.RouteUpdate
-			subscribe := func(ch chan<- netlink.RouteUpdate, _ <-chan struct{}, opts netlink.RouteSubscribeOptions) error {
-				if opts.ListExisting {
-					t.Error("ListExisting enabled despite malformed library dump request")
+	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
+		oldGw, newGw := net.ParseIP("192.0.2.1"), net.ParseIP("192.0.2.3")
+		if family == unix.AF_INET6 {
+			oldGw, newGw = net.ParseIP("fd00:1::1"), net.ParseIP("fd00:1::3")
+		}
+		old := mkRouteUpdate(unix.RTM_NEWROUTE, family, unix.RT_TABLE_MAIN, oldGw, 7, nil)
+		removed := old
+		removed.Type = unix.RTM_DELROUTE
+		replacement := mkRouteUpdate(unix.RTM_NEWROUTE, family, unix.RT_TABLE_MAIN, newGw, 7, nil)
+		for _, tc := range []struct {
+			name     string
+			snapshot []netlink.Route
+			current  []netlink.Route
+			queued   []netlink.RouteUpdate
+			want     []string
+		}{
+			{
+				name:     "delete after snapshot",
+				snapshot: []netlink.Route{old.Route},
+				queued:   []netlink.RouteUpdate{removed},
+				want:     []string{"add " + oldGw.String(), "del " + oldGw.String()},
+			},
+			{
+				name:   "add then delete after empty snapshot",
+				queued: []netlink.RouteUpdate{old, removed},
+				want:   []string{"del " + oldGw.String(), "del " + oldGw.String()},
+			},
+			{
+				name:     "replacement after snapshot",
+				snapshot: []netlink.Route{old.Route},
+				current:  []netlink.Route{replacement.Route},
+				queued:   []netlink.RouteUpdate{removed, replacement},
+				want:     []string{"add " + oldGw.String(), "add " + newGw.String(), "add " + newGw.String()},
+			},
+			{
+				name:     "snapshot already includes queued changes",
+				snapshot: []netlink.Route{replacement.Route},
+				current:  []netlink.Route{replacement.Route},
+				queued:   []netlink.RouteUpdate{old, removed, replacement},
+				want:     []string{"add " + newGw.String(), "add " + newGw.String(), "add " + newGw.String(), "add " + newGw.String()},
+			},
+		} {
+			for _, afterStart := range []bool{false, true} {
+				delivery := "buffered during snapshot"
+				if afterStart {
+					delivery = "delivered after Start"
 				}
-				updates = ch
-				return nil
+				t.Run(routeFamilyFromAF(family).String()+"/"+tc.name+"/"+delivery, func(t *testing.T) {
+					t.Parallel()
+					testRouteStartupHistory(t, family, tc.snapshot, tc.current, tc.queued, afterStart, tc.want)
+				})
 			}
-			listed := false
-			listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
-				if family != unix.AF_INET6 {
-					return nil, nil
-				}
-				if listed {
-					return tc.current, nil
-				}
-				listed = true
-				for _, upd := range tc.queued {
-					updates <- upd
-				}
-				close(updates)
-				return tc.snapshot, nil
-			}
-			out := make(chan RouteEvent, len(tc.want))
-			exited, err := s.StartWith(ctx, subscribe, listFn, out)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// No consumer runs during Start, so snapshot events must be
-			// available synchronously without waiting for the live loop.
-			if len(out) < len(tc.snapshot) {
-				t.Fatal("Start returned before queuing the route snapshot")
-			}
-			select {
-			case err := <-exited:
-				if !errors.Is(err, errSubscriptionClosed) {
-					t.Fatalf("subscriber = %v, want subscription closed", err)
-				}
-			case <-ctx.Done():
-				t.Fatal("subscriber did not finish draining queued changes")
-			}
-			var got []string
-			for len(out) > 0 {
-				ev := <-out
-				if ev.Iface != "eth0" || ev.Family != RouteFamilyV6 {
-					t.Errorf("event = %+v, want eth0/v6", ev)
-				}
-				got = append(got, ev.Op.String()+" "+ev.Gateway.String())
-			}
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("events = %v, want %v", got, tc.want)
-			}
-		})
+		}
+	}
+}
+
+// testRouteStartupHistory starts a RouteSubscriber on eth0 whose
+// first family route list returns snapshot and every later one
+// current. The queued updates reach the subscription either while
+// the snapshot is read or after Start returns; then the subscription
+// closes. It checks the events Start and the live loop queued.
+func testRouteStartupHistory(t *testing.T, family int, snapshot, current []netlink.Route, queued []netlink.RouteUpdate, afterStart bool, want []string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{7: "eth0"})
+	var updates chan<- netlink.RouteUpdate
+	subscribe := func(ch chan<- netlink.RouteUpdate, _ <-chan struct{}, opts netlink.RouteSubscribeOptions) error {
+		if opts.ListExisting {
+			t.Error("ListExisting enabled despite malformed library dump request")
+		}
+		updates = ch
+		return nil
+	}
+	sendHistory := func() {
+		for _, upd := range queued {
+			updates <- upd
+		}
+		close(updates)
+	}
+	listed := false
+	listFn := func(_ netlink.Link, af int) ([]netlink.Route, error) {
+		if af != family {
+			return nil, nil
+		}
+		if listed {
+			return current, nil
+		}
+		listed = true
+		if !afterStart {
+			sendHistory()
+		}
+		return snapshot, nil
+	}
+	out := make(chan RouteEvent, len(want))
+	exited, err := s.StartWith(ctx, subscribe, listFn, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No consumer runs during Start, so snapshot events must be
+	// available synchronously without waiting for the live loop.
+	if len(out) < len(snapshot) {
+		t.Fatal("Start returned before queuing the route snapshot")
+	}
+	if afterStart {
+		sendHistory()
+	}
+	select {
+	case err := <-exited:
+		if !errors.Is(err, errSubscriptionClosed) {
+			t.Fatalf("subscriber = %v, want subscription closed", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("subscriber did not finish draining queued changes")
+	}
+	var got []string
+	for len(out) > 0 {
+		ev := <-out
+		if ev.Iface != "eth0" || ev.Family != routeFamilyFromAF(family) {
+			t.Errorf("event = %+v, want eth0/%v", ev, routeFamilyFromAF(family))
+		}
+		got = append(got, ev.Op.String()+" "+ev.Gateway.String())
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("events = %v, want %v", got, want)
 	}
 }
 
