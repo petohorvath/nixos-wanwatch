@@ -23,7 +23,7 @@ Before changing a contract, read its sources and documentation together:
 | Contract | Sources and documentation |
 |---|---|
 | Nix options and outputs | `lib/types/`, `nixos/`, `README.md` |
-| Daemon config JSON | `lib/internal/config.nix`, `daemon/internal/config/`, `docs/specs/daemon-config.md` |
+| Daemon config JSON | `lib/internal/config.nix`, `daemon/internal/config/`, the golden `daemon/internal/config/testdata/config.golden.json`, `docs/specs/daemon-config.md` |
 | State and Hooks | `daemon/internal/state/`, `docs/specs/daemon-state.md` |
 | Selection and failover | the Nix and Go selectors, `docs/selector.md`, `docs/specs/failover.md` |
 | Metrics | `daemon/internal/metrics/`, `docs/metrics.md` |

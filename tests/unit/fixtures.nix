@@ -5,7 +5,8 @@
     inputs           — a minimal and a full valid input per value type.
                        Each `full` input sets every field in its
                        serialized form, so `toJSONValue (make full)`
-                       equals it.
+                       equals it. `config` combines them into one
+                       `config.render` input.
     misspelledFields — one misspelled optional field per value type.
                        Added to the `minimal` input, `tryMake` and the
                        option type must both reject it rather than
@@ -52,54 +53,83 @@ let
       priority = 2;
     };
   };
+
+  wan = {
+    minimal = {
+      name = "primary";
+      interface = "eth0";
+      probe = probe.minimal;
+    };
+    full = {
+      name = "vpn";
+      interface = "wg0";
+      pointToPoint = true;
+      probe = probe.full;
+    };
+  };
+
+  global = {
+    minimal = { };
+    full = {
+      logLevel = "debug";
+      hookTimeoutMs = 2000;
+    };
+  };
+
+  group = {
+    minimal = {
+      name = "home-uplink";
+      # The attribute key names the WAN, so a Member input may omit
+      # `wan`.
+      members.primary = { };
+      mark = 1000;
+      table = 1000;
+    };
+    full = {
+      name = "guest-uplink";
+      members = {
+        primary = {
+          wan = "primary";
+          priority = 1;
+        };
+        backup = member.full;
+      };
+      strategy = "primary-backup";
+      mark = 1001;
+      table = 1001;
+    };
+  };
 in
 {
   inputs = {
-    inherit member probe;
+    inherit
+      global
+      group
+      member
+      probe
+      wan
+      ;
 
-    wan = {
-      minimal = {
-        name = "primary";
-        interface = "eth0";
-        probe = probe.minimal;
-      };
-      full = {
-        name = "vpn";
-        interface = "wg0";
-        pointToPoint = true;
-        probe = probe.full;
-      };
-    };
-
-    global = {
-      minimal = { };
-      full = {
-        logLevel = "debug";
-        hookTimeoutMs = 2000;
-      };
-    };
-
-    group = {
-      minimal = {
-        name = "home-uplink";
-        # The attribute key names the WAN, so a Member input may omit
-        # `wan`.
-        members.primary = { };
-        mark = 1000;
-        table = 1000;
-      };
-      full = {
-        name = "guest-uplink";
-        members = {
-          primary = {
-            wan = "primary";
-            priority = 1;
-          };
-          backup = member.full;
+    /*
+      A `config.render` input whose WANs and Groups are still inputs
+      for `wan.make` and `group.make`. It uses the minimal and the full
+      input of every value type, adding the `backup` WAN that the full
+      Group's Members need. Rendered, it is the daemon-config golden
+      that the daemon's tests parse.
+    */
+    config = {
+      global = global.full;
+      wans = {
+        primary = wan.minimal;
+        backup = wan.minimal // {
+          name = "backup";
+          interface = "wwan0";
         };
-        strategy = "primary-backup";
-        mark = 1001;
-        table = 1001;
+        vpn = wan.full;
+      };
+      groups = {
+        home-uplink = group.minimal;
+        guest-uplink = group.full;
       };
     };
   };

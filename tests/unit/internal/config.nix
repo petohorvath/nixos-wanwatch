@@ -39,11 +39,24 @@ let
     vpn = wan.make fixtures.inputs.wan.full;
   };
 
+  # `fixtures.inputs.config` with its WANs and Groups made.
   renderInput = {
-    global.logLevel = "warn";
-    inherit wans;
-    groups = distinctGroups;
+    inherit (fixtures.inputs.config) global;
+    wans = builtins.mapAttrs (_: wan.make) fixtures.inputs.config.wans;
+    groups = builtins.mapAttrs (_: group.make) fixtures.inputs.config.groups;
   };
+
+  /*
+    The daemon's config tests parse this file, so the two sides of
+    `config.json` agree on one document. Regenerate it after a
+    deliberate change to the rendered shape:
+
+      nix eval --json .#tests.unit.internal.config.render.testMatchesGolden.expr \
+        | jq . > daemon/internal/config/testdata/config.golden.json
+  */
+  golden = builtins.fromJSON (
+    builtins.readFile ../../../daemon/internal/config/testdata/config.golden.json
+  );
 
   assertUnique = config.assertUniqueMarksAndTables;
 in
@@ -174,13 +187,9 @@ in
       };
     };
 
-    testSerializesWansAndGroups = {
-      expr = removeAttrs (config.render renderInput) [ "global" ];
-      expected = {
-        schema = config.schemaVersion;
-        wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
-        groups = builtins.mapAttrs (_: group.toJSONValue) distinctGroups;
-      };
+    testMatchesGolden = {
+      expr = config.render renderInput;
+      expected = golden;
     };
 
     testRejectsSharedMark = {
