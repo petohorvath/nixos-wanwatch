@@ -2,19 +2,19 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -24,7 +24,7 @@ import (
 // gauges the daemon updates directly — going through scrape
 // would test the wire format too, but that's already covered
 // in `internal/metrics`.
-func readGauge(t *testing.T, g prometheus.Gauge) float64 {
+func readGauge(t testing.TB, g prometheus.Gauge) float64 {
 	t.Helper()
 	var m dto.Metric
 	if err := g.Write(&m); err != nil {
@@ -35,7 +35,7 @@ func readGauge(t *testing.T, g prometheus.Gauge) float64 {
 
 // readCounter is the Counter twin of readGauge — same idea, same
 // DTO entry point.
-func readCounter(t *testing.T, c prometheus.Counter) float64 {
+func readCounter(t testing.TB, c prometheus.Counter) float64 {
 	t.Helper()
 	var m dto.Metric
 	if err := c.Write(&m); err != nil {
@@ -55,35 +55,31 @@ func testDaemonWithContext(ctx context.Context, t *testing.T, cfg *config.Config
 	t.Helper()
 	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
 	cfg.Global.HooksDir = t.TempDir()
-	d := newDaemon(ctx, cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	// Default the apply seams to succeeding fakes: the sandbox has no
-	// CAP_NET_ADMIN, so the real netlink path can't run. Tests that
-	// exercise an apply *failure* override the relevant seam.
-	d.ifindexOf = func(string) (int, error) { return 1, nil }
-	d.writeRoute = func(context.Context, apply.DefaultRoute) error { return nil }
-	d.interfaceAddrs = func(string) ([]net.IP, error) { return nil, nil }
-	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) { return 0, nil }
+	mreg := metrics.New()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// The sandbox has no CAP_NET_ADMIN, so the real netlink path can't
+	// run: the fake kernel succeeds unless a test scripts a failure.
+	hooks := state.NewHookNotifier(ctx, cfg.Global.HooksDir,
+		time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger)
+	d := newDaemon(cfg, newFakeKernel(&trace{}, cfg), hooks, mreg, logger)
 	t.Cleanup(d.hooks.Close)
 	return d
 }
 
-// failingIfindex is a d.ifindexOf stub that always fails — the
-// ifindex-lookup hard failure applyRoutes must surface and
-// the Group Decision module must hold pending.
-func failingIfindex(string) (int, error) {
-	return 0, errors.New("apply test: no such interface")
+// fakeKernelOf returns the fake kernel testDaemon wired into d.
+func fakeKernelOf(d *daemon) *fakeKernel {
+	return d.kernel.(*fakeKernel)
 }
 
-// countWrites points d.writeRoute at a stub that records every route
-// write and returns the running count, so a test can assert
-// applyRoutes ran without depending on netlink.
-func countWrites(d *daemon) *int {
-	var n int
-	d.writeRoute = func(context.Context, apply.DefaultRoute) error {
-		n++
-		return nil
+// routeWrites counts the route writes d's fake kernel has attempted.
+func routeWrites(d *daemon) int {
+	n := 0
+	for _, line := range fakeKernelOf(d).trace.all() {
+		if strings.HasPrefix(line, "route ") {
+			n++
+		}
 	}
-	return &n
+	return n
 }
 
 // gatewayText renders a State Gateway for failure messages: the

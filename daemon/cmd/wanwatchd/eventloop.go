@@ -34,3 +34,18 @@ func eventLoop(
 		}
 	}
 }
+
+// serve runs the event loop until ctx is cancelled, then closes Hook
+// delivery. run() calls it once every subsystem is wired; the test
+// harness drives the same sequence.
+func serve(
+	ctx context.Context,
+	d *daemon,
+	probeResults <-chan probe.ProbeResult,
+	linkEvents <-chan rtnl.LinkEvent,
+	routeEvents <-chan rtnl.RouteEvent,
+	watchdogChallenges <-chan watchdogChallenge,
+) {
+	eventLoop(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
+	d.hooks.Close()
+}

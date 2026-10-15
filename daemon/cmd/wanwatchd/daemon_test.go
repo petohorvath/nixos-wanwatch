@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
@@ -247,42 +245,26 @@ func TestRecomputeGroupColdToPrimary(t *testing.T) {
 func TestFlushSwitchedConntrackFlushesVacatedWAN(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-
-	var gotIface string
-	d.interfaceAddrs = func(iface string) ([]net.IP, error) {
-		gotIface = iface
-		return []net.IP{net.ParseIP("192.0.2.1"), net.ParseIP("2001:db8::1")}, nil
-	}
-	var flushed []probe.Family
-	d.flushConntrack = func(_ context.Context, family probe.Family, _ net.IP) (uint, error) {
-		flushed = append(flushed, family)
-		return 3, nil
-	}
+	k := fakeKernelOf(d)
+	k.setAddrs("eth0", "192.0.2.1", "2001:db8::1")
+	k.setAddrs("wwan0", "198.51.100.1")
 
 	g := d.cfg.Groups["home"]
 	old := selector.Active{Wan: "primary", Has: true}
 	next := selector.Active{Wan: "backup", Has: true}
 	d.flushSwitchedConntrack(t.Context(), g, old, next)
 
-	if gotIface != "eth0" {
-		t.Errorf("interfaceAddrs called with %q, want eth0 (primary's iface)", gotIface)
-	}
-	if len(flushed) != 2 {
-		t.Fatalf("flushConntrack calls = %d, want 2 (one per family)", len(flushed))
-	}
-	if flushed[0] != probe.FamilyV4 || flushed[1] != probe.FamilyV6 {
-		t.Errorf("flushed families = %v, want [v4 v6]", flushed)
-	}
+	// Only primary's (eth0's) addresses, one flush per Family.
+	assertTrace(t, k.trace.take(), []string{"flush v4 192.0.2.1", "flush v6 2001:db8::1"})
 }
 
 func TestFlushSwitchedConntrackSkipsNonSwitch(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	called := false
-	d.interfaceAddrs = func(string) ([]net.IP, error) {
-		called = true
-		return nil, nil
-	}
+	k := fakeKernelOf(d)
+	k.setAddrs("eth0", "192.0.2.1")
+	// A failing address lookup puts every lookup attempt in the trace.
+	k.fail(opAddrs, "")
 
 	g := d.cfg.Groups["home"]
 	primary := selector.Active{Wan: "primary", Has: true}
@@ -292,31 +274,23 @@ func TestFlushSwitchedConntrackSkipsNonSwitch(t *testing.T) {
 	// up: nothing was vacated.
 	d.flushSwitchedConntrack(t.Context(), g, selector.NoActive, primary)
 
-	if called {
-		t.Error("interfaceAddrs called for a non-switch transition")
-	}
+	assertTrace(t, k.trace.take(), nil)
 }
 
 func TestFlushSwitchedConntrackMetersResolveFailure(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	d.interfaceAddrs = func(string) ([]net.IP, error) {
-		return nil, errors.New("flush test: no such interface")
-	}
-	flushCalled := false
-	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) {
-		flushCalled = true
-		return 0, nil
-	}
+	k := fakeKernelOf(d)
+	k.setAddrs("eth0", "192.0.2.1")
+	k.fail(opAddrs, "eth0")
 
 	g := d.cfg.Groups["home"]
 	old := selector.Active{Wan: "primary", Has: true}
 	next := selector.Active{Wan: "backup", Has: true}
 	d.flushSwitchedConntrack(t.Context(), g, old, next)
 
-	if flushCalled {
-		t.Error("flushConntrack called despite address-resolution failure")
-	}
+	// No flush follows the failed address lookup.
+	assertTrace(t, k.trace.take(), []string{"addrs eth0 ✗"})
 	if got := readCounter(t, d.metrics.ApplyOpErrors.WithLabelValues("home", "conntrack_flush")); got != 1 {
 		t.Errorf("ApplyOpErrors{home,conntrack_flush} = %v, want 1", got)
 	}
@@ -325,17 +299,9 @@ func TestFlushSwitchedConntrackMetersResolveFailure(t *testing.T) {
 func TestFlushSwitchedConntrackMetersFlushFailure(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	d.interfaceAddrs = func(string) ([]net.IP, error) {
-		return []net.IP{net.ParseIP("192.0.2.1"), net.ParseIP("2001:db8::1")}, nil
-	}
-	calls := 0
-	d.flushConntrack = func(_ context.Context, family probe.Family, _ net.IP) (uint, error) {
-		calls++
-		if family == probe.FamilyV4 {
-			return 0, errors.New("flush test: ENOMEM")
-		}
-		return 5, nil
-	}
+	k := fakeKernelOf(d)
+	k.setAddrs("eth0", "192.0.2.1", "2001:db8::1")
+	k.fail(opFlush, "eth0", probe.FamilyV4)
 
 	g := d.cfg.Groups["home"]
 	old := selector.Active{Wan: "primary", Has: true}
@@ -343,9 +309,7 @@ func TestFlushSwitchedConntrackMetersFlushFailure(t *testing.T) {
 	d.flushSwitchedConntrack(t.Context(), g, old, next)
 
 	// A failure on one family must not abort the next.
-	if calls != 2 {
-		t.Errorf("flushConntrack calls = %d, want 2 (v4 failed, v6 still attempted)", calls)
-	}
+	assertTrace(t, k.trace.take(), []string{"flush v4 192.0.2.1 ✗", "flush v6 2001:db8::1"})
 	if got := readCounter(t, d.metrics.ApplyOpErrors.WithLabelValues("home", "conntrack_flush")); got != 1 {
 		t.Errorf("ApplyOpErrors{home,conntrack_flush} = %v, want 1 (the v4 failure)", got)
 	}
@@ -358,27 +322,18 @@ func TestRecomputeGroupSwitchFlushesConntrack(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
 	linkUp(d, "primary", "backup")
+	k := fakeKernelOf(d)
+	k.setAddrs("eth0", "192.0.2.1")
+	k.setAddrs("wwan0", "198.51.100.1")
 
-	var flushedIfaces []string
-	d.interfaceAddrs = func(iface string) ([]net.IP, error) {
-		flushedIfaces = append(flushedIfaces, iface)
-		return []net.IP{net.ParseIP("192.0.2.1")}, nil
-	}
-	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) {
-		return 1, nil
-	}
-
-	// Cold start → primary: an "up", nothing vacated.
+	// Cold start → primary: an "up", nothing vacated. No Gateway is
+	// cached, so Apply writes no route either.
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
-	if len(flushedIfaces) != 0 {
-		t.Errorf("conntrack resolve on cold-start up = %v, want none", flushedIfaces)
-	}
+	assertTrace(t, k.trace.take(), nil)
 	// primary sickens → switch to backup: primary's iface is flushed.
 	probeLost(d, "primary")
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
-	if len(flushedIfaces) != 1 || flushedIfaces[0] != "eth0" {
-		t.Errorf("conntrack resolve on switch = %v, want [eth0]", flushedIfaces)
-	}
+	assertTrace(t, k.trace.take(), []string{"flush v4 192.0.2.1"})
 }
 
 // TestRecomputeAffectedGroupsFansOut: a per-WAN health change
@@ -517,7 +472,6 @@ func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
 	linkUp(d, "primary", "backup")
-	writes := countWrites(d)
 
 	g := d.groups["home"]
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
@@ -525,7 +479,7 @@ func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 		t.Fatalf("setup: want primary active, got %+v", g.Snapshot().Active)
 	}
 
-	before := *writes
+	before := routeWrites(d)
 	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "eth0", // primary's iface — must trigger reapply
@@ -533,8 +487,8 @@ func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
 		Gateway: net.ParseIP("192.0.2.1"),
 	})
 
-	if *writes <= before {
-		t.Errorf("writeRoute calls %d → %d, want an increase (active-WAN reapply not entered)", before, *writes)
+	if after := routeWrites(d); after <= before {
+		t.Errorf("route writes %d → %d, want an increase (active-WAN reapply not entered)", before, after)
 	}
 }
 
@@ -545,11 +499,10 @@ func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
 	linkUp(d, "primary", "backup")
-	writes := countWrites(d)
 
 	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
 
-	before := *writes
+	before := routeWrites(d)
 	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
 		Op:      rtnl.RouteEventAdd,
 		Iface:   "lo", // not used by any WAN
@@ -557,8 +510,8 @@ func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
 		Gateway: net.ParseIP("127.0.0.1"),
 	})
 
-	if *writes != before {
-		t.Errorf("writeRoute called on inactive-iface event: %d → %d", before, *writes)
+	if after := routeWrites(d); after != before {
+		t.Errorf("route written on inactive-iface event: %d → %d", before, after)
 	}
 }
 
@@ -785,18 +738,17 @@ func TestApplyRoutesErrorContract(t *testing.T) {
 	}
 
 	// An ifindex lookup failure is a hard failure.
-	d.ifindexOf = failingIfindex
+	k := fakeKernelOf(d)
+	k.fail(opIfIndex, "eth0")
 	if err := d.applyRoutes(t.Context(), g, "primary"); err == nil {
 		t.Error("applyRoutes with a failing ifindex lookup = nil, want error")
 	}
 
 	// A netlink write error is a hard failure, and bumps the
 	// per-(group,family) error counter so the failure is observable.
-	d.ifindexOf = func(string) (int, error) { return 1, nil }
+	k.heal(opIfIndex, "eth0")
 	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	d.writeRoute = func(context.Context, apply.DefaultRoute) error {
-		return errors.New("netlink: operation not permitted")
-	}
+	k.fail(opRoute, "eth0")
 	if err := d.applyRoutes(t.Context(), g, "primary"); err == nil {
 		t.Error("applyRoutes with a failing route write = nil, want error")
 	}
@@ -813,31 +765,22 @@ func TestApplyRoutesExplicitFamilyWritesOnlyThat(t *testing.T) {
 	// assertion below couldn't distinguish "filtered" from "skipped".
 	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
 	d.gateways.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
-	var fams []probe.Family
-	d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
-		fams = append(fams, r.Family)
-		return nil
-	}
-
 	if err := d.applyRoutes(t.Context(), d.cfg.Groups["home"], "primary", probe.FamilyV4); err != nil {
 		t.Fatalf("applyRoutes(primary, v4) = %v, want nil", err)
 	}
-	if len(fams) != 1 || fams[0] != probe.FamilyV4 {
-		t.Errorf("written families = %v, want [v4]", fams)
-	}
+	assertTrace(t, fakeKernelOf(d).trace.take(), []string{"route home v4 eth0 via 192.0.2.1"})
 }
 
 func TestApplyRoutesExplicitFamilySkipsUnprobed(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	writes := countWrites(d)
 	// backup is v4-only in testCfg (its only target is 8.8.8.8), so
 	// passing FamilyV6 must be a no-op — the daemon has no route to
 	// maintain for an unprobed family.
 	if err := d.applyRoutes(t.Context(), d.cfg.Groups["home"], "backup", probe.FamilyV6); err != nil {
 		t.Errorf("applyRoutes(backup, v6) = %v, want nil (unprobed family is a no-op)", err)
 	}
-	if *writes != 0 {
-		t.Errorf("writes = %d, want 0 (unprobed family must not call writeRoute)", *writes)
+	if n := routeWrites(d); n != 0 {
+		t.Errorf("writes = %d, want 0 (unprobed family must not write a route)", n)
 	}
 }

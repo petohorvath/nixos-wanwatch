@@ -6,12 +6,14 @@
 //
 // File layout:
 //   - main.go         — process lifecycle (flags, logging, signals)
-//   - daemon.go       — event handlers, Apply adapter and commit publication
+//   - daemon.go       — event handlers, Apply adapter, commit publication
+//     and the Hook-sink seam
 //     (WAN Health lives in internal/health, Selection progression
 //     in internal/decision)
 //   - probers.go      — startProbers + identKeysFor
 //   - subscribers.go  — startLinkSubscriber, startRouteSubscriber
-//   - eventloop.go    — eventLoop (central event dispatch)
+//   - eventloop.go    — eventLoop (central event dispatch) and serve
+//   - kernel.go       — the kernel seam and its netlink adapter
 //   - decision.go     — pure helpers (groupContainsWAN, hookEventFor)
 //     and the decisionReason enum
 //   - gateway.go      — GatewayCache (kernel default-route mirror)
@@ -31,9 +33,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 )
 
 // flags are the daemon's command-line options. Kept minimal —
@@ -141,7 +145,9 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 
 	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
 
-	d := newDaemon(ctx, &cfg, mreg, logger)
+	hooks := state.NewHookNotifier(ctx, cfg.Global.HooksDir,
+		time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger)
+	d := newDaemon(&cfg, netlinkKernel{}, hooks, mreg, logger)
 	if err := d.bootstrap(ctx); err != nil {
 		cancel(fmt.Errorf("bootstrap: %w", err))
 		return exitError(ctx, metricsDone, logger)
@@ -175,8 +181,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 	watchdogChallenges := make(chan watchdogChallenge)
 	go runWatchdog(ctx, logger, watchdogChallenges)
 
-	eventLoop(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
-	d.hooks.Close()
+	serve(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
 	return exitError(ctx, metricsDone, logger)
 }
 

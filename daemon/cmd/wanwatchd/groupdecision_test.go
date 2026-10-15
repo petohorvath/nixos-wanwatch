@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -13,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
@@ -74,6 +72,24 @@ func readDecisionHooks(t *testing.T, dir string) []state.HookContext {
 	return hooks
 }
 
+// routeAttempts splits a fake-kernel trace into the Families of its
+// route writes, failed ones included, and its conntrack flush lines.
+func routeAttempts(lines []string) (routes []probe.Family, flushes []string) {
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "route "):
+			fam := probe.FamilyV4
+			if strings.Contains(line, " v6 ") {
+				fam = probe.FamilyV6
+			}
+			routes = append(routes, fam)
+		case strings.HasPrefix(line, "flush "):
+			flushes = append(flushes, line)
+		}
+	}
+	return routes, flushes
+}
+
 // A partial Apply must not publish a switch or flush the vacated WAN.
 // Exercise every hard failure through the real route-building adapter and
 // every retry source through daemon event handlers.
@@ -93,28 +109,18 @@ func TestDecisionPublicationWaitsForApply(t *testing.T) {
 				d.gateways.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
 				d.gateways.set("wwan0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
 				hookDir := captureDecisionHooks(t, d)
-				var flushed []string
-				d.interfaceAddrs = func(iface string) ([]net.IP, error) {
-					flushed = append(flushed, iface)
-					return nil, nil
-				}
-				failing := false
-				d.ifindexOf = func(iface string) (int, error) {
-					if iface == "eth0" {
-						if failing && failure == "ifindex" {
-							return failingIfindex(iface)
-						}
-						return 1, nil
+				k := fakeKernelOf(d)
+				k.setAddrs("eth0", "192.0.2.10")
+				k.setAddrs("wwan0", "198.51.100.10")
+				fail := func() {
+					switch failure {
+					case "ifindex":
+						k.fail(opIfIndex, "eth0")
+					case "v4 write":
+						k.fail(opRoute, "eth0", probe.FamilyV4)
+					case "v6 write":
+						k.fail(opRoute, "eth0", probe.FamilyV6)
 					}
-					return 2, nil
-				}
-				var attempts []probe.Family
-				d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
-					attempts = append(attempts, r.Family)
-					if failing && r.Family.String()+" write" == failure {
-						return errors.New("route write failed")
-					}
-					return nil
 				}
 				d.handleLinkEvent(t.Context(), rtnl.LinkEvent{Name: "wwan0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp})
 				waitForHookPath(t, filepath.Join(hookDir, "up"), 3*time.Second)
@@ -124,14 +130,15 @@ func TestDecisionPublicationWaitsForApply(t *testing.T) {
 					t.Fatalf("setup: State = %+v, Hooks = %+v", before, hooks)
 				}
 
-				failing = true
-				attempts = nil
+				fail()
+				k.trace.take()
 				d.handleLinkEvent(t.Context(), rtnl.LinkEvent{Name: "eth0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp})
 				hooks = readDecisionHooks(t, hookDir)
 				pending := readPublishedState(t, d).Groups["home"]
 				if pending.Active == nil || *pending.Active != "backup" || !pending.ActiveSince.Equal(*before.ActiveSince) || pending.DecisionsTotal != 2 {
 					t.Fatalf("failed Apply published a switch: %+v", pending)
 				}
+				attempts, flushed := routeAttempts(k.trace.take())
 				if len(hooks) != 1 || len(flushed) != 0 {
 					t.Fatalf("failed Apply delivered Hooks or flushed conntrack: Hooks=%+v, flushes=%v", hooks, flushed)
 				}
@@ -142,11 +149,12 @@ func TestDecisionPublicationWaitsForApply(t *testing.T) {
 					}
 				}
 
-				failing = false
-				attempts = nil
+				k.heal(opIfIndex, "eth0")
+				k.heal(opRoute, "eth0", probe.FamilyV4)
+				k.heal(opRoute, "eth0", probe.FamilyV6)
 				d.handleProbeResult(t.Context(), probe.ProbeResult{Wan: "backup", Family: probe.FamilyV4})
 				d.handleRouteEvent(t.Context(), rtnl.RouteEvent{Op: rtnl.RouteEventAdd, Iface: "wwan0", Family: rtnl.RouteFamilyV4, Gateway: net.ParseIP("198.51.100.2")})
-				if len(attempts) != 0 {
+				if attempts, _ = routeAttempts(k.trace.take()); len(attempts) != 0 {
 					t.Fatalf("events for the old Selection retried Apply: %v", attempts)
 				}
 				if retry == "Gateway" {
@@ -159,6 +167,7 @@ func TestDecisionPublicationWaitsForApply(t *testing.T) {
 				}
 				d.hooks.Close()
 				hooks = readDecisionHooks(t, hookDir)
+				attempts, flushed = routeAttempts(k.trace.take())
 				slices.Sort(attempts)
 				if !slices.Equal(attempts, []probe.Family{probe.FamilyV4, probe.FamilyV6}) {
 					t.Errorf("retry attempted %v, want both families", attempts)
@@ -179,7 +188,7 @@ func TestDecisionPublicationWaitsForApply(t *testing.T) {
 				if retry == "partial Probe" && !snap.UpdatedAt.Equal(hooks[1].Timestamp) {
 					t.Error("State publication and Hook have different timestamps")
 				}
-				if !slices.Equal(flushed, []string{"wwan0"}) {
+				if !slices.Equal(flushed, []string{"flush v4 198.51.100.10"}) {
 					t.Errorf("conntrack flushes = %v, want the vacated backup once", flushed)
 				}
 			})
@@ -204,13 +213,19 @@ func TestDecisionMissingGatewayCommitsThenRefreshes(t *testing.T) {
 				if cached == "v6" {
 					d.gateways.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
 				}
-				var attempts []probe.Family
-				d.writeRoute = func(_ context.Context, r apply.DefaultRoute) error {
-					attempts = append(attempts, r.Family)
-					if r.PointToPoint != wan.PointToPoint || (r.Gateway == nil) != wan.PointToPoint {
-						t.Errorf("unexpected route mode: %+v", r)
+				k := fakeKernelOf(d)
+				// routes returns the Families of the routes written since
+				// the last call, checking each one's mode.
+				routes := func() []probe.Family {
+					t.Helper()
+					lines := k.trace.take()
+					for _, line := range lines {
+						if strings.HasSuffix(line, "scope link") != wan.PointToPoint {
+							t.Errorf("unexpected route mode: %s", line)
+						}
 					}
-					return nil
+					fams, _ := routeAttempts(lines)
+					return fams
 				}
 				hookDir := captureDecisionHooks(t, d)
 				d.handleLinkEvent(t.Context(), rtnl.LinkEvent{Name: "eth0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp})
@@ -229,27 +244,26 @@ func TestDecisionMissingGatewayCommitsThenRefreshes(t *testing.T) {
 				case "point-to-point":
 					want = []probe.Family{probe.FamilyV4, probe.FamilyV6}
 				}
+				attempts := routes()
 				slices.Sort(attempts)
 				if !slices.Equal(attempts, want) {
 					t.Errorf("initial route attempts = %v, want %v", attempts, want)
 				}
-				attempts = nil
-				gateway := net.ParseIP("192.0.2.2")
+				gw := net.ParseIP("192.0.2.2")
 				if family == probe.FamilyV6 {
-					gateway = net.ParseIP("2001:db8::2")
+					gw = net.ParseIP("2001:db8::2")
 				}
-				event := rtnl.RouteEvent{Op: rtnl.RouteEventAdd, Iface: "eth0", Family: rtnl.RouteFamily(family), Gateway: gateway}
+				event := rtnl.RouteEvent{Op: rtnl.RouteEventAdd, Iface: "eth0", Family: rtnl.RouteFamily(family), Gateway: gw}
 				d.handleRouteEvent(t.Context(), event)
-				if !slices.Equal(attempts, []probe.Family{family}) {
+				if attempts = routes(); !slices.Equal(attempts, []probe.Family{family}) {
 					t.Errorf("Gateway refresh wrote %v, want only %v", attempts, family)
 				}
 				if after := readPublishedState(t, d).Groups["home"]; !reflect.DeepEqual(after, before) {
 					t.Fatalf("Gateway refresh changed Selection: %+v", after)
 				}
-				attempts = nil
 				publications := readCounter(t, d.metrics.StatePublications)
 				d.handleRouteEvent(t.Context(), event)
-				if len(attempts) != 0 || readCounter(t, d.metrics.StatePublications) != publications {
+				if len(routes()) != 0 || readCounter(t, d.metrics.StatePublications) != publications {
 					t.Error("duplicate Gateway event reapplied or republished State")
 				}
 				d.hooks.Close()
@@ -264,12 +278,7 @@ func TestDecisionMissingGatewayCommitsThenRefreshes(t *testing.T) {
 func TestSupersededDecisionPublishesOnlyConvergedSelection(t *testing.T) {
 	t.Parallel()
 	d := testDaemon(t, testCfgWithGroup())
-	d.ifindexOf = func(iface string) (int, error) {
-		if iface == "eth0" {
-			return failingIfindex(iface)
-		}
-		return 2, nil
-	}
+	fakeKernelOf(d).fail(opIfIndex, "eth0")
 	hookDir := captureDecisionHooks(t, d)
 	d.handleLinkEvent(t.Context(), rtnl.LinkEvent{Name: "eth0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp})
 	d.handleLinkEvent(t.Context(), rtnl.LinkEvent{Name: "wwan0", Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp})

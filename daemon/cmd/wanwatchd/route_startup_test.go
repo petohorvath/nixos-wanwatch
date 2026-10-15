@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -104,14 +103,6 @@ func testRouteStartupHistory(t *testing.T, family int, delayed bool) {
 	wan.Interface = lo.Name
 	cfg.Wans["primary"] = wan
 	d := testDaemon(t, cfg)
-	var writes []string
-	d.writeRoute = func(_ context.Context, route apply.DefaultRoute) error {
-		writes = append(writes, route.Gateway.String())
-		if route.Table != 100 || !route.Gateway.Equal(current.Gw) {
-			t.Errorf("Apply wrote obsolete route %+v; want table 100 via %s", route, current.Gw)
-		}
-		return nil
-	}
 	d.handleLinkEvent(t.Context(), rtnl.LinkEvent{
 		Name: lo.Name, Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp,
 	})
@@ -130,7 +121,8 @@ func testRouteStartupHistory(t *testing.T, family int, delayed bool) {
 			t.Errorf("Selection = %v; want primary", active)
 		}
 	}
-	if len(writes) != 1 {
-		t.Errorf("Apply Gateways = %v; want only the current Gateway %s", writes, current.Gw)
-	}
+	// Only the current Gateway reaches Group home's table.
+	assertTrace(t, fakeKernelOf(d).trace.take(), []string{
+		"route home " + rtnl.RouteFamily(family).String() + " lo via " + current.Gw.String(),
+	})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"slices"
 	"time"
 
@@ -19,47 +18,44 @@ import (
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 )
 
+// hookSink receives the Decision data the daemon captures for Hooks.
+// *state.HookNotifier is the production adapter; tests record
+// notifications synchronously.
+type hookSink interface {
+	// Notify submits one notification and reports whether it was accepted.
+	Notify(hookCtx state.HookContext) bool
+	// Close stops accepting notifications and finishes delivery.
+	Close()
+}
+
 // daemon bundles the runtime state and subsystem handles. Wired
 // once in run(), then driven by eventLoop's dispatch.
 type daemon struct {
 	cfg      *config.Config
+	kernel   kernel
+	hooks    hookSink
 	metrics  *metrics.Registry
 	stateW   *state.Writer
-	hooks    *state.HookNotifier
 	logger   *slog.Logger
 	health   *health.Wans
 	groups   map[string]*decision.Group
 	gateways *gatewayCache
-
-	// The syscall-touching seams of the apply path — newDaemon wires
-	// each to its production function; tests substitute fakes (the
-	// sandbox grants no CAP_NET_ADMIN). ifindexOf and writeRoute drive
-	// applyRoutes; interfaceAddrs and flushConntrack drive the
-	// post-switch conntrack flush.
-	ifindexOf      func(name string) (int, error)
-	writeRoute     func(ctx context.Context, r apply.DefaultRoute) error
-	interfaceAddrs func(name string) ([]net.IP, error)
-	flushConntrack func(ctx context.Context, family probe.Family, ip net.IP) (uint, error)
 }
 
 // newDaemon constructs the runtime state from `cfg` — cold WAN
-// Health and one Group Decision module per Group. It performs no I/O
-// and starts no goroutines.
-func newDaemon(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, logger *slog.Logger) *daemon {
+// Health and one Group Decision module per Group — over the given
+// kernel and Hook sink. It performs no I/O and starts no goroutines.
+func newDaemon(cfg *config.Config, k kernel, hooks hookSink, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
-		cfg:     cfg,
-		metrics: mreg,
-		stateW:  &state.Writer{Path: cfg.Global.StatePath},
-		hooks: state.NewHookNotifier(ctx, cfg.Global.HooksDir,
-			time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger),
-		logger:         logger,
-		health:         health.New(cfg.Wans, mreg),
-		groups:         make(map[string]*decision.Group, len(cfg.Groups)),
-		gateways:       newGatewayCache(),
-		ifindexOf:      interfaceIndex,
-		writeRoute:     apply.WriteDefault,
-		interfaceAddrs: interfaceAddrs,
-		flushConntrack: apply.FlushBySource,
+		cfg:      cfg,
+		kernel:   k,
+		hooks:    hooks,
+		metrics:  mreg,
+		stateW:   &state.Writer{Path: cfg.Global.StatePath},
+		logger:   logger,
+		health:   health.New(cfg.Wans, mreg),
+		groups:   make(map[string]*decision.Group, len(cfg.Groups)),
+		gateways: newGatewayCache(),
 	}
 	for name, g := range cfg.Groups {
 		d.groups[name] = decision.New(g, func(ctx context.Context, wan string, families ...probe.Family) error {
@@ -76,7 +72,7 @@ func newDaemon(ctx context.Context, cfg *config.Config, mreg *metrics.Registry, 
 func (d *daemon) bootstrap(ctx context.Context) error {
 	for _, g := range d.cfg.Groups {
 		for _, fam := range probe.AllFamilies {
-			if err := apply.EnsureRule(ctx, apply.FwmarkRule{
+			if err := d.kernel.EnsureRule(ctx, apply.FwmarkRule{
 				Family: fam,
 				Mark:   g.Mark,
 				Table:  g.Table,
@@ -169,7 +165,7 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, o
 	if !ok {
 		return
 	}
-	addrs, err := d.interfaceAddrs(wan.Interface)
+	addrs, err := d.kernel.InterfaceAddrs(wan.Interface)
 	if err != nil {
 		d.logger.Warn("conntrack flush: resolve vacated WAN addresses",
 			"group", g.Name, "wan", old.Wan, "iface", wan.Interface, "err", err)
@@ -181,7 +177,7 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, o
 		if ip.To4() == nil {
 			family = probe.FamilyV6
 		}
-		n, err := d.flushConntrack(ctx, family, ip)
+		n, err := d.kernel.FlushConntrack(ctx, family, ip)
 		if err != nil {
 			d.logger.Warn("conntrack flush",
 				"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "err", err)
@@ -221,7 +217,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 	if !ok {
 		return fmt.Errorf("apply routes: unknown wan %q", activeWan)
 	}
-	ifindex, err := d.ifindexOf(wan.Interface)
+	ifindex, err := d.kernel.IfIndex(wan.Interface)
 	if err != nil {
 		d.logger.Error("ifindex lookup", "iface", wan.Interface, "err", err)
 		d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "ifindex_lookup").Inc()
@@ -254,7 +250,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 			route.Gateway = gw
 		}
 		started := time.Now()
-		err := d.writeRoute(ctx, route)
+		err := d.kernel.WriteRoute(ctx, route)
 		d.metrics.ApplyRouteDuration.WithLabelValues(g.Name, famLabel).Observe(time.Since(started).Seconds())
 		if err != nil {
 			d.logger.Error("route write", "group", g.Name, "family", famLabel, "err", err)
