@@ -177,6 +177,14 @@ func (h *harness) hooks() []state.HookContext {
 	return h.recorder.accepted()
 }
 
+// selectionOf returns the Selection of group in s, or "" for none.
+func selectionOf(s state.State, group string) string {
+	if a := s.Groups[group].Active; a != nil {
+		return *a
+	}
+	return ""
+}
+
 // barrier sends a watchdog challenge and waits for its ack. The event
 // loop handles one event at a time, so the ack proves the handler of
 // every earlier event has returned.

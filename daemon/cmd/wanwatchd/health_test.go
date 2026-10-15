@@ -89,11 +89,7 @@ func TestHealthPublication(t *testing.T) {
 				t.Errorf("State republished = %v, want %v", published, tc.published)
 			}
 			s := h.State()
-			active := ""
-			if a := s.Groups["home"].Active; a != nil {
-				active = *a
-			}
-			if active != tc.active {
+			if active := selectionOf(s, "home"); active != tc.active {
 				t.Errorf("State Selection = %q, want %q", active, tc.active)
 			}
 			wan := s.Wans["primary"]

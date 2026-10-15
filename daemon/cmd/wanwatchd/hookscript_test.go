@@ -52,8 +52,8 @@ func TestHookScriptRunsFromConfiguredDir(t *testing.T) {
 	// The script is still blocked: the event loop handles this event
 	// and acknowledges the harness barrier regardless.
 	h.Link(carrier("wwan0", true))
-	if a := h.State().Groups["home"].Active; a == nil || *a != "primary" {
-		t.Errorf("State Selection = %v, want primary", a)
+	if got := selectionOf(h.State(), "home"); got != "primary" {
+		t.Errorf("State Selection = %q, want primary", got)
 	}
 }
 

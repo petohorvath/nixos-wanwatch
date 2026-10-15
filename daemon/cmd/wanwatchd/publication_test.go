@@ -31,11 +31,7 @@ func runSteps(tb testing.TB, h *harness, steps []step) {
 	for _, s := range steps {
 		s.do(h)
 		assertTrace(tb, fmt.Sprintf("step %q", s.name), h.Trace(), s.want)
-		active := ""
-		if a := h.State().Groups["home"].Active; a != nil {
-			active = *a
-		}
-		if active != s.active {
+		if active := selectionOf(h.State(), "home"); active != s.active {
 			tb.Errorf("step %q: State Selection = %q, want %q", s.name, active, s.active)
 		}
 		hooks := h.hooks()
@@ -683,8 +679,8 @@ func TestDecisionPublication(t *testing.T) {
 			},
 			check: func(tb testing.TB, h *harness) {
 				tb.Helper()
-				guest := h.State().Groups["guest"]
-				if guest.Active == nil || *guest.Active != "backup" || guest.DecisionsTotal != 1 {
+				s := h.State()
+				if guest := s.Groups["guest"]; selectionOf(s, "guest") != "backup" || guest.DecisionsTotal != 1 {
 					tb.Errorf("guest State = %+v, want backup after 1 Decision", guest)
 				}
 				for _, g := range []struct{ group, wan string }{{"home", "primary"}, {"guest", "backup"}} {

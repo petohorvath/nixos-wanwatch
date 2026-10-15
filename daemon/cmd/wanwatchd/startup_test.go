@@ -93,13 +93,12 @@ func TestStartupInstallsFwmarkRules(t *testing.T) {
 			}
 			s := h.State()
 			for name := range cfg.Groups {
-				g, ok := s.Groups[name]
-				if !ok {
+				if _, ok := s.Groups[name]; !ok {
 					t.Errorf("State has no Group %q", name)
 					continue
 				}
-				if g.Active != nil {
-					t.Errorf("Group %q Selection = %q at startup, want none", name, *g.Active)
+				if got := selectionOf(s, name); got != "" {
+					t.Errorf("Group %q Selection = %q at startup, want none", name, got)
 				}
 			}
 			if n := readCounter(t, h.metrics.StatePublications); n != 1 {
