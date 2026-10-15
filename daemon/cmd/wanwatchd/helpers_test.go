@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -64,6 +66,20 @@ func testDaemonWithContext(ctx context.Context, t *testing.T, cfg *config.Config
 	d := newDaemon(cfg, newFakeKernel(&trace{}, cfg), hooks, mreg, logger)
 	t.Cleanup(d.hooks.Close)
 	return d
+}
+
+// readPublishedState reads the state.json d publishes.
+func readPublishedState(t *testing.T, d *daemon) state.State {
+	t.Helper()
+	data, err := os.ReadFile(d.cfg.Global.StatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap state.State
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatal(err)
+	}
+	return snap
 }
 
 // fakeKernelOf returns the fake kernel testDaemon wired into d.
