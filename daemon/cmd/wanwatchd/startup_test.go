@@ -210,5 +210,8 @@ func TestStartupRouteHistory(t *testing.T) {
 
 // link is a step action delivering iface's carrier.
 func link(iface string, up bool) func(*harness) {
-	return func(h *harness) { h.Link(carrier(iface, up)) }
+	return func(h *harness) {
+		h.tb.Helper()
+		h.Link(carrier(iface, up))
+	}
 }

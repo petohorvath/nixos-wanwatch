@@ -78,6 +78,7 @@ func linkFlaps(n int) []step {
 // cachedGateways teaches the daemon a v4 and v6 Gateway for both
 // baseConfig WANs, and gives both interfaces addresses to flush.
 func cachedGateways(h *harness) {
+	h.tb.Helper()
 	h.Route(gateway("eth0", probe.FamilyV4, "192.0.2.1"))
 	h.Route(gateway("eth0", probe.FamilyV6, "2001:db8::1"))
 	h.Route(gateway("wwan0", probe.FamilyV4, "198.51.100.1"))
