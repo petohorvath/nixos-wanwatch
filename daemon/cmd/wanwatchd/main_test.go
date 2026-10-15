@@ -121,7 +121,7 @@ func TestExitError(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			ctx, cancel := context.WithCancelCause(context.Background())
+			ctx, cancel := context.WithCancelCause(t.Context())
 			cancel(tc.cause)
 			metricsDone := make(chan struct{})
 			close(metricsDone)

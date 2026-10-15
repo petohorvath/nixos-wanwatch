@@ -1,19 +1,12 @@
 package main
 
 import (
-	"context"
-	"io"
-	"log/slog"
 	"net"
-	"path/filepath"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -23,82 +16,24 @@ import (
 // gauges the daemon updates directly — going through scrape
 // would test the wire format too, but that's already covered
 // in `internal/metrics`.
-func readGauge(t testing.TB, g prometheus.Gauge) float64 {
-	t.Helper()
+func readGauge(tb testing.TB, g prometheus.Gauge) float64 {
+	tb.Helper()
 	var m dto.Metric
 	if err := g.Write(&m); err != nil {
-		t.Fatalf("Gauge.Write: %v", err)
+		tb.Fatalf("Gauge.Write: %v", err)
 	}
 	return m.GetGauge().GetValue()
 }
 
 // readCounter is the Counter twin of readGauge — same idea, same
 // DTO entry point.
-func readCounter(t testing.TB, c prometheus.Counter) float64 {
-	t.Helper()
+func readCounter(tb testing.TB, c prometheus.Counter) float64 {
+	tb.Helper()
 	var m dto.Metric
 	if err := c.Write(&m); err != nil {
-		t.Fatalf("Counter.Write: %v", err)
+		tb.Fatalf("Counter.Write: %v", err)
 	}
 	return m.GetCounter().GetValue()
-}
-
-// testDaemon builds a daemon wired against `cfg` without invoking
-// bootstrap() — netlink rule install isn't available in unit tests.
-func testDaemon(t *testing.T, cfg *config.Config) *daemon {
-	t.Helper()
-	return testDaemonWithContext(t.Context(), t, cfg)
-}
-
-func testDaemonWithContext(ctx context.Context, t *testing.T, cfg *config.Config) *daemon {
-	t.Helper()
-	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
-	cfg.Global.HooksDir = t.TempDir()
-	mreg := metrics.New()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// The sandbox has no CAP_NET_ADMIN, so the real netlink path can't
-	// run: the fake kernel succeeds unless a test scripts a failure.
-	hooks := state.NewHookNotifier(ctx, cfg.Global.HooksDir,
-		time.Duration(cfg.Global.HookTimeoutMs)*time.Millisecond, mreg, logger)
-	d := newDaemon(cfg, newFakeKernel(&trace{}, cfg), hooks, mreg, logger)
-	t.Cleanup(d.hooks.Close)
-	return d
-}
-
-// gatewayText renders a State Gateway for failure messages: the
-// address, or "<nil>" when the Gateway is absent.
-func gatewayText(gw *string) string {
-	if gw == nil {
-		return "<nil>"
-	}
-	return *gw
-}
-
-func testCfg() *config.Config {
-	return &config.Config{
-		Wans: map[string]config.Wan{
-			"primary": {
-				Name:      "primary",
-				Interface: "eth0",
-				Probe: config.Probe{
-					Targets: config.Targets{
-						V4: []string{"1.1.1.1"},
-						V6: []string{"2606:4700:4700::1111"},
-					},
-				},
-			},
-			"backup": {
-				Name:      "backup",
-				Interface: "wwan0",
-				// v4-only WAN — only a v4 probe target.
-				Probe: config.Probe{
-					Targets: config.Targets{
-						V4: []string{"8.8.8.8"},
-					},
-				},
-			},
-		},
-	}
 }
 
 func TestInterfaceIndexLoopback(t *testing.T) {

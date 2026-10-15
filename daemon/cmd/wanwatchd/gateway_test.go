@@ -144,6 +144,15 @@ func gatewayString(gw *string) string {
 	return *gw
 }
 
+// gatewayText renders a State Gateway for failure messages: the
+// address, or "<nil>" when the Gateway is absent.
+func gatewayText(gw *string) string {
+	if gw == nil {
+		return "<nil>"
+	}
+	return *gw
+}
+
 // primaryActive teaches the daemon a v4 and v6 Gateway on eth0, then
 // raises eth0's carrier so Group home selects primary.
 var primaryActive = step{
