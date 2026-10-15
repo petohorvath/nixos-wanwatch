@@ -42,8 +42,8 @@ let
   # `fixtures.inputs.config` with its WANs and Groups made.
   renderInput = {
     inherit (fixtures.inputs.config) global;
-    wans = builtins.mapAttrs (_: wan.make) fixtures.inputs.config.wans;
-    groups = builtins.mapAttrs (_: group.make) fixtures.inputs.config.groups;
+    wans = lib.mapAttrs (_: wan.make) fixtures.inputs.config.wans;
+    groups = lib.mapAttrs (_: group.make) fixtures.inputs.config.groups;
   };
 
   /*

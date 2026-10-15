@@ -39,9 +39,10 @@ func TestParseAcceptsGolden(t *testing.T) {
 	}
 }
 
-// TestParsePopulatesNestedFields decodes the golden's full WAN and
-// full Group, whose fields all differ from the Nix defaults, so a
-// field decoded into the wrong place shows up.
+// TestParsePopulatesNestedFields decodes the golden's global settings,
+// its full WAN, and its full Group, which set every field and mostly
+// to values other than the Nix defaults, so a field decoded into the
+// wrong place shows up.
 func TestParsePopulatesNestedFields(t *testing.T) {
 	t.Parallel()
 	cfg := mustParse(t, goldenConfig)
@@ -119,8 +120,7 @@ func TestGoldenRoundTrips(t *testing.T) {
 
 func TestParseRejectsSchemaMismatch(t *testing.T) {
 	t.Parallel()
-	bad := `{"schema": 99, "global": {"statePath":"a","hooksDir":"b","metricsSocket":"c","logLevel":"info"}, "wans":{}, "groups":{}}`
-	_, err := Parse([]byte(bad))
+	_, err := Parse(goldenWith(t, 99, "schema"))
 	if !errors.Is(err, ErrSchemaMismatch) {
 		t.Errorf("err = %v, want wrap of ErrSchemaMismatch", err)
 	}
