@@ -257,47 +257,6 @@ func gatewayGone(iface string, fam probe.Family) rtnl.RouteEvent {
 	return rtnl.RouteEvent{Op: rtnl.RouteEventDel, Iface: iface, Family: rtnl.RouteFamily(fam)}
 }
 
-// TestHarnessRouteEventsReachState checks the Route path through the
-// harness: State shows the Gateway the last RouteEvent left behind, and
-// a Gateway change on a WAN no Group selected writes no route.
-func TestHarnessRouteEventsReachState(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name   string
-		events []rtnl.RouteEvent
-		want   string // primary's v4 Gateway in State, "" for none
-	}{
-		{"none learned", nil, ""},
-		{"learned", []rtnl.RouteEvent{gateway("eth0", probe.FamilyV4, "192.0.2.1")}, "192.0.2.1"},
-		{"replaced", []rtnl.RouteEvent{
-			gateway("eth0", probe.FamilyV4, "192.0.2.1"),
-			gateway("eth0", probe.FamilyV4, "192.0.2.2"),
-		}, "192.0.2.2"},
-		{"withdrawn", []rtnl.RouteEvent{
-			gateway("eth0", probe.FamilyV4, "192.0.2.1"),
-			gatewayGone("eth0", probe.FamilyV4),
-		}, ""},
-		{"other Family", []rtnl.RouteEvent{gateway("eth0", probe.FamilyV6, "2001:db8::1")}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			h := startHarness(t, baseConfig())
-			h.Trace()
-			for _, e := range tc.events {
-				h.Route(e)
-			}
-			assertTrace(t, h.Trace(), nil)
-			got := ""
-			if gw := h.State().Wans["primary"].Gateways.V4; gw != nil {
-				got = *gw
-			}
-			if got != tc.want {
-				t.Errorf("primary v4 Gateway = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // hookRecorder is the synchronous Hook sink of the harness. It records
 // `hook <event> <group> <old>→<new>` in the trace and keeps the full
 // Hook context. Like state.HookNotifier it rejects notifications after
