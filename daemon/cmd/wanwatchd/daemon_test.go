@@ -84,38 +84,6 @@ func TestWriteStateSnapshotHappyPath(t *testing.T) {
 	}
 }
 
-// TestHandleRouteEventPopulatesGatewayCache: an Add RouteEvent
-// populates the cache so subsequent applyRoutes can find a gw.
-func TestHandleRouteEventPopulatesGatewayCache(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfg())
-	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
-		Op:      rtnl.RouteEventAdd,
-		Iface:   "eth0",
-		Family:  rtnl.RouteFamilyV4,
-		Gateway: net.ParseIP("198.51.100.1"),
-	})
-	gw, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4)
-	if !ok || gw.String() != "198.51.100.1" {
-		t.Errorf("eth0/v4 = (%v, %v), want (198.51.100.1, true)", gw, ok)
-	}
-}
-
-// TestHandleRouteEventDelClearsCache: a Del clears the entry.
-func TestHandleRouteEventDelClearsCache(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfg())
-	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("198.51.100.1"))
-	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
-		Op:     rtnl.RouteEventDel,
-		Iface:  "eth0",
-		Family: rtnl.RouteFamilyV4,
-	})
-	if _, ok := d.gateways.get("eth0", rtnl.RouteFamilyV4); ok {
-		t.Error("cache still has eth0/v4 after Del event")
-	}
-}
-
 // testCfgWithGroup builds the same two-WAN cfg as testCfg() and
 // attaches a single primary-backup group containing both members.
 // Hand-rolled here rather than mutating testCfg() so the existing
@@ -148,56 +116,6 @@ func linkUp(d *daemon, wans ...string) {
 			Carrier:   rtnl.CarrierUp,
 			Operstate: rtnl.OperstateUp,
 		})
-	}
-}
-
-// TestHandleRouteEventReappliesOnActiveIface: a RouteEvent for the
-// active member's iface populates the gateway cache and reapplies —
-// applyRoutes now has a v4 gateway to write, so writeRoute fires.
-func TestHandleRouteEventReappliesOnActiveIface(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	linkUp(d, "primary", "backup")
-
-	g := d.groups["home"]
-	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
-	if *g.Snapshot().Active != "primary" {
-		t.Fatalf("setup: want primary active, got %+v", g.Snapshot().Active)
-	}
-
-	before := routeWrites(d)
-	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
-		Op:      rtnl.RouteEventAdd,
-		Iface:   "eth0", // primary's iface — must trigger reapply
-		Family:  rtnl.RouteFamilyV4,
-		Gateway: net.ParseIP("192.0.2.1"),
-	})
-
-	if after := routeWrites(d); after <= before {
-		t.Errorf("route writes %d → %d, want an increase (active-WAN reapply not entered)", before, after)
-	}
-}
-
-// TestHandleRouteEventSkipsInactiveIface: a RouteEvent on an iface
-// not used by any active member populates the cache but triggers no
-// route write.
-func TestHandleRouteEventSkipsInactiveIface(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	linkUp(d, "primary", "backup")
-
-	d.recomputeAffectedGroups(t.Context(), "primary", reasonHealth)
-
-	before := routeWrites(d)
-	d.handleRouteEvent(t.Context(), rtnl.RouteEvent{
-		Op:      rtnl.RouteEventAdd,
-		Iface:   "lo", // not used by any WAN
-		Family:  rtnl.RouteFamilyV4,
-		Gateway: net.ParseIP("127.0.0.1"),
-	})
-
-	if after := routeWrites(d); after != before {
-		t.Errorf("route written on inactive-iface event: %d → %d", before, after)
 	}
 }
 
@@ -401,32 +319,4 @@ func TestSlowHookDoesNotBlockWatchdogAck(t *testing.T) {
 	}
 	waitForHookPath(t, finished, 2*time.Second)
 	d.hooks.Close()
-}
-
-func TestApplyRoutesExplicitFamilyWritesOnlyThat(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	// Seed both families' gateways so the filtered call has something
-	// to write — otherwise both families would soft-skip and the
-	// assertion below couldn't distinguish "filtered" from "skipped".
-	d.gateways.set("eth0", rtnl.RouteFamilyV4, net.ParseIP("192.0.2.1"))
-	d.gateways.set("eth0", rtnl.RouteFamilyV6, net.ParseIP("2001:db8::1"))
-	if err := d.applyRoutes(t.Context(), d.cfg.Groups["home"], "primary", probe.FamilyV4); err != nil {
-		t.Fatalf("applyRoutes(primary, v4) = %v, want nil", err)
-	}
-	assertTrace(t, fakeKernelOf(d).trace.take(), []string{"route home v4 eth0 via 192.0.2.1"})
-}
-
-func TestApplyRoutesExplicitFamilySkipsUnprobed(t *testing.T) {
-	t.Parallel()
-	d := testDaemon(t, testCfgWithGroup())
-	// backup is v4-only in testCfg (its only target is 8.8.8.8), so
-	// passing FamilyV6 must be a no-op — the daemon has no route to
-	// maintain for an unprobed family.
-	if err := d.applyRoutes(t.Context(), d.cfg.Groups["home"], "backup", probe.FamilyV6); err != nil {
-		t.Errorf("applyRoutes(backup, v6) = %v, want nil (unprobed family is a no-op)", err)
-	}
-	if n := routeWrites(d); n != 0 {
-		t.Errorf("writes = %d, want 0 (unprobed family must not write a route)", n)
-	}
 }

@@ -29,13 +29,6 @@ func (t *trace) add(line string) {
 	t.lines = append(t.lines, line)
 }
 
-// all returns every line recorded so far.
-func (t *trace) all() []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return slices.Clone(t.lines)
-}
-
 // take returns the lines added since the previous take.
 func (t *trace) take() []string {
 	t.mu.Lock()
