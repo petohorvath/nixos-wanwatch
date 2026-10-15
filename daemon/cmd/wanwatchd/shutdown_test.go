@@ -94,13 +94,13 @@ func TestStopDropsQueuedEvents(t *testing.T) {
 				tc.queue(h)
 				synctest.Wait() // every queued send is pending
 
-				assertTrace(t, h.Trace(), []string{"ifindex eth0 ✗"})
+				assertTrace(t, "busy retry", h.Trace(), []string{"ifindex eth0 ✗"})
 				stateBefore := readStateFile(t, h)
 				errorsBefore := applyRouteErrors(t, h)
 
 				h.Stop()
 
-				assertTrace(t, h.Trace(), []string{"hooks closed"})
+				assertTrace(t, "Stop", h.Trace(), []string{"hooks closed"})
 				if got := readStateFile(t, h); !bytes.Equal(got, stateBefore) {
 					t.Errorf("State rewritten during shutdown:\nbefore: %s\nafter:  %s", stateBefore, got)
 				}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
@@ -84,9 +83,7 @@ func TestHealthPublication(t *testing.T) {
 
 			h.Probe(tc.result)
 
-			if got := h.Trace(); !slices.Equal(got, tc.want) {
-				t.Errorf("trace (-want +got):\n%s", lineDiff(tc.want, got))
-			}
+			assertTrace(t, "probe result", h.Trace(), tc.want)
 			published := readCounter(t, h.metrics.StatePublications) > before
 			if published != tc.published {
 				t.Errorf("State republished = %v, want %v", published, tc.published)

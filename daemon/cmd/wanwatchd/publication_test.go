@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
@@ -31,9 +30,7 @@ func runSteps(tb testing.TB, h *harness, steps []step) {
 	seen := len(h.hooks())
 	for _, s := range steps {
 		s.do(h)
-		if got := h.Trace(); !slices.Equal(got, s.want) {
-			tb.Errorf("step %q trace (-want +got):\n%s", s.name, lineDiff(s.want, got))
-		}
+		assertTrace(tb, fmt.Sprintf("step %q", s.name), h.Trace(), s.want)
 		active := ""
 		if a := h.State().Groups["home"].Active; a != nil {
 			active = *a

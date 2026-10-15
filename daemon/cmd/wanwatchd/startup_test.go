@@ -74,7 +74,7 @@ func TestStartupInstallsFwmarkRules(t *testing.T) {
 
 			err := h.Start()
 			got, want := slices.Sorted(slices.Values(h.Trace())), slices.Sorted(slices.Values(tc.want))
-			assertTrace(t, got, want)
+			assertTrace(t, "Start", got, want)
 
 			if tc.wantErr {
 				if !errors.Is(err, errScripted) {

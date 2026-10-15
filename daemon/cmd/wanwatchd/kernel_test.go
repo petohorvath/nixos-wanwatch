@@ -274,14 +274,14 @@ func (k *fakeKernel) FlushConntrack(ctx context.Context, fam probe.Family, ip ne
 	return 1, nil
 }
 
-// assertTrace compares one step's trace and prints a line diff on a
-// mismatch.
-func assertTrace(tb testing.TB, got, want []string) {
+// assertTrace compares the trace of what, such as one step, and
+// prints a line diff on a mismatch.
+func assertTrace(tb testing.TB, what string, got, want []string) {
 	tb.Helper()
 	if slices.Equal(got, want) {
 		return
 	}
-	tb.Errorf("trace mismatch (-want +got):\n%s", lineDiff(want, got))
+	tb.Errorf("%s trace (-want +got):\n%s", what, lineDiff(want, got))
 }
 
 // lineDiff renders a longest-common-subsequence diff of two line
