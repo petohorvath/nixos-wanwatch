@@ -510,51 +510,68 @@ func closeLinkUpdatesOnStop(ch chan<- netlink.LinkUpdate, done <-chan struct{}) 
 // queued before the snapshot describe history it may already
 // include. Each must be read as the link's current state and
 // deduplicated against the snapshot, so stale history never reaches
-// out as a transient flap.
+// out as a transient flap, while a change the snapshot missed still
+// does, in notification order across interfaces.
 func TestLinkSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 	t.Parallel()
-	up := mkLink("wan0", unix.IFF_LOWER_UP, netlink.OperUp)
-	down := mkLink("wan0", 0, netlink.OperDown)
+	up := func(name string) netlink.Link { return mkLink(name, unix.IFF_LOWER_UP, netlink.OperUp) }
+	down := func(name string) netlink.Link { return mkLink(name, 0, netlink.OperDown) }
 	for _, tc := range []struct {
 		name     string
 		snapshot []netlink.Link
-		current  netlink.Link // nil: the link no longer exists
+		current  []netlink.Link // links that exist after the snapshot
 		queued   []netlink.LinkUpdate
 		want     []string
 	}{
 		{
 			name:     "flap before snapshot",
-			snapshot: []netlink.Link{up},
-			current:  up,
+			snapshot: []netlink.Link{up("wan0")},
+			current:  []netlink.Link{up("wan0")},
 			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
-			want:     []string{"up/up"},
+			want:     []string{"wan0 up/up"},
 		},
 		{
 			name:     "carrier lost after snapshot",
-			snapshot: []netlink.Link{up},
-			current:  down,
+			snapshot: []netlink.Link{up("wan0")},
+			current:  []netlink.Link{down("wan0")},
 			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown)},
-			want:     []string{"up/up", "down/down"},
+			want:     []string{"wan0 up/up", "wan0 down/down"},
 		},
 		{
 			name:     "carrier gained after snapshot",
-			snapshot: []netlink.Link{down},
-			current:  up,
+			snapshot: []netlink.Link{down("wan0")},
+			current:  []netlink.Link{up("wan0")},
 			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
-			want:     []string{"down/down", "up/up"},
+			want:     []string{"wan0 down/down", "wan0 up/up"},
 		},
 		{
 			name:     "re-created before snapshot",
-			snapshot: []netlink.Link{up},
-			current:  up,
+			snapshot: []netlink.Link{up("wan0")},
+			current:  []netlink.Link{up("wan0")},
 			queued:   []netlink.LinkUpdate{mkDelete("wan0"), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
-			want:     []string{"up/up"},
+			want:     []string{"wan0 up/up"},
 		},
 		{
 			name:     "deleted after snapshot",
-			snapshot: []netlink.Link{up},
+			snapshot: []netlink.Link{up("wan0")},
 			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkDelete("wan0")},
-			want:     []string{"up/up", "down/notpresent"},
+			want:     []string{"wan0 up/up", "wan0 down/notpresent"},
+		},
+		{
+			// vm-recovery: wan1 gains carrier just after the dump, then
+			// wan0 loses carrier.
+			name:     "carrier moves to another link after snapshot",
+			snapshot: []netlink.Link{up("wan0"), down("wan1")},
+			current:  []netlink.Link{down("wan0"), up("wan1")},
+			queued:   []netlink.LinkUpdate{mkUpdate("wan1", unix.IFF_LOWER_UP, netlink.OperUp), mkUpdate("wan0", 0, netlink.OperDown)},
+			want:     []string{"wan0 up/up", "wan1 down/down", "wan1 up/up", "wan0 down/down"},
+		},
+		{
+			name:     "flap on one link before snapshot",
+			snapshot: []netlink.Link{up("wan0"), up("wan1")},
+			current:  []netlink.Link{up("wan0"), up("wan1")},
+			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			want:     []string{"wan0 up/up", "wan1 up/up"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -574,15 +591,14 @@ func TestLinkSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 				return tc.snapshot, nil
 			}
 			getFn := func(name string) (netlink.Link, error) {
-				if name != "wan0" {
-					t.Errorf("LinkByName(%q), want wan0", name)
+				for _, link := range tc.current {
+					if link.Attrs().Name == name {
+						return link, nil
+					}
 				}
-				if tc.current == nil {
-					return nil, netlink.LinkNotFoundError{}
-				}
-				return tc.current, nil
+				return nil, netlink.LinkNotFoundError{}
 			}
-			s := &LinkSubscriber{Interfaces: map[string]struct{}{"wan0": {}}}
+			s := &LinkSubscriber{Interfaces: map[string]struct{}{"wan0": {}, "wan1": {}}}
 			out := make(chan LinkEvent, len(tc.queued)+len(tc.snapshot))
 			exited, err := s.StartWith(ctx, subscribe, listFn, getFn, out)
 			if err != nil {
@@ -604,7 +620,7 @@ func TestLinkSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 			var got []string
 			for len(out) > 0 {
 				ev := <-out
-				got = append(got, ev.Carrier.String()+"/"+ev.Operstate.String())
+				got = append(got, ev.Name+" "+ev.Carrier.String()+"/"+ev.Operstate.String())
 			}
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("events = %v, want %v", got, tc.want)
