@@ -17,29 +17,29 @@ import (
 // $NOTIFY_SOCKET at it, and returns the conn for the test to read
 // datagrams from. These tests touch process env, so none of them
 // can run with t.Parallel().
-func listenNotify(t *testing.T) *net.UnixConn {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "notify.sock")
+func listenNotify(tb testing.TB) *net.UnixConn {
+	tb.Helper()
+	path := filepath.Join(tb.TempDir(), "notify.sock")
 	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
 	if err != nil {
-		t.Fatalf("ListenUnixgram: %v", err)
+		tb.Fatalf("ListenUnixgram: %v", err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	t.Setenv("NOTIFY_SOCKET", path)
+	tb.Cleanup(func() { _ = conn.Close() })
+	tb.Setenv("NOTIFY_SOCKET", path)
 	return conn
 }
 
 // readDatagram reads one datagram under a deadline, so a missing
 // send fails the test instead of hanging it.
-func readDatagram(t *testing.T, conn *net.UnixConn) string {
-	t.Helper()
+func readDatagram(tb testing.TB, conn *net.UnixConn) string {
+	tb.Helper()
 	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatalf("SetReadDeadline: %v", err)
+		tb.Fatalf("SetReadDeadline: %v", err)
 	}
 	buf := make([]byte, 256)
 	n, err := conn.Read(buf)
 	if err != nil {
-		t.Fatalf("Read: %v", err)
+		tb.Fatalf("Read: %v", err)
 	}
 	return string(buf[:n])
 }
@@ -111,7 +111,7 @@ func TestRunWatchdogDisabledReturns(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	done := make(chan struct{})
 	go func() {
-		runWatchdog(context.Background(), logger, nil)
+		runWatchdog(t.Context(), logger, nil)
 		close(done)
 	}()
 	select {
@@ -129,7 +129,7 @@ func TestRunWatchdogPingsUntilCancelled(t *testing.T) {
 	t.Setenv("WATCHDOG_PID", strconv.Itoa(os.Getpid()))
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	challenges := make(chan watchdogChallenge)
 	done := make(chan struct{})
 	go func() {
@@ -165,7 +165,7 @@ func TestRunWatchdogNoAckNoPing(t *testing.T) {
 	t.Setenv("WATCHDOG_PID", strconv.Itoa(os.Getpid()))
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	challenges := make(chan watchdogChallenge)
 	challengeReceived := make(chan struct{})
 	done := make(chan struct{})

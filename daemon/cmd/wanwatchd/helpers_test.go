@@ -1,19 +1,11 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"io"
-	"log/slog"
 	"net"
-	"path/filepath"
 	"slices"
 	"testing"
 
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/apply"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -24,102 +16,24 @@ import (
 // gauges the daemon updates directly — going through scrape
 // would test the wire format too, but that's already covered
 // in `internal/metrics`.
-func readGauge(t *testing.T, g prometheus.Gauge) float64 {
-	t.Helper()
+func readGauge(tb testing.TB, g prometheus.Gauge) float64 {
+	tb.Helper()
 	var m dto.Metric
 	if err := g.Write(&m); err != nil {
-		t.Fatalf("Gauge.Write: %v", err)
+		tb.Fatalf("Gauge.Write: %v", err)
 	}
 	return m.GetGauge().GetValue()
 }
 
 // readCounter is the Counter twin of readGauge — same idea, same
 // DTO entry point.
-func readCounter(t *testing.T, c prometheus.Counter) float64 {
-	t.Helper()
+func readCounter(tb testing.TB, c prometheus.Counter) float64 {
+	tb.Helper()
 	var m dto.Metric
 	if err := c.Write(&m); err != nil {
-		t.Fatalf("Counter.Write: %v", err)
+		tb.Fatalf("Counter.Write: %v", err)
 	}
 	return m.GetCounter().GetValue()
-}
-
-// testDaemon builds a daemon wired against `cfg` without invoking
-// bootstrap() — netlink rule install isn't available in unit tests.
-func testDaemon(t *testing.T, cfg *config.Config) *daemon {
-	t.Helper()
-	return testDaemonWithContext(t.Context(), t, cfg)
-}
-
-func testDaemonWithContext(ctx context.Context, t *testing.T, cfg *config.Config) *daemon {
-	t.Helper()
-	cfg.Global.StatePath = filepath.Join(t.TempDir(), "state.json")
-	cfg.Global.HooksDir = t.TempDir()
-	d := newDaemon(ctx, cfg, metrics.New(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	// Default the apply seams to succeeding fakes: the sandbox has no
-	// CAP_NET_ADMIN, so the real netlink path can't run. Tests that
-	// exercise an apply *failure* override the relevant seam.
-	d.ifindexOf = func(string) (int, error) { return 1, nil }
-	d.writeRoute = func(context.Context, apply.DefaultRoute) error { return nil }
-	d.interfaceAddrs = func(string) ([]net.IP, error) { return nil, nil }
-	d.flushConntrack = func(context.Context, probe.Family, net.IP) (uint, error) { return 0, nil }
-	t.Cleanup(d.hooks.Close)
-	return d
-}
-
-// failingIfindex is a d.ifindexOf stub that always fails — the
-// ifindex-lookup hard failure applyRoutes must surface and
-// the Group Decision module must hold pending.
-func failingIfindex(string) (int, error) {
-	return 0, errors.New("apply test: no such interface")
-}
-
-// countWrites points d.writeRoute at a stub that records every route
-// write and returns the running count, so a test can assert
-// applyRoutes ran without depending on netlink.
-func countWrites(d *daemon) *int {
-	var n int
-	d.writeRoute = func(context.Context, apply.DefaultRoute) error {
-		n++
-		return nil
-	}
-	return &n
-}
-
-// gatewayText renders a State Gateway for failure messages: the
-// address, or "<nil>" when the Gateway is absent.
-func gatewayText(gw *string) string {
-	if gw == nil {
-		return "<nil>"
-	}
-	return *gw
-}
-
-func testCfg() *config.Config {
-	return &config.Config{
-		Wans: map[string]config.Wan{
-			"primary": {
-				Name:      "primary",
-				Interface: "eth0",
-				Probe: config.Probe{
-					Targets: config.Targets{
-						V4: []string{"1.1.1.1"},
-						V6: []string{"2606:4700:4700::1111"},
-					},
-				},
-			},
-			"backup": {
-				Name:      "backup",
-				Interface: "wwan0",
-				// v4-only WAN — only a v4 probe target.
-				Probe: config.Probe{
-					Targets: config.Targets{
-						V4: []string{"8.8.8.8"},
-					},
-				},
-			},
-		},
-	}
 }
 
 func TestInterfaceIndexLoopback(t *testing.T) {

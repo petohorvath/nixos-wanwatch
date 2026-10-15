@@ -1,0 +1,325 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"testing"
+
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
+)
+
+// harness drives one daemon through the production bootstrap, event
+// loop and stop sequence. Events go over unbuffered channels, and each
+// is followed by a watchdog challenge whose ack proves the handler
+// finished, so every step is synchronous without sleeps or polling.
+//
+// Kernel effects and Hook notifications land in one ordered trace;
+// State is read back from state.json.
+type harness struct {
+	tb        testing.TB
+	d         *daemon
+	kernel    *fakeKernel
+	metrics   *metrics.Registry
+	recorder  *hookRecorder
+	trace     *trace
+	statePath string
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	probes     chan probe.ProbeResult
+	links      chan rtnl.LinkEvent
+	routes     chan rtnl.RouteEvent
+	challenges chan watchdogChallenge
+	done       chan struct{} // closed when serve returns; nil before Start
+	stopOnce   sync.Once
+}
+
+// newHarness builds a daemon for cfg without starting it. It points
+// State and Hooks at fresh temporary directories, so cfg must not be
+// shared with another harness or changed afterwards.
+func newHarness(tb testing.TB, cfg *config.Config) *harness {
+	tb.Helper()
+	return buildHarness(tb, cfg, func(h *harness, _ *slog.Logger) hookSink { return h.recorder })
+}
+
+// newScriptHarness is newHarness with Hook delivery wired as run()
+// wires it: real scripts from cfg's Hook directory. Hooks reach
+// neither the trace nor hooks().
+func newScriptHarness(tb testing.TB, cfg *config.Config) *harness {
+	tb.Helper()
+	return buildHarness(tb, cfg, func(h *harness, logger *slog.Logger) hookSink {
+		return newHookNotifier(h.ctx, cfg, h.metrics, logger)
+	})
+}
+
+// buildHarness builds the harness and its daemon, which delivers
+// Hooks to the sink that hooks returns for the harness.
+func buildHarness(tb testing.TB, cfg *config.Config, hooks func(*harness, *slog.Logger) hookSink) *harness {
+	tb.Helper()
+	cfg.Global.StatePath = filepath.Join(tb.TempDir(), "state.json")
+	cfg.Global.HooksDir = tb.TempDir()
+	tr := &trace{}
+	h := &harness{
+		tb:         tb,
+		kernel:     newFakeKernel(tr, cfg),
+		metrics:    metrics.New(),
+		recorder:   &hookRecorder{trace: tr},
+		trace:      tr,
+		statePath:  cfg.Global.StatePath,
+		probes:     make(chan probe.ProbeResult),
+		links:      make(chan rtnl.LinkEvent),
+		routes:     make(chan rtnl.RouteEvent),
+		challenges: make(chan watchdogChallenge),
+	}
+	h.ctx, h.cancel = context.WithCancel(tb.Context())
+	tb.Cleanup(h.cancel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h.d = newDaemon(cfg, h.kernel, hooks(h, logger), h.metrics, logger)
+	return h
+}
+
+// Start runs bootstrap, then serve on its own goroutine, as run()
+// does once the probers and subscribers are wired. The test's cleanup
+// stops it.
+func (h *harness) Start() error {
+	if err := h.d.bootstrap(h.ctx); err != nil {
+		return err
+	}
+	h.done = make(chan struct{})
+	go func() {
+		defer close(h.done)
+		serve(h.ctx, h.d, h.probes, h.links, h.routes, h.challenges)
+	}()
+	h.tb.Cleanup(h.Stop)
+	return nil
+}
+
+// startHarness builds and starts a harness, failing the test if
+// bootstrap fails.
+func startHarness(tb testing.TB, cfg *config.Config) *harness {
+	tb.Helper()
+	h := newHarness(tb, cfg)
+	if err := h.Start(); err != nil {
+		tb.Fatalf("harness start: %v", err)
+	}
+	return h
+}
+
+// Probe delivers one ProbeResult and waits until its handler finished.
+func (h *harness) Probe(r probe.ProbeResult) {
+	h.tb.Helper()
+	send(h, h.probes, r)
+	h.barrier()
+}
+
+// Link delivers one LinkEvent and waits until its handler finished.
+func (h *harness) Link(e rtnl.LinkEvent) {
+	h.tb.Helper()
+	send(h, h.links, e)
+	h.barrier()
+}
+
+// Route delivers one RouteEvent and waits until its handler finished.
+func (h *harness) Route(e rtnl.RouteEvent) {
+	h.tb.Helper()
+	send(h, h.routes, e)
+	h.barrier()
+}
+
+// Stop cancels the daemon context and waits for serve to return,
+// which closes Hook delivery. Repeated calls are safe.
+func (h *harness) Stop() {
+	h.stopOnce.Do(func() {
+		h.cancel()
+		if h.done != nil {
+			<-h.done
+		}
+	})
+}
+
+// Trace returns the kernel effects and Hook notifications recorded
+// since the previous call, in order.
+func (h *harness) Trace() []string {
+	return h.trace.take()
+}
+
+// State reads the published state.json.
+func (h *harness) State() state.State {
+	h.tb.Helper()
+	data, err := os.ReadFile(h.statePath)
+	if err != nil {
+		h.tb.Fatalf("read State: %v", err)
+	}
+	var s state.State
+	if err := json.Unmarshal(data, &s); err != nil {
+		h.tb.Fatalf("decode State: %v", err)
+	}
+	return s
+}
+
+// hooks returns every Hook notification accepted so far, with full
+// Decision data.
+func (h *harness) hooks() []state.HookContext {
+	return h.recorder.accepted()
+}
+
+// selectionOf returns the Selection of group in s, or "" for none.
+func selectionOf(s state.State, group string) string {
+	if a := s.Groups[group].Active; a != nil {
+		return *a
+	}
+	return ""
+}
+
+// barrier sends a watchdog challenge and waits for its ack. The event
+// loop handles one event at a time, so the ack proves the handler of
+// every earlier event has returned.
+func (h *harness) barrier() {
+	h.tb.Helper()
+	ack := make(chan struct{})
+	send(h, h.challenges, watchdogChallenge{ack: ack})
+	select {
+	case <-ack:
+	case <-h.done:
+		h.tb.Fatal("harness: serve stopped before acknowledging the barrier")
+	}
+}
+
+// send hands v to the event loop, failing the test if serve is not
+// running to receive it.
+func send[T any](h *harness, ch chan<- T, v T) {
+	h.tb.Helper()
+	if h.done == nil {
+		h.tb.Fatal("harness: event sent before Start")
+	}
+	select {
+	case ch <- v:
+	case <-h.done:
+		h.tb.Fatal("harness: event sent after serve stopped")
+	}
+}
+
+// baseConfig is the starting point of every harness test: primary on
+// eth0 and backup on wwan0, both dual-stack, in Group home. Change it
+// with plain Go before newHarness.
+func baseConfig() *config.Config {
+	probeCfg := func(v4, v6 string) config.Probe {
+		return config.Probe{
+			Method:             "icmp",
+			Targets:            config.Targets{V4: []string{v4}, V6: []string{v6}},
+			IntervalMs:         1000,
+			TimeoutMs:          1000,
+			WindowSize:         5,
+			Thresholds:         config.Thresholds{LossPctDown: 20, LossPctUp: 10, RttMsDown: 200, RttMsUp: 100},
+			Hysteresis:         config.Hysteresis{ConsecutiveUp: 1, ConsecutiveDown: 1},
+			FamilyHealthPolicy: "all",
+		}
+	}
+	return &config.Config{
+		Schema: config.SupportedSchema,
+		Wans: map[string]config.Wan{
+			"primary": {Name: "primary", Interface: "eth0", Probe: probeCfg("198.51.100.53", "2001:db8:53::1")},
+			"backup":  {Name: "backup", Interface: "wwan0", Probe: probeCfg("203.0.113.53", "2001:db8:53::2")},
+		},
+		Groups: map[string]selector.Group{
+			"home": {
+				Name:     "home",
+				Strategy: "primary-backup",
+				Table:    100,
+				Mark:     0x100,
+				Members: map[string]selector.Member{
+					"primary": {Wan: "primary", Priority: 1},
+					"backup":  {Wan: "backup", Priority: 2},
+				},
+			},
+		},
+	}
+}
+
+// healthy is a full Window that passes baseConfig's thresholds.
+func healthy(wan string, fam probe.Family) probe.ProbeResult {
+	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
+		RTTMicros: 10_000, WindowFilled: true,
+	}}
+}
+
+// lossy is a full Window in which every Sample was lost.
+func lossy(wan string, fam probe.Family) probe.ProbeResult {
+	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
+		LossRatio: 1, WindowFilled: true,
+	}}
+}
+
+// carrier reports iface's carrier and operstate both up or both down.
+func carrier(iface string, up bool) rtnl.LinkEvent {
+	if up {
+		return rtnl.LinkEvent{Name: iface, Carrier: rtnl.CarrierUp, Operstate: rtnl.OperstateUp}
+	}
+	return rtnl.LinkEvent{Name: iface, Carrier: rtnl.CarrierDown, Operstate: rtnl.OperstateDown}
+}
+
+// gateway reports a default route on iface via ip; an empty ip is a
+// scope-link route.
+func gateway(iface string, fam probe.Family, ip string) rtnl.RouteEvent {
+	return rtnl.RouteEvent{Op: rtnl.RouteEventAdd, Iface: iface, Family: rtnl.RouteFamily(fam), Gateway: net.ParseIP(ip)}
+}
+
+// gatewayGone reports that iface no longer has a default route.
+func gatewayGone(iface string, fam probe.Family) rtnl.RouteEvent {
+	return rtnl.RouteEvent{Op: rtnl.RouteEventDel, Iface: iface, Family: rtnl.RouteFamily(fam)}
+}
+
+// hookRecorder is the synchronous Hook sink of the harness. It records
+// `hook <event> <group> <old>→<new>` in the trace and keeps the full
+// Hook context. Like state.HookNotifier it rejects notifications after
+// Close, which it records marked as failed.
+type hookRecorder struct {
+	trace *trace
+
+	mu     sync.Mutex
+	hooks  []state.HookContext
+	closed bool
+}
+
+func (r *hookRecorder) Notify(c state.HookContext) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	line := fmt.Sprintf("hook %s %s %s→%s", c.Event, c.Group, c.WanOld, c.WanNew)
+	if r.closed {
+		r.trace.add(line + failedMark)
+		return false
+	}
+	c.Families = slices.Clone(c.Families)
+	r.hooks = append(r.hooks, c)
+	r.trace.add(line)
+	return true
+}
+
+func (r *hookRecorder) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.closed {
+		r.closed = true
+		r.trace.add("hooks closed")
+	}
+}
+
+func (r *hookRecorder) accepted() []state.HookContext {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.hooks)
+}

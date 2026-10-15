@@ -49,15 +49,21 @@ in
   };
 
   /*
-    Per-package coverage floors (AGENTS.md); `cmd/wanwatchd` is
-    exempt because the VM tier exercises it. Floors track measured
-    coverage: raise them as coverage improves, and lower one only
-    with a comment explaining the regression.
+    Per-package coverage floors (AGENTS.md). `cmd/wanwatchd` has the
+    lowest floor: its netlink kernel adapter and the run() wiring of
+    probers and subscribers need a real kernel, which only the VM tier
+    exercises. Its coverage also varies between 69.7% and 70.3%: the
+    shutdown tests reach eventLoop's cancelled-context returns only when
+    select picks the queued event over ctx.Done, so its floor truncates
+    the lowest measurement. Floors track measured coverage: raise them as
+    coverage improves, and lower one only with a comment explaining the
+    regression.
   */
   coverage = runGoCheck {
     name = "wanwatch-daemon-coverage";
     script = ''
       cat > coverage.thresholds <<'EOF'
+      cmd/wanwatchd:69
       internal/apply:90
       internal/config:100
       internal/decision:100
@@ -69,7 +75,7 @@ in
       internal/state:94
       EOF
 
-      go test -cover ./internal/... > coverage.out 2>&1 || {
+      go test -cover ./cmd/... ./internal/... > coverage.out 2>&1 || {
           cat coverage.out
           echo "coverage: go test failed" >&2
           exit 1
