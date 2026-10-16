@@ -9,7 +9,8 @@
   `self`: the flake itself, which only the integration entry point
   passes, for the suite that compares its outputs with the source;
   null otherwise.
-  `system`: the host platform of the evaluated NixOS systems.
+  `system`: the host platform of the NixOS systems that the
+  integration suites evaluate; null otherwise.
 
   Returns `{ fixtures; helpers; internal; lib; libnet; self; wanwatch; }`.
 */
@@ -17,7 +18,7 @@
   nixpkgs,
   libnet,
   self ? null,
-  system,
+  system ? null,
 }:
 let
   inherit (nixpkgs) lib;

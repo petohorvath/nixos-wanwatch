@@ -43,11 +43,9 @@
           # nftzones' own input that follows no root input.
           "nftzones/nftypes" = inputs.nftzones.inputs.nftypes;
         };
+        enableSystemAgnostic = false;
         tests = {
-          unit = import ../tests/unit {
-            inherit (inputs) libnet nixpkgs;
-            inherit system;
-          };
+          unit = import ../tests/unit { inherit (inputs) libnet nixpkgs; };
         }
         # The integration suites evaluate NixOS, which is Linux-only.
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {

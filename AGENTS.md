@@ -76,11 +76,13 @@ The flake has one nixpkgs input, pinned to the stable branch. To run a check aga
 
 Tests live under `tests/`, one directory per kind: `unit/` and `integration/` hold [nix-unit](https://github.com/nix-community/nix-unit) suites, `build/` the tests that run a real program in a derivation, and `vm/` the NixOS VM scenarios. Each kind's `default.nix` lists its tests by hand, so a new test file runs only once it is listed there. Unit suites mirror the source path they test (`lib/internal/config.nix` → `tests/unit/internal/config.nix`); every suite receives the `testContext` that `tests/test-context.nix` builds from source. Shared helpers live in `tests/helpers/` and shared data in `tests/fixtures/`.
 
-The `nix-unit` check runs the flake's `tests.systems.<system>` output in the sandbox, with every flake input passed as `--override-input`. For per-test results, run nix-unit on the output directly; a longer attribute path narrows the run to one suite, and `--override-input nixpkgs <flake-ref>` evaluates against another nixpkgs.
+The `nix-unit` check runs the flake's `tests.systems.<system>` output in the sandbox, with every flake input passed as `--override-input`. For per-test results, run nix-unit on the output directly; a longer attribute path narrows the run to one suite, `--attr <test>` narrows it to one test of that suite, and `--override-input nixpkgs <flake-ref>` evaluates against another nixpkgs. nix-unit treats the selected attribute as a suite, so a test's full attribute path does not select it.
 
 ```sh
 nix develop --command nix-unit --flake .#tests.systems.x86_64-linux.unit
 nix develop --command nix-unit --flake .#tests.systems.x86_64-linux.integration.nixos-module
+nix develop --command nix-unit --flake .#tests.systems.x86_64-linux.unit.internal.config \
+  --attr testSchemaVersion
 nix build .#checks.x86_64-linux.nix-unit
 nix build .#checks.x86_64-linux.vm-smoke
 nix build --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable \

@@ -5,7 +5,7 @@
 let
   runGoCheck = import ../helpers/go-check.nix { inherit pkgs; };
 in
-pkgs.linkFarm "wanwatch-build-daemon" {
+pkgs.linkFarm "wanwatch-daemon" {
   tests = runGoCheck {
     name = "wanwatch-daemon-tests";
     script = "go test -v ./...";

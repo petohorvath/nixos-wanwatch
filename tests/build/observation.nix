@@ -11,7 +11,7 @@ let
     ];
   };
 in
-pkgs.runCommand "wanwatch-observation-tests" { } ''
+pkgs.runCommand "wanwatch-observation" { } ''
   ${pkgs.python3}/bin/python3 -B -m unittest discover \
     -s ${observationDir} -p test_observation.py -v
   touch $out
