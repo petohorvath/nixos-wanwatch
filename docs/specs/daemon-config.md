@@ -157,7 +157,7 @@ Pre-release, `schemaVersion` and `SupportedSchema` stay at 1; the renderer and t
 The committed golden `daemon/internal/config/testdata/config.golden.json` pins the shape on both sides. The nix-unit test `internal.config.render.testMatchesGolden` checks that `config.render` produces it from the unit fixtures, and the daemon's config tests parse it and re-encode it to the same document. A change to the rendered shape, breaking or not, regenerates the golden in the same commit:
 
 ```sh
-nix eval --json .#tests.unit.internal.config.render.testMatchesGolden.expr \
+nix eval --impure --json -f tests/unit internal.config.render.testMatchesGolden.expr \
   | jq . > daemon/internal/config/testdata/config.golden.json
 ```
 

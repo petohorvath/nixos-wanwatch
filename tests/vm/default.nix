@@ -1,52 +1,28 @@
 /*
-  End-to-end scenarios in NixOS VMs, covering what evaluation cannot:
-  capabilities, hardening, netlink, and socket modes. Each scenario
-  receives the wanwatch module plus the extra modules and libraries it
-  takes.
-
-  `nftzones`: the nixos-nftzones flake, for the nftzones-integration
-  scenario.
-  `nixosModules`: the flake's NixOS modules.
-  `pkgs`: the package set the VMs build against.
-
-  Returns an attrset of VM test derivations, one per scenario.
+  The VM entry point: end-to-end scenarios in NixOS VMs, covering what
+  evaluation cannot: capabilities, hardening, netlink, and socket
+  modes. Each scenario is a NixOS test module that reaches the wanwatch
+  modules through `inputs.self`.
 */
-{
-  nftzones,
-  nixosModules,
-  pkgs,
-}:
+{ inputs, pkgs }:
 let
-  scenario =
-    name: extraArgs:
-    import (./. + "/${name}.nix") (
-      {
-        inherit pkgs;
-        nixosModule = nixosModules.default;
-      }
-      // extraArgs
-    );
+  testArgs = { inherit inputs pkgs; };
 in
 {
-  smoke = scenario "smoke" { };
-  failover-v4 = scenario "failover-v4" { };
-  failover-v6 = scenario "failover-v6" { };
-  failover-dual-stack = scenario "failover-dual-stack" { };
-  failover-probe-loss = scenario "failover-probe-loss" { };
-  failover-probe-loss-v6 = scenario "failover-probe-loss-v6" { };
-  cold-start = scenario "cold-start" { };
-  recovery = scenario "recovery" { };
-  recovery-v6 = scenario "recovery-v6" { };
-  hooks = scenario "hooks" { };
-  metrics = scenario "metrics" {
-    telegrafModule = nixosModules.telegraf;
-  };
-  family-health-policy = scenario "family-health-policy" { };
-  gateway-discovery = scenario "gateway-discovery" { };
-  gateway-discovery-v6 = scenario "gateway-discovery-v6" { };
-  nftables-steering = scenario "nftables-steering" { };
-  nftzones-integration = scenario "nftzones-integration" {
-    nftzonesModule = nftzones.nixosModules.default;
-    nftypes = nftzones.inputs.nftypes.lib;
-  };
+  cold-start = import ./cold-start.nix testArgs;
+  failover-dual-stack = import ./failover-dual-stack.nix testArgs;
+  failover-probe-loss = import ./failover-probe-loss.nix testArgs;
+  failover-probe-loss-v6 = import ./failover-probe-loss-v6.nix testArgs;
+  failover-v4 = import ./failover-v4.nix testArgs;
+  failover-v6 = import ./failover-v6.nix testArgs;
+  family-health-policy = import ./family-health-policy.nix testArgs;
+  gateway-discovery = import ./gateway-discovery.nix testArgs;
+  gateway-discovery-v6 = import ./gateway-discovery-v6.nix testArgs;
+  hooks = import ./hooks.nix testArgs;
+  metrics = import ./metrics.nix testArgs;
+  nftables-steering = import ./nftables-steering.nix testArgs;
+  nftzones-integration = import ./nftzones-integration.nix testArgs;
+  recovery = import ./recovery.nix testArgs;
+  recovery-v6 = import ./recovery-v6.nix testArgs;
+  smoke = import ./smoke.nix testArgs;
 }

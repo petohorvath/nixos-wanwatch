@@ -4,18 +4,13 @@
   /run/wanwatch/, and the fwmark rules land in both family RIBs. No
   probe target is reachable; the failover-* scenarios cover failover.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-smoke";
-
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
 
       # Dummy interfaces stand in for real WANs so probe sockets can
       # bind via SO_BINDTODEVICE and rtnetlink reports a real Name.

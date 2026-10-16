@@ -4,24 +4,18 @@
   contain wanwatch_* series, and the telegraf user must belong to the
   wanwatch group.
 */
-{
-  pkgs,
-  nixosModule,
-  telegrafModule,
-}:
+{ inputs, ... }:
 
 let
   scrapeFile = "/var/lib/telegraf/scrape.log";
 in
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-metrics";
-
+{
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
       imports = [
-        nixosModule
-        telegrafModule
+        inputs.self.nixosModules.default
+        inputs.self.nixosModules.telegraf
       ];
 
       boot.kernelModules = [ "dummy" ];

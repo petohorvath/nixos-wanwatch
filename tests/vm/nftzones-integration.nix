@@ -5,26 +5,24 @@
   must install the fwmark rules and the Group's default route.
   Single node; failover-* covers route rewrites.
 */
-{
-  pkgs,
-  nixosModule,
-  nftzonesModule,
-  nftypes,
-}:
+{ inputs, pkgs }:
 
 let
-  inherit (nftypes.dsl) mangle;
-  inherit (nftypes.dsl.fields) meta;
+  inherit (inputs.nftzones.inputs.nftypes.lib.dsl) mangle;
+  inherit (inputs.nftzones.inputs.nftypes.lib.dsl.fields) meta;
 in
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-nftzones-integration";
-
+{
   nodes.router =
-    { config, lib, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     {
       imports = [
-        nixosModule
-        nftzonesModule
+        inputs.self.nixosModules.default
+        inputs.nftzones.nixosModules.default
       ];
 
       boot.kernelModules = [ "dummy" ];

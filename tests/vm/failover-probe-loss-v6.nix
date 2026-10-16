@@ -21,14 +21,9 @@
        over; restoring it recovers.
     F  A daemon restart keeps the primary active on carrier.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-failover-probe-loss-v6";
-
   nodes = {
     isp1 =
       { lib, ... }:
@@ -44,9 +39,9 @@ pkgs.testers.runNixOSTest {
       };
 
     router =
-      { lib, ... }:
+      { lib, pkgs, ... }:
       {
-        imports = [ nixosModule ];
+        imports = [ inputs.self.nixosModules.default ];
         virtualisation.vlans = [
           1
           2

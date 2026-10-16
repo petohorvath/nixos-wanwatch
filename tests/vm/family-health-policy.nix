@@ -4,14 +4,9 @@
   report v4 healthy, v6 unhealthy, and the WAN unhealthy under
   `familyHealthPolicy = "all"`.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-family-health-policy";
-
   # The test driver numbers nodes alphabetically: isp is 192.168.1.1
   # and router is 192.168.1.2. pointToPoint needs no gateway.
   nodes.isp =
@@ -22,9 +17,9 @@ pkgs.testers.runNixOSTest {
     };
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
       virtualisation.vlans = [ 1 ];
       networking.firewall.enable = lib.mkForce false;
 

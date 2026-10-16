@@ -3,26 +3,21 @@
   capturing Hook receives the docs/specs/daemon-state.md WANWATCH_* environment. Both
   WANs are pointToPoint, so the gateway variables are empty.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-let
-  # Hooks run as the wanwatch user, which can write only under
-  # /run/wanwatch.
-  captureHook = pkgs.writeShellScript "capture-env.sh" ''
-    set -eu
-    env | grep '^WANWATCH_' | sort > /run/wanwatch/last-hook.env
-  '';
-in
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-hooks";
-
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
+    let
+      # Hooks run as the wanwatch user, which can write only under
+      # /run/wanwatch.
+      captureHook = pkgs.writeShellScript "capture-env.sh" ''
+        set -eu
+        env | grep '^WANWATCH_' | sort > /run/wanwatch/last-hook.env
+      '';
+    in
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
 
       boot.kernelModules = [ "dummy" ];
 

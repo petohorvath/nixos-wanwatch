@@ -11,14 +11,9 @@
   Both WANs are pointToPoint. A 200 ms interval and
   consecutive{Up,Down} = 2 keep each transition under a second.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-failover-probe-loss";
-
   /*
     The test driver numbers nodes globally in alphabetical order, so
     each node keeps its last octet on every VLAN: isp1 is 192.168.1.1,
@@ -40,9 +35,9 @@ pkgs.testers.runNixOSTest {
       };
 
     router =
-      { lib, ... }:
+      { lib, pkgs, ... }:
       {
-        imports = [ nixosModule ];
+        imports = [ inputs.self.nixosModules.default ];
         virtualisation.vlans = [
           1
           2

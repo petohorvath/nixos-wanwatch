@@ -44,7 +44,7 @@ Run the observer's contract tests without KVM:
 
 ```sh
 python3 -B -m unittest discover -s tests/vm -p test_observation.py -v
-nix build .#checks.x86_64-linux.observation
+nix build .#checks.x86_64-linux.build-observation
 ```
 
 These checks also run in CI and `nix flake check`. The real `vm-*` scenarios

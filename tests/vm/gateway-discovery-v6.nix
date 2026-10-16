@@ -4,14 +4,9 @@
   real packet path. The test driver assigns only v4 addresses, so
   both nodes declare their fd00:1::/64 addresses through networkd.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-gateway-discovery-v6";
-
   # isp (fd00:1::1) is the next hop that router (fd00:1::2) learns.
   nodes.isp =
     { lib, ... }:
@@ -28,9 +23,9 @@ pkgs.testers.runNixOSTest {
     };
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
       virtualisation.vlans = [ 1 ];
       networking.firewall.enable = lib.mkForce false;
 

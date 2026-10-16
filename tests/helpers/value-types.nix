@@ -1,8 +1,8 @@
 /*
-  Test helpers shared by the unit suites; `default.nix` passes them to
-  every suite as `helpers`. The `…Tests` helpers turn a case table into
-  nix-unit tests whose results list the misjudged cases, so a failure
-  names them.
+  Helpers that test the value types and option types;
+  `test-context.nix` passes them to every suite in `helpers`. The
+  `…Tests` helpers turn a case table into nix-unit tests whose results
+  list the misjudged cases, so a failure names them.
 */
 { lib }:
 let

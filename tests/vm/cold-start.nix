@@ -9,14 +9,9 @@
   consecutiveUp > 1 is dropped and re-selected on every daemon start:
   a spurious health-reason down + up Decision pair.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-cold-start";
-
   nodes.isp =
     { lib, ... }:
     {
@@ -25,9 +20,9 @@ pkgs.testers.runNixOSTest {
     };
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
       virtualisation.vlans = [ 1 ];
       networking.firewall.enable = lib.mkForce false;
 

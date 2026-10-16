@@ -51,7 +51,8 @@ let
     `config.json` agree on one document. Regenerate it after a
     deliberate change to the rendered shape:
 
-      nix eval --json .#tests.unit.internal.config.render.testMatchesGolden.expr \
+      nix eval --impure --json -f tests/unit \
+        internal.config.render.testMatchesGolden.expr \
         | jq . > daemon/internal/config/testdata/config.golden.json
   */
   golden = builtins.fromJSON (

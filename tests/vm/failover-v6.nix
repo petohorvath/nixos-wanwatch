@@ -3,18 +3,13 @@
   topology, same carrier-driven cold-start path; the assertions
   walk the v6 RIB (`ip -6 route show table <T>`) instead of v4.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-failover-v6";
-
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
 
       boot.kernelModules = [ "dummy" ];
 

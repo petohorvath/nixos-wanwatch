@@ -1,34 +1,12 @@
-/*
-  The dev partition: the formatter, development shells, checks, and the
-  nix-unit `tests` output. The root flake publishes these outputs from
-  this partition.
-*/
+# The dev partition: the formatter, development shells, and checks. The
+# root flake publishes these outputs from this partition.
 {
-  config,
   inputs,
   lib,
   self,
   ...
 }:
 {
-  # nix-unit tests: `nix-unit --flake .#tests`. The `unit` and
-  # `integration` checks run them in the sandbox.
-  flake.tests = {
-    unit = import ../tests/unit {
-      inherit (inputs.nixpkgs) lib;
-      libnet = inputs.libnet.lib.withLib inputs.nixpkgs.lib;
-      wanwatch = self.lib;
-    };
-    integration = lib.genAttrs (lib.filter (lib.hasSuffix "-linux") config.systems) (
-      system:
-      import ../tests/integration {
-        inherit system;
-        inherit (inputs.nixpkgs.lib) nixosSystem;
-        inherit (self) nixosModules;
-      }
-    );
-  };
-
   perSystem =
     {
       config,

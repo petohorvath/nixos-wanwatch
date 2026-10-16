@@ -37,7 +37,7 @@ Use the [`GLOSSARY.md`](./GLOSSARY.md) terms exactly in code, comments, commit m
 
 ## Development environment
 
-The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, formatter, and nix-unit `tests` output, and `tests/default.nix` assembles the check implementations ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The daemon and Linux-specific checks exist only on Linux systems.
+The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, and formatter ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). `tests/default.nix` assembles the test entries as the devnix-labs test standard lays them out ([ADR-0015](./docs/adr/0015-adopt-test-standard.md)), and `dev/checks.nix` adds the formatting, lint, and package entries. `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The daemon and Linux-specific checks exist only on Linux systems.
 
 Override sibling flakes with absolute paths:
 
@@ -64,23 +64,24 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 
 | Check | Covers |
 |---|---|
-| `format` | treefmt formatting drift |
-| `lint` | statix and deadnix over the repository |
+| `formatting` | treefmt formatting drift |
+| `lint` | statix and deadnix over the repository, and the `.golangci.yml` linters over the daemon |
 | `unit` | Pure-Nix library tests, including the value-type skeleton tests |
-| `integration` | Module evaluation, rendered config, Telegraf wiring, and expected rejections |
-| `daemon` | All Go tests in a hermetic, network-disabled build |
-| `coverage` | Per-package Go coverage floors defined in `tests/daemon.nix` |
-| `race` | All Go tests with the race detector |
-| `golangci-lint` | The `.golangci.yml` linters over the daemon |
-| `package` | The production daemon derivation |
+| `integration` | NixOS module evaluation, rendered config, Telegraf wiring, expected rejections, and the flake's outputs |
+| `build-daemon` | All Go tests in a hermetic, network-disabled build (`tests`), the per-package coverage floors defined in `tests/build/daemon.nix` (`coverage`), and all Go tests with the race detector (`race`) |
+| `build-observation` | The VM observation helpers' contract tests, without a VM |
+| `package-wanwatchd` | The production daemon derivation |
 | `vm-<scenario>` | NixOS VM scenarios (Linux with KVM) |
 
 The flake has one nixpkgs input, pinned to the stable branch. To run a check against nixos-unstable, override that input; `--override-input` leaves `flake.lock` unchanged ([ADR-0012](./docs/adr/0012-single-nixpkgs-input.md)).
 
-The `unit` and `integration` checks run the flake's `tests` output with [nix-unit](https://github.com/nix-community/nix-unit) in the sandbox. For per-test results, run nix-unit directly; `nix-unit --flake .#tests.unit` narrows the run.
+Tests live under `tests/`, one directory per kind: `unit/` and `integration/` hold [nix-unit](https://github.com/nix-community/nix-unit) suites, `build/` the tests that run a real program in a derivation, and `vm/` the NixOS VM scenarios. Each kind's `default.nix` lists its tests by hand, so a new test file runs only once it is listed there. Unit suites mirror the source path they test (`lib/internal/config.nix` → `tests/unit/internal/config.nix`); every suite receives the `testContext` that `tests/test-context.nix` builds from source. Shared helpers live in `tests/helpers/` and shared data in `tests/fixtures/`.
+
+The `unit` and `integration` checks run their entry points with nix-unit in the sandbox. For per-test results, run nix-unit on an entry point directly; `--attr <suite>` narrows the run, and `--arg nixpkgs …` evaluates against another nixpkgs.
 
 ```sh
-nix develop --command nix-unit --flake .#tests
+nix develop --command nix-unit tests/unit
+nix develop --command nix-unit tests/integration --attr nixos-module
 nix build .#checks.x86_64-linux.unit
 nix build .#checks.x86_64-linux.vm-smoke
 nix build --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable \
@@ -105,7 +106,7 @@ nix run github:petohorvath/nixos-project-policy/v0.6 -- test . --nixpkgs unstabl
 
 Every Nix value type (`wan`, `probe`, `group`, `member`, `global`) implements the `make`, `tryMake`, and `toJSONValue` skeleton that `tests/unit/skeleton.nix` asserts. Pure-function modules such as `selector` and `config` use purpose-specific APIs.
 
-Nix tests are nix-unit attrsets of `testFoo = { expr; expected; }` (or `expectedError`), nested by module. Shared inputs and the valid and invalid cases of each value domain live in `tests/unit/fixtures.nix`; reuse a case table wherever an option type and a validator check the same domain, so the two layers stay in agreement.
+Nix tests are nix-unit attrsets of `testFoo = { expr; expected; }` (or `expectedError`), nested by module. Shared inputs and the valid and invalid cases of each value domain live in `tests/fixtures/values.nix`; reuse a case table wherever an option type and a validator check the same domain, so the two layers stay in agreement.
 
 Nix code uses current APIs and explicit dependencies: `inherit (x) y` rather than file-scope `with`, `lib.types.oneOf` rather than `lib.types.either`, and never the removed `lib.types.uniq`. Every NixOS option has a type, a description, and a default or example.
 

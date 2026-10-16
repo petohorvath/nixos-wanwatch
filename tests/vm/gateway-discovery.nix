@@ -4,14 +4,9 @@
   publish it in State, and write a `via` default route into the
   Group's table.
 */
+{ inputs, pkgs }:
+
 {
-  pkgs,
-  nixosModule,
-}:
-
-pkgs.testers.runNixOSTest {
-  name = "wanwatch-gateway-discovery";
-
   # isp (192.168.1.1) is the next hop that router (192.168.1.2) learns.
   nodes.isp =
     { lib, ... }:
@@ -21,9 +16,9 @@ pkgs.testers.runNixOSTest {
     };
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
       virtualisation.vlans = [ 1 ];
       networking.firewall.enable = lib.mkForce false;
 
