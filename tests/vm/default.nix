@@ -1,7 +1,7 @@
 /*
   The VM entry point: end-to-end scenarios in NixOS VMs, covering what
   evaluation cannot: capabilities, hardening, netlink, and socket
-  modes. Each scenario is a NixOS test module that reaches the wanwatch
+  modes. Each scenario calls `runNixOSTest` and reaches the wanwatch
   modules through `inputs.self`.
 */
 { inputs, pkgs }:

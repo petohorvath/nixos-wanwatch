@@ -11,7 +11,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-cold-start";
+
   nodes.isp =
     { lib, ... }:
     {

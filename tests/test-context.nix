@@ -6,16 +6,17 @@
 
   `nixpkgs`: the nixpkgs flake.
   `libnet`: the nix-libnet flake.
-  `flake-parts`: the flake-parts flake, which only the integration
-  entry point passes; null otherwise.
+  `self`: the flake itself, which only the integration entry point
+  passes, for the suite that compares its outputs with the source;
+  null otherwise.
   `system`: the host platform of the evaluated NixOS systems.
 
-  Returns `{ fixtures; helpers; internal; lib; libnet; wanwatch; }`.
+  Returns `{ fixtures; helpers; internal; lib; libnet; self; wanwatch; }`.
 */
 {
   nixpkgs,
   libnet,
-  flake-parts ? null,
+  self ? null,
   system,
 }:
 let
@@ -34,20 +35,9 @@ let
     default = importModule ../nixos/module.nix;
     telegraf = importModule ../nixos/telegraf.nix;
   };
-
-  # The flake's outputs as consumers see them, evaluated from
-  # `flake.nix` with the given inputs.
-  flakeOutputs =
-    if flake-parts == null then
-      null
-    else
-      import ./helpers/evaluation-inputs.nix {
-        path = ../.;
-        inputs = { inherit flake-parts libnet nixpkgs; };
-      };
 in
 {
-  inherit lib wanwatch;
+  inherit lib self wanwatch;
   libnet = libnetWithLib;
   # The modules below the public API, such as `primitives`.
   internal = import ../lib/internal {
@@ -59,8 +49,5 @@ in
   };
   helpers =
     import ./helpers/value-types.nix { inherit lib; }
-    // import ./helpers/nixos.nix { inherit nixosModules nixpkgs system; }
-    // {
-      inherit flakeOutputs;
-    };
+    // import ./helpers/nixos.nix { inherit nixosModules nixpkgs system; };
 }

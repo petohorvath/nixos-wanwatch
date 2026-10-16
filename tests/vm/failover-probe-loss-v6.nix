@@ -23,7 +23,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-failover-probe-loss-v6";
+
   nodes = {
     isp1 =
       { lib, ... }:

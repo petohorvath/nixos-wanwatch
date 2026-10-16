@@ -6,7 +6,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-smoke";
+
   nodes.router =
     { lib, pkgs, ... }:
     {

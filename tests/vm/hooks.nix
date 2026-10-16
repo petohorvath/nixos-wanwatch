@@ -5,7 +5,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-hooks";
+
   nodes.router =
     { lib, pkgs, ... }:
     let

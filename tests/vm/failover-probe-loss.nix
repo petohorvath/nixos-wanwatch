@@ -13,7 +13,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-failover-probe-loss";
+
   /*
     The test driver numbers nodes globally in alphabetical order, so
     each node keeps its last octet on every VLAN: isp1 is 192.168.1.1,

@@ -9,7 +9,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-failover-v4";
+
   nodes.router =
     { lib, pkgs, ... }:
     {

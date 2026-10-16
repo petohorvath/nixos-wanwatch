@@ -5,7 +5,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-recovery";
+
   nodes.router =
     { lib, pkgs, ... }:
     {

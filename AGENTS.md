@@ -37,13 +37,13 @@ Use the [`GLOSSARY.md`](./GLOSSARY.md) terms exactly in code, comments, commit m
 
 ## Development environment
 
-The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, and formatter ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). `tests/default.nix` assembles the test entries as the devnix-labs test standard lays them out ([ADR-0015](./docs/adr/0015-adopt-test-standard.md)), and `dev/checks.nix` adds the formatting, lint, and package entries. `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The daemon and Linux-specific checks exist only on Linux systems.
+The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, formatter, and the nix-unit `tests` output ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). The tests follow the devnix-labs test standard ([ADR-0015](./docs/adr/0015-adopt-test-standard.md)): `dev/default.nix` runs the nix-unit suites through nix-unit's flake-parts module, `tests/default.nix` assembles the build and VM entries, and `dev/checks.nix` adds the formatting, lint, and package entries. `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The daemon and Linux-specific checks exist only on Linux systems.
 
 Override sibling flakes with absolute paths:
 
 ```sh
 nix build --override-input libnet path:/absolute/path/to/nix-libnet \
-  .#checks.x86_64-linux.unit
+  .#checks.x86_64-linux.nix-unit
 ```
 
 ## Formatting and linting
@@ -66,8 +66,7 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 |---|---|
 | `formatting` | treefmt formatting drift |
 | `lint` | statix and deadnix over the repository, and the `.golangci.yml` linters over the daemon |
-| `unit` | Pure-Nix library tests, including the value-type skeleton tests |
-| `integration` | NixOS module evaluation, rendered config, Telegraf wiring, expected rejections, and the flake's outputs |
+| `nix-unit` | The nix-unit suites: `unit` (pure-Nix library tests, including the value-type skeleton tests) and, on Linux, `integration` (NixOS module evaluation, rendered config, Telegraf wiring, expected rejections, and the flake's outputs) |
 | `build-daemon` | All Go tests in a hermetic, network-disabled build (`tests`), the per-package coverage floors defined in `tests/build/daemon.nix` (`coverage`), and all Go tests with the race detector (`race`) |
 | `build-observation` | The VM observation helpers' contract tests, without a VM |
 | `package-wanwatchd` | The production daemon derivation |
@@ -77,12 +76,12 @@ The flake has one nixpkgs input, pinned to the stable branch. To run a check aga
 
 Tests live under `tests/`, one directory per kind: `unit/` and `integration/` hold [nix-unit](https://github.com/nix-community/nix-unit) suites, `build/` the tests that run a real program in a derivation, and `vm/` the NixOS VM scenarios. Each kind's `default.nix` lists its tests by hand, so a new test file runs only once it is listed there. Unit suites mirror the source path they test (`lib/internal/config.nix` → `tests/unit/internal/config.nix`); every suite receives the `testContext` that `tests/test-context.nix` builds from source. Shared helpers live in `tests/helpers/` and shared data in `tests/fixtures/`.
 
-The `unit` and `integration` checks run their entry points with nix-unit in the sandbox. For per-test results, run nix-unit on an entry point directly; `--attr <suite>` narrows the run, and `--arg nixpkgs …` evaluates against another nixpkgs.
+The `nix-unit` check runs the flake's `tests.systems.<system>` output in the sandbox, with every flake input passed as `--override-input`. For per-test results, run nix-unit on the output directly; a longer attribute path narrows the run to one suite, and `--override-input nixpkgs <flake-ref>` evaluates against another nixpkgs.
 
 ```sh
-nix develop --command nix-unit tests/unit
-nix develop --command nix-unit tests/integration --attr nixos-module
-nix build .#checks.x86_64-linux.unit
+nix develop --command nix-unit --flake .#tests.systems.x86_64-linux.unit
+nix develop --command nix-unit --flake .#tests.systems.x86_64-linux.integration.nixos-module
+nix build .#checks.x86_64-linux.nix-unit
 nix build .#checks.x86_64-linux.vm-smoke
 nix build --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable \
   .#checks.x86_64-linux.vm-smoke

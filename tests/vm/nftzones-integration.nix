@@ -11,7 +11,9 @@ let
   inherit (inputs.nftzones.inputs.nftypes.lib.dsl) mangle;
   inherit (inputs.nftzones.inputs.nftypes.lib.dsl.fields) meta;
 in
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-nftzones-integration";
+
   nodes.router =
     {
       config,

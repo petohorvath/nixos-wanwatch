@@ -4,7 +4,7 @@
 
     primaryAndBackup — a primary and a backup WAN in one Group.
     oneWan           — one WAN in one Group, faulty only in the given
-                       probe targets or Members.
+                       Targets or Members.
 */
 {
   primaryAndBackup = {

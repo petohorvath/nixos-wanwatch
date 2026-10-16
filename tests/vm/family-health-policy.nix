@@ -6,7 +6,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-family-health-policy";
+
   # The test driver numbers nodes alphabetically: isp is 192.168.1.1
   # and router is 192.168.1.2. pointToPoint needs no gateway.
   nodes.isp =

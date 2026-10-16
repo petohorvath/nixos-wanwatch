@@ -4,12 +4,14 @@
   contain wanwatch_* series, and the telegraf user must belong to the
   wanwatch group.
 */
-{ inputs, ... }:
+{ inputs, pkgs }:
 
 let
   scrapeFile = "/var/lib/telegraf/scrape.log";
 in
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-metrics";
+
   nodes.router =
     { lib, pkgs, ... }:
     {

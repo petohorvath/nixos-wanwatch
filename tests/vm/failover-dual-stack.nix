@@ -6,7 +6,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-failover-dual-stack";
+
   nodes.router =
     { lib, pkgs, ... }:
     {

@@ -1,7 +1,8 @@
 /*
-  The flake's checks for one system: the test entries from `tests/`,
-  plus the formatting, lint, and package entries. golangci-lint and the
-  package exist only on Linux, like the daemon.
+  The flake's checks for one system: the build and VM entries from
+  `tests/`, plus the formatting, lint, and package entries. The nix-unit
+  module adds the `nix-unit` entry beside them. The test entries,
+  golangci-lint, and the package exist only on Linux, like the daemon.
 
   `inputs`: the flake inputs, including `self`.
   `packages`: the flake's packages for this system.
@@ -20,8 +21,9 @@ let
   inherit (pkgs) lib;
   inherit (pkgs.stdenv.hostPlatform) isLinux;
   runGoCheck = import ../tests/helpers/go-check.nix { inherit pkgs; };
+  testEntries = lib.optionalAttrs isLinux (import ../tests { inherit inputs pkgs; });
 in
-lib.attrsets.unionOfDisjoint (import ../tests { inherit inputs pkgs; }) (
+lib.attrsets.unionOfDisjoint testEntries (
   {
     formatting = treefmt.config.build.check inputs.self;
 

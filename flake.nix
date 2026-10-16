@@ -46,6 +46,18 @@
 
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Runs the nix-unit suites through its flake-parts module. Its
+    # nixpkgs follows the root input, and the dev partition takes the
+    # nix-unit package from nixpkgs.
+    nix-unit = {
+      url = "github:nix-community/nix-unit";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        treefmt-nix.follows = "";
+        nix-github-actions.follows = "";
+      };
+    };
   };
 
   outputs =
@@ -74,6 +86,7 @@
         checks = "dev";
         devShells = "dev";
         formatter = "dev";
+        tests = "dev";
       };
 
       perSystem =

@@ -6,7 +6,9 @@
 */
 { inputs, pkgs }:
 
-{
+pkgs.testers.runNixOSTest {
+  name = "wanwatch-gateway-discovery";
+
   # isp (192.168.1.1) is the next hop that router (192.168.1.2) learns.
   nodes.isp =
     { lib, ... }:

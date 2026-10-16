@@ -1,11 +1,11 @@
 # The daemon's Go tests, coverage floors, and race detector, run
-# hermetically against the vendored modules. The Go test files live
-# beside the Go code in `daemon/`.
+# hermetically against the vendored modules and combined into one
+# entry. The Go test files live beside the Go code in `daemon/`.
 { pkgs, ... }:
 let
   runGoCheck = import ../helpers/go-check.nix { inherit pkgs; };
 in
-{
+pkgs.linkFarm "wanwatch-build-daemon" {
   tests = runGoCheck {
     name = "wanwatch-daemon-tests";
     script = "go test -v ./...";

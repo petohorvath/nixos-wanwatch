@@ -1,17 +1,15 @@
-/*
-  The flake's public outputs, evaluated through flake-parts as
-  consumers see them, expose the same code that `test-context.nix`
-  imports from source, so the other suites test what the flake
-  publishes.
-*/
+# The flake (`self`) exposes the same code that `test-context.nix`
+# imports from source, so the other suites test what the flake
+# publishes.
 {
   fixtures,
   helpers,
+  self,
   wanwatch,
   ...
 }:
 let
-  inherit (helpers) evalNixosWith flakeOutputs renderConfig;
+  inherit (helpers) evalNixosWith renderConfig;
 
   # The config rendered from the shared declaration, with the
   # `evalNixosWith` arguments given.
@@ -29,21 +27,22 @@ let
       }
     ]).services.telegraf.extraConfig.inputs.prometheus;
 
-  fromFlake.wanwatchModules = flakeOutputs.nixosModules;
+  # `evalNixosWith` arguments that evaluate the flake's modules.
+  flakeModulesArgs.wanwatchModules = self.nixosModules;
 in
 {
   testLibExports = {
-    expr = builtins.attrNames flakeOutputs.lib;
+    expr = builtins.attrNames self.lib;
     expected = builtins.attrNames wanwatch;
   };
 
   testLibVersion = {
-    expr = flakeOutputs.lib.version;
+    expr = self.lib.version;
     expected = wanwatch.version;
   };
 
   testNixosModules = {
-    expr = builtins.attrNames flakeOutputs.nixosModules;
+    expr = builtins.attrNames self.nixosModules;
     expected = [
       "default"
       "telegraf"
@@ -52,21 +51,21 @@ in
   };
 
   testDefaultModuleRendersLikeSource = {
-    expr = renderWith fromFlake;
+    expr = renderWith flakeModulesArgs;
     expected = renderWith { };
   };
 
   testWanwatchModuleIsDefault = {
     expr = renderWith {
-      wanwatchModules = flakeOutputs.nixosModules // {
-        default = flakeOutputs.nixosModules.wanwatch;
+      wanwatchModules = self.nixosModules // {
+        default = self.nixosModules.wanwatch;
       };
     };
     expected = renderWith { };
   };
 
   testTelegrafModuleConfiguresLikeSource = {
-    expr = scrapeInputWith fromFlake;
+    expr = scrapeInputWith flakeModulesArgs;
     expected = scrapeInputWith { };
   };
 }

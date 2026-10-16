@@ -1,34 +1,21 @@
 /*
   The integration entry point: nix-unit suites that evaluate the
-  wanwatch NixOS modules in NixOS systems, and the flake's outputs
-  through flake-parts, without a VM or kernel. Every argument defaults
-  to the root flake's locked input, so `nix-unit tests/integration`
-  needs no arguments.
+  wanwatch NixOS modules in NixOS systems, and the flake's own outputs,
+  without a VM or kernel. `dev/default.nix` passes the flake's inputs,
+  the flake itself as `self`, and the system.
 */
-let
-  rootInputs = (builtins.getFlake (toString ../..)).inputs;
-  rebuild = import ../helpers/evaluation-inputs.nix;
-in
 {
-  nixpkgs ? rootInputs.nixpkgs,
-  # flake-parts and libnet follow nixpkgs, so rebuild them against the
-  # selected one.
-  flake-parts ? rebuild {
-    path = rootInputs.flake-parts.outPath;
-    inputs.nixpkgs-lib = nixpkgs;
-  },
-  libnet ? rebuild {
-    path = rootInputs.libnet.outPath;
-    inputs = { inherit flake-parts nixpkgs; };
-  },
-  system ? builtins.currentSystem,
+  libnet,
+  nixpkgs,
+  self,
+  system,
 }:
 let
   testContext = import ../test-context.nix {
     inherit
-      flake-parts
       libnet
       nixpkgs
+      self
       system
       ;
   };

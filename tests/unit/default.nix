@@ -1,24 +1,10 @@
 # The unit entry point: nix-unit suites that evaluate the wanwatch
-# library and its option types. Every argument defaults to the root
-# flake's locked input, so `nix-unit tests/unit` needs no arguments.
-let
-  rootInputs = (builtins.getFlake (toString ../..)).inputs;
-  rebuild = import ../helpers/evaluation-inputs.nix;
-in
+# library and its option types. `dev/default.nix` passes the flake's
+# inputs and the system.
 {
-  nixpkgs ? rootInputs.nixpkgs,
-  # libnet follows nixpkgs, so rebuild it against the selected one.
-  libnet ? rebuild {
-    path = rootInputs.libnet.outPath;
-    inputs = {
-      inherit nixpkgs;
-      flake-parts = rebuild {
-        path = rootInputs.flake-parts.outPath;
-        inputs.nixpkgs-lib = nixpkgs;
-      };
-    };
-  },
-  system ? builtins.currentSystem,
+  libnet,
+  nixpkgs,
+  system,
 }:
 let
   testContext = import ../test-context.nix { inherit libnet nixpkgs system; };
