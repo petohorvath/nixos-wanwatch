@@ -1,12 +1,7 @@
 # The dev partition: the formatter, development shells, checks, and the
 # nix-unit `tests` output. The root flake publishes these outputs from
 # this partition.
-{
-  inputs,
-  lib,
-  self,
-  ...
-}:
+{ inputs, self, ... }:
 {
   imports = [ inputs.nix-unit.modules.flake.default ];
 
@@ -25,8 +20,6 @@
 
       devShells = {
         default = pkgs.callPackage ./shell.nix { inherit (config) formatter; };
-      }
-      // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
         review = pkgs.callPackage ./review-shell.nix { };
       };
 
@@ -46,9 +39,6 @@
         enableSystemAgnostic = false;
         tests = {
           unit = import ../tests/unit { inherit (inputs) libnet nixpkgs; };
-        }
-        # The integration suites evaluate NixOS, which is Linux-only.
-        // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           integration = import ../tests/integration {
             inherit (inputs) libnet nixpkgs self;
             inherit system;

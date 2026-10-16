@@ -1,6 +1,5 @@
 # The build and VM entries for one system; `dev/checks.nix` adds them
-# to the checks on Linux only, because the daemon and the VMs are
-# Linux-only.
+# to the checks.
 { inputs, pkgs }:
 let
   inherit (pkgs) lib;

@@ -1,8 +1,7 @@
 /*
   The flake's checks for one system: the build and VM entries from
   `tests/`, plus the formatting, lint, and package entries. The nix-unit
-  module adds the `nix-unit` entry beside them. The test entries,
-  golangci-lint, and the package exist only on Linux, like the daemon.
+  module adds the `nix-unit` entry beside them.
 
   `inputs`: the flake inputs, including `self`.
   `packages`: the flake's packages for this system.
@@ -19,49 +18,41 @@
 }:
 let
   inherit (pkgs) lib;
-  inherit (pkgs.stdenv.hostPlatform) isLinux;
   runGoCheck = import ../tests/helpers/go-check.nix { inherit pkgs; };
-  testEntries = lib.optionalAttrs isLinux (import ../tests { inherit inputs pkgs; });
 in
-lib.attrsets.unionOfDisjoint testEntries (
-  {
-    formatting = treefmt.config.build.check inputs.self;
+lib.attrsets.unionOfDisjoint (import ../tests { inherit inputs pkgs; }) {
+  formatting = treefmt.config.build.check inputs.self;
 
-    lint = pkgs.linkFarm "wanwatch-lint" (
-      {
-        # statix and deadnix scan the whole repository.
-        nix =
-          pkgs.runCommand "wanwatch-lint-nix"
-            {
-              nativeBuildInputs = [
-                pkgs.deadnix
-                pkgs.statix
-              ];
-            }
-            ''
-              cd ${inputs.self}
-              statix check .
-              deadnix --fail .
-              touch $out
-            '';
-      }
-      // lib.optionalAttrs isLinux {
-        # The `.golangci.yml` linters, govet included. The config lives
-        # at the repository root, outside the copied `daemon/` source.
-        golangci-lint = runGoCheck {
-          name = "wanwatch-lint-golangci";
-          script = ''
-            export GOLANGCI_LINT_CACHE=$TMPDIR/golangci-lint
-            ${lib.getExe pkgs.golangci-lint} run \
-              --config ${../.golangci.yml} ./...
-          '';
-        };
-      }
-    );
-  }
-  // lib.optionalAttrs isLinux {
-    # Catches packaging regressions, such as a file missing from the
-    # fileset, in `nix flake check`.
-    package-wanwatchd = packages.wanwatchd;
-  }
-)
+  lint = pkgs.linkFarm "wanwatch-lint" {
+    # statix and deadnix scan the whole repository.
+    nix =
+      pkgs.runCommand "wanwatch-lint-nix"
+        {
+          nativeBuildInputs = [
+            pkgs.deadnix
+            pkgs.statix
+          ];
+        }
+        ''
+          cd ${inputs.self}
+          statix check .
+          deadnix --fail .
+          touch $out
+        '';
+
+    # The `.golangci.yml` linters, govet included. The config lives
+    # at the repository root, outside the copied `daemon/` source.
+    golangci-lint = runGoCheck {
+      name = "wanwatch-lint-golangci";
+      script = ''
+        export GOLANGCI_LINT_CACHE=$TMPDIR/golangci-lint
+        ${lib.getExe pkgs.golangci-lint} run \
+          --config ${../.golangci.yml} ./...
+      '';
+    };
+  };
+
+  # Catches packaging regressions, such as a file missing from the
+  # fileset, in `nix flake check`.
+  package-wanwatchd = packages.wanwatchd;
+}

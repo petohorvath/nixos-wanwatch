@@ -6,7 +6,7 @@ The unit and integration suites run on nix-unit's flake-parts module, which the 
 
 ## Consequences
 
-The check names change: `unit` and `integration` become `nix-unit`, `format` becomes `formatting`, `package` becomes `package-wanwatchd`, and the `daemon`, `coverage`, and `race` checks become the `tests`, `coverage`, and `race` links of `build-daemon`. `observation` becomes `build-observation` and, like the other build tests, exists only on Linux. golangci-lint runs in `lint`.
+The check names change: `unit` and `integration` become `nix-unit`, `format` becomes `formatting`, `package` becomes `package-wanwatchd`, and the `daemon`, `coverage`, and `race` checks become the `tests`, `coverage`, and `race` links of `build-daemon`. `observation` becomes `build-observation`. golangci-lint runs in `lint`.
 
 The flake gains the `nix-unit` input, because the module lives only in nix-unit's flake; the nix-unit program comes from nixpkgs. Its `nixpkgs` follows the root input and its other inputs are dropped, so consumers lock one more input but no second nixpkgs. A consumer can drop it with `inputs.wanwatch.inputs.nix-unit.follows = "";`. Like `treefmt-nix` and `nftzones`, it is a development input in the root flake, as [ADR-0011](./0011-flake-parts-with-dev-partition.md) decided. The `nix-unit` check copies every flake input into a store inside its build directory, and evaluates all suites in one process.
 

@@ -69,11 +69,10 @@
       ...
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      # The daemon and the NixOS module are Linux-only.
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
       ];
 
       # The development outputs evaluate in a separate partition, so

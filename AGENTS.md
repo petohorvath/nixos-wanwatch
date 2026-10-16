@@ -37,7 +37,7 @@ Use the [`GLOSSARY.md`](./GLOSSARY.md) terms exactly in code, comments, commit m
 
 ## Development environment
 
-The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, formatter, and the nix-unit `tests` output ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). The tests follow the devnix-labs test standard ([ADR-0015](./docs/adr/0015-adopt-test-standard.md)): `dev/default.nix` runs the nix-unit suites through nix-unit's flake-parts module, `tests/default.nix` assembles the build and VM entries, and `dev/checks.nix` adds the formatting, lint, and package entries. `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The daemon and Linux-specific checks exist only on Linux systems.
+The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, formatter, and the nix-unit `tests` output ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). The tests follow the devnix-labs test standard ([ADR-0015](./docs/adr/0015-adopt-test-standard.md)): `dev/default.nix` runs the nix-unit suites through nix-unit's flake-parts module, `tests/default.nix` assembles the build and VM entries, and `dev/checks.nix` adds the formatting, lint, and package entries. `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The flake supports `x86_64-linux` and `aarch64-linux` only, because the daemon and the NixOS module are Linux-only.
 
 Override sibling flakes with absolute paths:
 
@@ -66,7 +66,7 @@ Run the smallest checks that exercise the change first. The examples use `x86_64
 |---|---|
 | `formatting` | treefmt formatting drift |
 | `lint` | statix and deadnix over the repository, and the `.golangci.yml` linters over the daemon |
-| `nix-unit` | The nix-unit suites: `unit` (pure-Nix library tests, including the value-type skeleton tests) and, on Linux, `integration` (NixOS module evaluation, rendered config, Telegraf wiring, expected rejections, and the flake's outputs) |
+| `nix-unit` | The nix-unit suites: `unit` (pure-Nix library tests, including the value-type skeleton tests) and `integration` (NixOS module evaluation, rendered config, Telegraf wiring, expected rejections, and the flake's outputs) |
 | `build-daemon` | All Go tests in a hermetic, network-disabled build (`tests`), the per-package coverage floors defined in `tests/build/daemon.nix` (`coverage`), and all Go tests with the race detector (`race`) |
 | `build-observation` | The VM observation helpers' contract tests, without a VM |
 | `package-wanwatchd` | The production daemon derivation |
