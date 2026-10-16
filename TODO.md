@@ -171,7 +171,8 @@ applied to the audit shell but not to the daemon build. The
 workflow, the `dev/audit-shell.nix` shell, the fail-closed
 `.github/scripts/retry-vulnix.sh` wrapper, and its
 `tests/ci/vulnix-retry.sh` contract test are recoverable from
-commit a6612d7. Until then, `AGENTS.md` lists the vulnerability
+commit a6612d7; restore the contract test beside its wrapper, as
+`tooling/review-env-test.sh` sits beside `tooling/review-env.sh`. Until then, `AGENTS.md` lists the vulnerability
 audit as paused.
 
 ---

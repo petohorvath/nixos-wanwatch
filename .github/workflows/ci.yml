@@ -67,9 +67,10 @@ jobs:
       - name: Verify go.mod and go.sum are tidy
         run: nix develop --command bash -c 'cd daemon && go mod tidy -diff'
 
-  # Runs the review wrapper's contract test on each Linux system the
-  # policy tests: `tooling/review-env.sh` runs outside the Nix
-  # sandbox, so no flake check covers it.
+  # Runs the review wrapper's contract test,
+  # `tooling/review-env-test.sh`, on each Linux system the policy
+  # tests: `tooling/review-env.sh` runs outside the Nix sandbox, so no
+  # flake check covers it.
   review-env:
     name: review environment (${{ matrix.system }})
     strategy:
@@ -94,4 +95,4 @@ jobs:
           purge-created: 0
           purge-primary-key: never
       - name: Verify executable review environment
-        run: bash tests/ci/review-env.sh
+        run: bash tooling/review-env-test.sh
