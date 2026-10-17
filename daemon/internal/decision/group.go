@@ -94,9 +94,9 @@ func (g *Group) Recompute(ctx context.Context, members []selector.MemberHealth, 
 }
 
 // Probe retries Apply when the pending Selection targets wan, and repairs
-// the committed Selection's routes when wan is selected and a repair is
+// the committed Selection's routes when wan is selected and a Repair is
 // due. Every probe cycle can drive this, including partial Windows during
-// cold start. A pending Decision holds a due repair until it commits.
+// cold start. A pending Decision holds a due Repair until it commits.
 func (g *Group) Probe(ctx context.Context, wan string) *Commit {
 	if g.pending != nil {
 		if !g.pending.Has || g.pending.Wan != wan {
@@ -114,9 +114,9 @@ func (g *Group) Probe(ctx context.Context, wan string) *Commit {
 // whether or not it changed the Gateway: the kernel can flush a Group-table
 // route without a notification, so any observation may mean that route is
 // gone. A pending Decision retries all its families; a committed Selection
-// refreshes the observed family, or every family when a repair is due. A
+// refreshes the observed family, or every family when a Repair is due. A
 // refresh produces no Decision or commit, even on failure; a failed one
-// leaves a repair due, and the Apply adapter meters its route failures.
+// leaves a Repair due, and the Apply adapter meters its route failures.
 func (g *Group) RouteObserved(ctx context.Context, wan string, family probe.Family) *Commit {
 	want := g.intent()
 	if !want.Has || want.Wan != wan {
@@ -125,11 +125,7 @@ func (g *Group) RouteObserved(ctx context.Context, wan string, family probe.Fami
 	if g.pending != nil {
 		return g.commit(ctx)
 	}
-	if g.repairDue {
-		g.refresh(ctx)
-	} else {
-		g.refresh(ctx, family)
-	}
+	g.refresh(ctx, family)
 	return nil
 }
 
@@ -158,8 +154,12 @@ func (g *Group) intent() selector.Active {
 }
 
 // refresh rewrites the committed Selection's routes for families, or for
-// every family when families is empty. A failure leaves a repair due.
+// every family when families is empty or a Repair is due. A failure leaves
+// a Repair due.
 func (g *Group) refresh(ctx context.Context, families ...probe.Family) {
+	if g.repairDue {
+		families = nil
+	}
 	if err := g.applyRoutes(ctx, g.active.Wan, families...); err != nil {
 		g.logger.Warn("route refresh incomplete; will retry",
 			"group", g.cfg.Name, "wan", g.active.Wan, "err", err)
@@ -185,7 +185,7 @@ func (g *Group) commit(ctx context.Context) *Commit {
 	g.active = next
 	g.pending = nil
 	// A commit wrote every family of its WAN, or left a down's routes in
-	// place on purpose, so no earlier repair remains due.
+	// place on purpose, so no earlier Repair remains due.
 	g.repairDue = false
 	// Every Selection change restamps, a down included. A commit that
 	// keeps its WAN keeps its Selection's start.

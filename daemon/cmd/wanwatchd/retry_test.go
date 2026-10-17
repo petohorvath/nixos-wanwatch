@@ -157,7 +157,7 @@ func TestPendingDecisionRetry(t *testing.T) {
 
 // TestRouteRepair pins the retry of a failed Gateway refresh: the
 // selected WAN's next probe result rewrites every Family, and the
-// repair is no Decision, so it delivers no Hook and keeps activeSince.
+// Repair is no Decision, so it delivers no Hook and keeps activeSince.
 func TestRouteRepair(t *testing.T) {
 	t.Parallel()
 	h := startHarness(t, baseConfig())

@@ -202,7 +202,8 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, o
 }
 
 // retryGroupDecisions forwards each Probe cycle. Groups decide whether
-// this WAN can advance a pending Decision; callers never inspect intent.
+// this WAN can advance a pending Decision or a due Repair; callers never
+// inspect intent.
 func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 	for name, g := range d.groups {
 		d.publishDecision(ctx, d.cfg.Groups[name], g.Probe(ctx, wan))

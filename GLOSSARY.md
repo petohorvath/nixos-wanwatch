@@ -65,8 +65,12 @@ The default-route next-hop of a WAN for one Family, as observed in the kernel.
 _Avoid_: router, next-hop (as a configured value)
 
 **Apply**:
-Mutating kernel routing and conntrack state to carry out a Decision.
+Mutating kernel routing and conntrack state to carry out a Decision, or to keep the committed Selection's routes in place.
 _Avoid_: commit, sync, Decision
+
+**Repair**:
+An Apply that rewrites every Family of the committed Selection's routes after a refresh of them failed. It is not a Decision.
+_Avoid_: reconcile, resync
 
 **State**:
 The published view of every WAN's Health and every Group's Selection.
@@ -84,4 +88,4 @@ _Avoid_: callback, handler, Apply
 - Each **Decision** triggers one **Apply**, followed by the **Hooks**.
 - A **Decision** counts when the **Strategy** chooses a new target, before its **Apply** converges. A target chosen while an earlier one is still pending can be the current **Selection** again; that **Decision** reapplies its routes but changes no **Selection** and runs no **Hooks**.
 - A **Gateway** is tracked per (**WAN**, **Family**) and independently of **Health**: a healthy **WAN** may not yet have a **Gateway**.
-- **Apply** also rewrites the committed **Selection**'s routes on each main-table default-route observation and, after a failed rewrite, repairs every **Family**. A repair is no **Decision**: it changes no **Selection** and runs no **Hooks**.
+- Each main-table default-route observation on a **WAN** rewrites that **Family**'s route for every **Group** that selects the **WAN**. A failed rewrite makes a **Repair** due, which the **WAN**'s next **Probe** cycle or route observation runs. Neither is a **Decision**: they change no **Selection** and run no **Hooks**.

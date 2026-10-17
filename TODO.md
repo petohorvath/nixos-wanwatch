@@ -103,7 +103,7 @@ lands. the TODO.md schema-evolution item.
 
 ### Gauge for a due Group-table repair
 
-A failed route refresh leaves a Group due for a repair
+A failed route refresh leaves a Group due for a Repair
 ([ADR-0017](./docs/adr/0017-repair-committed-group-table.md)), which
 only `wanwatch_apply_route_errors_total` and the logs reveal. A gauge
 such as `wanwatch_group_routes_converged{group}` would let an alert

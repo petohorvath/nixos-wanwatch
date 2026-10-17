@@ -137,7 +137,7 @@ The decision package owns pending and committed Selections, Decision counts, act
 
 A hard Apply failure leaves the target Selection pending, and State and Hooks stay on the committed Selection. Probe cycles and route observations retry every Family for the pending target, and a newer Selection supersedes it.
 
-A missing Gateway is a soft skip: a commit can leave that Family's existing route untouched. Every main-table default-route observation on a committed Selection's WAN rewrites the observed Family, even when its Gateway is unchanged, because the kernel flushes IPv4 routes on link down without a notification. A failed rewrite leaves a repair due, and the WAN's next Probe cycle or route observation rewrites every Family. Neither produces a Decision or Hook ([ADR-0017](./adr/0017-repair-committed-group-table.md)).
+A missing Gateway is a soft skip: a commit can leave that Family's existing route untouched. Every main-table default-route observation on a committed Selection's WAN rewrites the observed Family, even when its Gateway is unchanged, because the kernel flushes IPv4 routes on link down without a notification. A failed rewrite leaves a Repair due, and the WAN's next Probe cycle or route observation rewrites every Family. Neither produces a Decision or Hook ([ADR-0017](./adr/0017-repair-committed-group-table.md)).
 
 ## Families and Gateways
 
