@@ -33,7 +33,9 @@ type Commit struct {
 
 // Event classifies the commit by its Selection change: up from none to a
 // WAN, down from a WAN to none, switch between two WANs, and "" when the
-// Selection is unchanged.
+// Selection is unchanged. "" is deliberately not a named state.Event:
+// the Events mirror the WANWATCH_EVENT values in docs/specs/daemon-state.md,
+// and an unchanged Selection runs no Hook.
 func (c Commit) Event() state.Event {
 	switch {
 	case !c.Old.Has && c.New.Has:
