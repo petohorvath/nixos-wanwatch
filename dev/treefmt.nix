@@ -15,17 +15,15 @@
     goimports.enable = true;
   };
 
-  settings = {
-    # Vendored code keeps upstream formatting so `go mod vendor`
-    # updates stay clean.
-    excludes = [ "daemon/vendor/**" ];
-
-    /*
-      The goldens keep the bytes their generators write: the state
-      golden is compared byte for byte with Go's encoder output, and
-      the daemon-config golden is regenerated with `jq .`
-      (docs/specs/daemon-config.md).
-    */
-    formatter.prettier.excludes = [ "*.golden.json" ];
-  };
+  /*
+    No formatter may change these files. Vendored code keeps upstream
+    formatting so `go mod vendor` updates stay clean. The goldens keep
+    the bytes their generators write: the state golden is compared
+    byte for byte with Go's encoder output, and the daemon-config
+    golden is regenerated with `jq .` (docs/specs/daemon-config.md).
+  */
+  settings.excludes = [
+    "daemon/vendor/**"
+    "*.golden.json"
+  ];
 }

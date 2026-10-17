@@ -14,4 +14,4 @@ treefmt-nix takes the tools from the nixpkgs in use, so the project policy's uns
 
 Prettier runs with its defaults and no `.prettierrc.json`, so an editor that formats on save gives the same result as `nix fmt`.
 
-Prettier skips the `*.golden.json` files: the state golden is compared byte for byte with the daemon's encoder output, and the daemon-config golden is regenerated with `jq .`.
+No program formats `daemon/vendor/` or the `*.golden.json` files: the state golden is compared byte for byte with the daemon's encoder output, and the daemon-config golden is regenerated with `jq .`. The exclusion is global rather than per program, so a program added later also leaves them alone.
