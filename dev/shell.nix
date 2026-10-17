@@ -1,33 +1,29 @@
-# mkShell rather than mkShellNoCC: `go test -race` needs gcc.
+/*
+  `treefmtShell` supplies treefmt and every program that
+  `dev/treefmt.nix` enables, so the list holds only the other tools.
+  mkShell rather than mkShellNoCC: `go test -race` needs gcc.
+*/
 {
-  deadnix,
-  formatter,
   git,
   go,
-  gofumpt,
   golangci-lint,
   gopls,
-  gotools,
   jq,
   mkShell,
   nil,
   nix,
   nix-unit,
-  nixfmt,
   statix,
+  treefmtShell,
 }:
 mkShell {
+  inputsFrom = [ treefmtShell ];
   packages = [
-    formatter
-    nixfmt
     go
     gopls
     nix-unit
-    gotools
     golangci-lint
-    gofumpt
     statix
-    deadnix
     nix
     git
     nil
