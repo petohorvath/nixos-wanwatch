@@ -1,9 +1,6 @@
 package main
 
-import (
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
-	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
-)
+import "github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 
 // groupContainsWAN reports whether `wan` is a member of `g`.
 func groupContainsWAN(g selector.Group, wan string) bool {
@@ -19,22 +16,3 @@ const (
 	reasonHealth  decisionReason = "health"
 	reasonCarrier decisionReason = "carrier"
 )
-
-// hookEventFor maps the old/next Active to the hook directory the
-// runner should dispatch into:
-//
-//   - absent → present       ⇒ up
-//   - present → absent       ⇒ down
-//   - present → present (≠)  ⇒ switch
-//   - otherwise              ⇒ "" (no event)
-func hookEventFor(old, next selector.Active) state.Event {
-	switch {
-	case !old.Has && next.Has:
-		return state.EventUp
-	case old.Has && !next.Has:
-		return state.EventDown
-	case old.Has && next.Has && old.Wan != next.Wan:
-		return state.EventSwitch
-	}
-	return ""
-}

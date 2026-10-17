@@ -229,6 +229,66 @@ func TestDecisionPublication(t *testing.T) {
 			},
 		},
 		{
+			name: "a reverted switch flushes nothing and delivers no Hook",
+			steps: []step{
+				{name: "gateways cached", do: cachedGateways},
+				{
+					name: "both WANs gain carrier",
+					do: func(h *harness) {
+						h.Link(carrier("eth0", true))
+						h.Link(carrier("wwan0", true))
+					},
+					want: []string{
+						"route home v4 eth0 via 192.0.2.1",
+						"route home v6 eth0 via 2001:db8::1",
+						"hook up home →primary",
+					},
+					active: "primary",
+				},
+				{
+					name: "primary loses v4, backup's routes fail",
+					do: func(h *harness) {
+						h.kernel.fail(opRoute, "wwan0")
+						h.Probe(lossy("primary", probe.FamilyV4))
+					},
+					want: []string{
+						"route home v4 wwan0 via 198.51.100.1 ✗",
+						"route home v6 wwan0 via 2001:db8:1::1 ✗",
+					},
+					active: "primary",
+				},
+				{
+					name: "primary recovers v4 before backup's retry",
+					do: func(h *harness) {
+						since := h.State().Groups["home"].ActiveSince
+						published := readCounter(h.tb, h.metrics.StatePublications)
+						h.Probe(healthy("primary", probe.FamilyV4))
+						if got := h.State().Groups["home"].ActiveSince; !reflect.DeepEqual(got, since) {
+							h.tb.Errorf("activeSince = %v, want the unchanged %v", got, since)
+						}
+						// The repair and the Health flip each publish State.
+						if n := readCounter(h.tb, h.metrics.StatePublications) - published; n != 2 {
+							h.tb.Errorf("State published %v times, want 2", n)
+						}
+					},
+					want: []string{
+						"route home v4 eth0 via 192.0.2.1",
+						"route home v6 eth0 via 2001:db8::1",
+					},
+					active: "primary",
+				},
+			},
+			check: func(tb testing.TB, h *harness) {
+				tb.Helper()
+				if got := len(h.hooks()); got != 1 {
+					tb.Errorf("%d Hooks delivered, want only the up", got)
+				}
+				if got := h.State().Groups["home"].DecisionsTotal; got != 3 {
+					tb.Errorf("decisionsTotal = %d, want 3", got)
+				}
+			},
+		},
+		{
 			name: "failed address lookup is metered and the switch commits",
 			steps: []step{
 				{name: "gateways cached", do: cachedGateways},

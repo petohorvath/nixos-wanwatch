@@ -67,6 +67,25 @@ retains the old v6 route untouched. Decide: clear vs retain.
 docs/nftzones-integration.md; add a `services.wanwatch.global.staleRoutes`
 enum once policy lands.
 
+### `activeSince` after a `down`
+
+After a `down` Decision, `groups.<name>.activeSince` keeps the
+timestamp of the previous Selection while `active` is `null`.
+[`docs/specs/daemon-state.md`](./docs/specs/daemon-state.md) defines
+it as when `active` took its current value, which the `down`
+arguably contradicts. Decide whether a `down` restamps it or clears
+it to `null`; either is a `state.json` contract change.
+`daemon/internal/decision/group.go` (`commit`).
+
+### Conntrack flush across Groups that share a WAN
+
+Conntrack flushing runs per Group, but source addresses belong to
+WANs. When two Groups share a WAN and only one switches off it, the
+flush also resets the other Group's flows, which still leave through
+that WAN. Flush only addresses that no Group still selects.
+`daemon/cmd/wanwatchd/daemon.go` (`flushSwitchedConntrack`),
+[`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
+
 ### Low-latency state subscription
 
 State readers polling `state.json` at >1 Hz miss short-lived

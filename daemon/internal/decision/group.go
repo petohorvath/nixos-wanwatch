@@ -23,10 +23,27 @@ type ApplyRoutes func(context.Context, string, ...probe.Family) error
 // Commit records a completed Apply. At stamps both State publication and
 // Hook delivery so consumers can correlate them. A commit does not guarantee
 // a new route in every family: missing Gateways leave existing routes intact.
+// A commit may leave the Selection unchanged, when a pending target is
+// superseded by the committed one or by none; Event classifies it.
 type Commit struct {
 	Old selector.Active
 	New selector.Active
 	At  time.Time
+}
+
+// Event classifies the commit by its Selection change: up from none to a
+// WAN, down from a WAN to none, switch between two WANs, and "" when the
+// Selection is unchanged.
+func (c Commit) Event() state.Event {
+	switch {
+	case !c.Old.Has && c.New.Has:
+		return state.EventUp
+	case c.Old.Has && !c.New.Has:
+		return state.EventDown
+	case c.Old.Has && c.New.Has && c.Old.Wan != c.New.Wan:
+		return state.EventSwitch
+	}
+	return ""
 }
 
 // Group owns pending and committed Selections. Its methods run synchronously
@@ -129,7 +146,8 @@ func (g *Group) commit(ctx context.Context) *Commit {
 	committed := &Commit{Old: g.active, New: next, At: time.Now().UTC()}
 	g.active = next
 	g.pending = nil
-	if next.Has {
+	// A repair that recommits the same WAN keeps its Selection's start.
+	if e := committed.Event(); e == state.EventUp || e == state.EventSwitch {
 		g.activeSince = committed.At
 	}
 	for _, m := range g.cfg.Members {

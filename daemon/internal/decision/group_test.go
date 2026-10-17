@@ -14,6 +14,7 @@ import (
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/metrics"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/state"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -23,7 +24,12 @@ type routeAttempt struct {
 	families []probe.Family
 }
 
-type transition struct{ old, next string }
+// transition is a Commit's old and new Selection ("" for none) and the
+// Event it is classified as.
+type transition struct {
+	old, next string
+	event     state.Event
+}
 
 func groupConfig() selector.Group {
 	return selector.Group{
@@ -86,11 +92,11 @@ func TestGroupProgression(t *testing.T) {
 			steps: []step{
 				{name: "no healthy members"},
 				{name: "no Selection to refresh", gatewayWAN: "primary", family: probe.FamilyV4},
-				{name: "up", healthy: []string{"primary", "backup"}, reason: "carrier", wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary"}, wantRoutes: all("primary")},
+				{name: "up", healthy: []string{"primary", "backup"}, reason: "carrier", wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
 				{name: "unchanged", healthy: []string{"primary", "backup"}, wantActive: "primary", wantDecisions: 1},
-				{name: "switch", healthy: []string{"backup"}, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"primary", "backup"}, wantRoutes: all("backup")},
-				{name: "down retains routes", wantDecisions: 3, wantCommit: &transition{"backup", ""}},
-				{name: "recovery", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 4, wantCommit: &transition{"", "primary"}, wantRoutes: all("primary")},
+				{name: "switch", healthy: []string{"backup"}, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"primary", "backup", state.EventSwitch}, wantRoutes: all("backup")},
+				{name: "down retains routes", wantDecisions: 3, wantCommit: &transition{"backup", "", state.EventDown}},
+				{name: "recovery", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 4, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
 			},
 		},
 		{
@@ -102,7 +108,7 @@ func TestGroupProgression(t *testing.T) {
 				{name: "failed Probe retry", probeWAN: "primary", fail: true, wantDecisions: 1, wantRoutes: all("primary")},
 				{name: "unrelated Gateway", gatewayWAN: "backup", family: probe.FamilyV4, wantDecisions: 1},
 				{name: "failed Gateway retry uses all families", gatewayWAN: "primary", family: probe.FamilyV4, fail: true, wantDecisions: 1, wantRoutes: all("primary")},
-				{name: "Probe commits", probeWAN: "primary", wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary"}, wantRoutes: all("primary")},
+				{name: "Probe commits", probeWAN: "primary", wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
 				{name: "committed Probe does nothing", probeWAN: "primary", wantActive: "primary", wantDecisions: 1},
 				{name: "v4 refresh", gatewayWAN: "primary", family: probe.FamilyV4, wantActive: "primary", wantDecisions: 1, wantRoutes: []routeAttempt{{"primary", []probe.Family{probe.FamilyV4}}}},
 				{name: "failed v6 refresh", gatewayWAN: "primary", family: probe.FamilyV6, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: []routeAttempt{{"primary", []probe.Family{probe.FamilyV6}}}},
@@ -116,17 +122,17 @@ func TestGroupProgression(t *testing.T) {
 				{name: "backup supersedes primary", healthy: []string{"backup"}, fail: true, wantDecisions: 2, wantRoutes: all("backup")},
 				{name: "superseded Probe ignored", probeWAN: "primary", wantDecisions: 2},
 				{name: "superseded Gateway ignored", gatewayWAN: "primary", family: probe.FamilyV4, wantDecisions: 2},
-				{name: "backup commits", gatewayWAN: "backup", family: probe.FamilyV4, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"", "backup"}, wantRoutes: all("backup")},
+				{name: "backup commits", gatewayWAN: "backup", family: probe.FamilyV4, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"", "backup", state.EventUp}, wantRoutes: all("backup")},
 			},
 		},
 		{
 			name: "failed switch preserves committed Selection",
 			steps: []step{
-				{name: "primary committed", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary"}, wantRoutes: all("primary")},
+				{name: "primary committed", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
 				{name: "backup pending", healthy: []string{"backup"}, fail: true, wantActive: "primary", wantDecisions: 2, wantRoutes: all("backup")},
 				{name: "old Selection Gateway ignored", gatewayWAN: "primary", family: probe.FamilyV6, wantActive: "primary", wantDecisions: 2},
 				{name: "old Selection Probe ignored", probeWAN: "primary", wantActive: "primary", wantDecisions: 2},
-				{name: "recovery reapplies primary to repair partial switch", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 3, wantCommit: &transition{"primary", "primary"}, wantRoutes: all("primary")},
+				{name: "recovery reapplies primary to repair partial switch", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 3, wantCommit: &transition{"primary", "primary", ""}, wantRoutes: all("primary")},
 				{name: "superseded backup Probe ignored", probeWAN: "backup", wantActive: "primary", wantDecisions: 3},
 			},
 		},
@@ -134,7 +140,7 @@ func TestGroupProgression(t *testing.T) {
 			name: "all-down supersedes an uncommitted target",
 			steps: []step{
 				{name: "primary pending", healthy: []string{"primary"}, fail: true, wantDecisions: 1, wantRoutes: all("primary")},
-				{name: "all-down", wantDecisions: 2, wantCommit: &transition{"", ""}},
+				{name: "all-down", wantDecisions: 2, wantCommit: &transition{"", "", ""}},
 				{name: "superseded Probe ignored", probeWAN: "primary", wantDecisions: 2},
 			},
 		},
@@ -180,13 +186,14 @@ func TestGroupProgression(t *testing.T) {
 						t.Fatalf("%s: unexpected commit %+v", s.name, got)
 					}
 				} else {
-					if got == nil || got.Old != active(s.wantCommit.old) || got.New != active(s.wantCommit.next) {
+					if got == nil || got.Old != active(s.wantCommit.old) || got.New != active(s.wantCommit.next) || got.Event() != s.wantCommit.event {
 						t.Fatalf("%s: commit = %+v, want %+v", s.name, got, s.wantCommit)
 					}
 					if got.At.Before(started) || got.At.After(time.Now()) || got.At.Location() != time.UTC {
 						t.Errorf("%s: invalid commit timestamp %v", s.name, got.At)
 					}
-					if got.New.Has {
+					// Only a change to a WAN starts a new Selection.
+					if e := s.wantCommit.event; e == state.EventUp || e == state.EventSwitch {
 						since = &got.At
 					}
 				}
@@ -216,6 +223,30 @@ func TestGroupProgression(t *testing.T) {
 						t.Errorf("%s: active{%s} = %v, want %v", s.name, member.Wan, value, want)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestCommitEvent(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		old, next string
+		want      state.Event
+	}{
+		{"none to WAN is up", "", "primary", state.EventUp},
+		{"WAN to none is down", "primary", "", state.EventDown},
+		{"WAN to another WAN is switch", "primary", "backup", state.EventSwitch},
+		{"same WAN is unchanged", "primary", "primary", ""},
+		{"none to none is unchanged", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := decision.Commit{Old: active(tc.old), New: active(tc.next)}
+			if got := c.Event(); got != tc.want {
+				t.Errorf("Commit{%q→%q}.Event() = %q, want %q", tc.old, tc.next, got, tc.want)
 			}
 		})
 	}
