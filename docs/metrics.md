@@ -6,46 +6,46 @@ This catalog matches the series registered in `daemon/internal/metrics/metrics.g
 
 ## Probe
 
-| Metric | Type | Labels | Meaning |
-|---|---|---|---|
-| `wanwatch_probe_rtt_seconds` | gauge | `wan`, `target`, `family` | RTT of the last Sample per Target. |
-| `wanwatch_probe_jitter_seconds` | gauge | `wan`, `family` | Jitter across the Window. |
-| `wanwatch_probe_loss_ratio` | gauge | `wan`, `family` | Loss in `[0, 1]`. |
+| Metric                          | Type  | Labels                    | Meaning                            |
+| ------------------------------- | ----- | ------------------------- | ---------------------------------- |
+| `wanwatch_probe_rtt_seconds`    | gauge | `wan`, `target`, `family` | RTT of the last Sample per Target. |
+| `wanwatch_probe_jitter_seconds` | gauge | `wan`, `family`           | Jitter across the Window.          |
+| `wanwatch_probe_loss_ratio`     | gauge | `wan`, `family`           | Loss in `[0, 1]`.                  |
 
 ## WAN
 
-| Metric | Type | Labels | Meaning |
-|---|---|---|---|
-| `wanwatch_wan_carrier` | gauge | `wan` | `1` = carrier up (`IFF_LOWER_UP`), `0` = down. |
-| `wanwatch_wan_operstate` | gauge | `wan` | `IFLA_OPERSTATE` integer (`0` = unknown, `6` = up). |
-| `wanwatch_wan_family_healthy` | gauge | `wan`, `family` | `1` = healthy after thresholds and Hysteresis. |
-| `wanwatch_wan_healthy` | gauge | `wan` | WAN Health under `probe.familyHealthPolicy`. |
-| `wanwatch_wan_carrier_changes_total` | counter | `wan` | Carrier transitions. |
+| Metric                               | Type    | Labels          | Meaning                                             |
+| ------------------------------------ | ------- | --------------- | --------------------------------------------------- |
+| `wanwatch_wan_carrier`               | gauge   | `wan`           | `1` = carrier up (`IFF_LOWER_UP`), `0` = down.      |
+| `wanwatch_wan_operstate`             | gauge   | `wan`           | `IFLA_OPERSTATE` integer (`0` = unknown, `6` = up). |
+| `wanwatch_wan_family_healthy`        | gauge   | `wan`, `family` | `1` = healthy after thresholds and Hysteresis.      |
+| `wanwatch_wan_healthy`               | gauge   | `wan`           | WAN Health under `probe.familyHealthPolicy`.        |
+| `wanwatch_wan_carrier_changes_total` | counter | `wan`           | Carrier transitions.                                |
 
 ## Group
 
-| Metric | Type | Labels | Meaning |
-|---|---|---|---|
-| `wanwatch_group_active` | gauge | `group`, `wan` | `1` for the active Member, `0` for the others. |
-| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. `reason` is `health` or `carrier`. |
+| Metric                           | Type    | Labels            | Meaning                                        |
+| -------------------------------- | ------- | ----------------- | ---------------------------------------------- |
+| `wanwatch_group_active`          | gauge   | `group`, `wan`    | `1` for the active Member, `0` for the others. |
+| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. `reason` is `health` or `carrier`.  |
 
 ## Apply
 
 Apply metrics are split into per-Family and Family-agnostic series so no label is ever empty.
 
-| Metric | Type | Labels | Meaning |
-|---|---|---|---|
-| `wanwatch_apply_route_duration_seconds` | histogram | `group`, `family` | Wall time of `RouteReplace`. |
-| `wanwatch_apply_route_errors_total` | counter | `group`, `family` | Route writes that returned a netlink error. |
-| `wanwatch_apply_op_errors_total` | counter | `group`, `op` | Family-agnostic errors. `op` is `conntrack_flush`, `ifindex_lookup`, or `rule_install`. |
+| Metric                                  | Type      | Labels            | Meaning                                                                                 |
+| --------------------------------------- | --------- | ----------------- | --------------------------------------------------------------------------------------- |
+| `wanwatch_apply_route_duration_seconds` | histogram | `group`, `family` | Wall time of `RouteReplace`.                                                            |
+| `wanwatch_apply_route_errors_total`     | counter   | `group`, `family` | Route writes that returned a netlink error.                                             |
+| `wanwatch_apply_op_errors_total`        | counter   | `group`, `op`     | Family-agnostic errors. `op` is `conntrack_flush`, `ifindex_lookup`, or `rule_install`. |
 
 ## Daemon
 
-| Metric | Type | Labels | Meaning |
-|---|---|---|---|
-| `wanwatch_state_publications_total` | counter | — | Successful atomic writes of `state.json`. |
-| `wanwatch_hook_invocations_total` | counter | `event`, `result` | Hook runs. `event` is `up`, `down`, or `switch`; `result` is `ok`, `nonzero`, or `timeout`. |
-| `wanwatch_build_info` | gauge | `version`, `go_version`, `commit` | `1`; the labels identify the binary. |
+| Metric                              | Type    | Labels                            | Meaning                                                                                     |
+| ----------------------------------- | ------- | --------------------------------- | ------------------------------------------------------------------------------------------- |
+| `wanwatch_state_publications_total` | counter | —                                 | Successful atomic writes of `state.json`.                                                   |
+| `wanwatch_hook_invocations_total`   | counter | `event`, `result`                 | Hook runs. `event` is `up`, `down`, or `switch`; `result` is `ok`, `nonzero`, or `timeout`. |
+| `wanwatch_build_info`               | gauge   | `version`, `go_version`, `commit` | `1`; the labels identify the binary.                                                        |
 
 ## Example PromQL
 

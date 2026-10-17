@@ -23,7 +23,7 @@ Choose the observation that proves the behavior (docs/specs/daemon-state.md):
 - `wait_family_metrics(wan, families)` checks all specified Health gauges in
   one live scrape, for example `{"v4": True, "v6": False}`.
 - `decisions(group, reason)` reads a counter; `wait_decisions(group, reason,
-  minimum)` waits for it to appear and reach a minimum. Only an unobserved
+minimum)` waits for it to appear and reach a minimum. Only an unobserved
   Decision counter reads as zero. Missing gauges never satisfy zero or false.
 - `wait_default_route(family, interface, group=..., gateway=...)` checks the
   kernel via `ip -j`, independently of State. It resolves the Group's table

@@ -62,10 +62,10 @@ ICMPv6 (RFC 4443) is identical except that `type = 128`. Echo replies use `type 
 
 `daemon/internal/probe/icmp.go:EchoRequestBytes` builds the request:
 
-| Family | Checksum | Notes |
-|---|---|---|
-| v4 | Computed by the daemon (RFC 1071 one's complement) | The daemon fills it in. |
-| v6 | Computed by the kernel on send | The daemon leaves it zero; the kernel fills it on `IPPROTO_ICMPV6` raw sockets (RFC 3542 `IPV6_CHECKSUM`), since only the kernel knows the pseudo-header's source address. |
+| Family | Checksum                                           | Notes                                                                                                                                                                      |
+| ------ | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| v4     | Computed by the daemon (RFC 1071 one's complement) | The daemon fills it in.                                                                                                                                                    |
+| v6     | Computed by the kernel on send                     | The daemon leaves it zero; the kernel fills it on `IPPROTO_ICMPV6` raw sockets (RFC 3542 `IPV6_CHECKSUM`), since only the kernel knows the pseudo-header's source address. |
 
 ## Socket setup
 
@@ -83,10 +83,10 @@ The socket requires `CAP_NET_RAW`, which the NixOS module grants through `Ambien
 
 `WindowStats` is a fixed-capacity ring buffer of `Sample` values, one per Target.
 
-| Stat | Computation | Boundary case |
-|---|---|---|
-| `LossRatio` | `lost / total` | `0` when the Window is empty. |
-| `MeanRTT` | Mean over non-Lost Samples | `0` with no non-Lost Samples. |
+| Stat           | Computation                             | Boundary case                             |
+| -------------- | --------------------------------------- | ----------------------------------------- |
+| `LossRatio`    | `lost / total`                          | `0` when the Window is empty.             |
+| `MeanRTT`      | Mean over non-Lost Samples              | `0` with no non-Lost Samples.             |
 | `JitterMicros` | Population stddev over non-Lost Samples | `0` with fewer than two non-Lost Samples. |
 
 `Aggregate(targets) → FamilyStats` combines the per-Target Windows with an unweighted mean:
