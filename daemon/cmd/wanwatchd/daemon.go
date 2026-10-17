@@ -157,7 +157,7 @@ func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committe
 	}
 	d.writeStateSnapshot(committed.At)
 	if event != "" {
-		d.notifyHooks(g, event, committed.Old, committed.New, committed.At)
+		d.notifyHooks(g, event, committed)
 	}
 }
 
@@ -363,7 +363,8 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 
 // notifyHooks captures the Decision data on the event-loop goroutine before
 // submitting it to the notifier. The worker never reads daemon-owned state.
-func (d *daemon) notifyHooks(g selector.Group, event state.Event, old, next selector.Active, now time.Time) {
+func (d *daemon) notifyHooks(g selector.Group, event state.Event, committed *decision.Commit) {
+	old, next := committed.Old, committed.New
 	oldIface := ifaceFor(d.cfg.Wans, old)
 	nextIface := ifaceFor(d.cfg.Wans, next)
 	hookCtx := state.HookContext{
@@ -384,7 +385,7 @@ func (d *daemon) notifyHooks(g selector.Group, event state.Event, old, next sele
 		Families:     probedFamiliesFor(d.cfg.Wans, next),
 		Table:        g.Table,
 		Mark:         g.Mark,
-		Timestamp:    now,
+		Timestamp:    committed.At,
 	}
 	d.hooks.Notify(hookCtx)
 }
