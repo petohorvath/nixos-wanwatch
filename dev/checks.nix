@@ -23,11 +23,17 @@ lib.attrsets.unionOfDisjoint (import ../tests { inherit inputs pkgs; }) {
   # The linters that treefmt cannot run correctly: `statix fix` skips
   # the lints it cannot fix, and golangci-lint analyzes whole packages.
   lint = pkgs.linkFarm "wanwatch-lint" {
-    nix = pkgs.runCommand "wanwatch-lint-nix" { nativeBuildInputs = [ pkgs.statix ]; } ''
-      cd ${inputs.self}
-      statix check .
-      touch "$out"
-    '';
+    nix =
+      pkgs.runCommand "wanwatch-lint-nix"
+        {
+          src = ../.;
+          nativeBuildInputs = [ pkgs.statix ];
+        }
+        ''
+          cd "$src"
+          statix check .
+          touch "$out"
+        '';
 
     # The `.golangci.yml` linters, govet included. The config lives
     # at the repository root, outside the copied `daemon/` source.
