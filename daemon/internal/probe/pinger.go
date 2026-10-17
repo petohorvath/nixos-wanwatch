@@ -39,24 +39,23 @@ type Pinger struct {
 	Logger     *slog.Logger // nil is normalized to a discard logger
 }
 
-// Run opens the ICMP socket, binds it to the WAN interface, and
-// blocks until ctx is cancelled or a fatal error occurs. ProbeResult
-// values are sent on `out` after each cycle.
+// Run probes until ctx is cancelled or a fatal error occurs.
+// ProbeResult values are sent on `out` after each cycle. Its ICMP
+// socket is bound to the WAN interface and re-dialed when the
+// interface is recreated; an absent interface is retried each
+// Interval, with every Sample lost meanwhile.
 func (p *Pinger) Run(ctx context.Context, out chan<- ProbeResult) error {
-	conn, err := dialICMP(p.Family, p.Interface)
-	if err != nil {
-		return fmt.Errorf("probe: open icmp %s on %s: %w", p.Family, p.Interface, err)
-	}
-	defer func() { _ = conn.Close() }()
-	return p.runWithConn(ctx, conn, out)
-}
-
-// runWithConn is the cycle loop, extracted so tests can drive it
-// with a fake pingConn instead of opening a real socket.
-func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- ProbeResult) error {
 	if p.Logger == nil {
 		p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	sock := p.newSocket(dialICMP, interfaceIndex)
+	defer sock.close()
+	return p.run(ctx, sock, out)
+}
+
+// run is the cycle loop, extracted so tests can drive it with a
+// scripted dialFn instead of opening a real socket.
+func (p *Pinger) run(ctx context.Context, sock *socket, out chan<- ProbeResult) error {
 	addrs, err := p.resolveTargets()
 	if err != nil {
 		return err
@@ -69,15 +68,9 @@ func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- Prob
 		}
 		windows[t] = w
 	}
-
-	// On cancellation, poke the read deadline into the past so a
-	// cycle blocked in ReadFrom returns at once instead of waiting
-	// out the per-cycle Timeout. The goroutine exits with
-	// runWithConn — both unblock on ctx.Done().
-	go func() {
-		<-ctx.Done()
-		_ = conn.SetReadDeadline(time.Now())
-	}()
+	if err := sock.open(); err != nil {
+		return err
+	}
 
 	ticker := time.NewTicker(p.Interval)
 	defer ticker.Stop()
@@ -89,7 +82,22 @@ func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- Prob
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			seq = p.cycle(ctx, conn, addrs, windows, buf, seq)
+			if err := sock.open(); err != nil {
+				return err
+			}
+			if sock.conn == nil {
+				// The interface is absent: no reply can come, so
+				// every Target loses its Sample.
+				for _, w := range windows {
+					w.Push(Sample{Lost: true})
+				}
+			} else {
+				var sendFailed bool
+				seq, sendFailed = p.cycle(ctx, sock.conn, addrs, windows, buf, seq)
+				if sendFailed {
+					sock.recheck()
+				}
+			}
 			result := ProbeResult{
 				Wan:    p.Wan,
 				Family: p.Family,
@@ -108,13 +116,14 @@ func (p *Pinger) runWithConn(ctx context.Context, conn pingConn, out chan<- Prob
 // cycle issues one echo per target, drains replies until the cycle
 // timeout fires (or ctx is cancelled), then pushes a Sample (with
 // measured RTT, or Lost) into each target's window. Returns the
-// next sequence to use.
-func (p *Pinger) cycle(ctx context.Context, conn pingConn, addrs map[string]net.Addr, windows map[string]*WindowStats, buf []byte, seq uint16) uint16 {
+// next sequence to use, and whether any send failed.
+func (p *Pinger) cycle(ctx context.Context, conn pingConn, addrs map[string]net.Addr, windows map[string]*WindowStats, buf []byte, seq uint16) (uint16, bool) {
 	type pending struct {
 		target string
 		sent   time.Time
 	}
 	inflight := make(map[uint16]pending, len(p.Targets))
+	var sendFailed bool
 	for _, target := range p.Targets {
 		req := EchoRequestBytes(p.Family, p.Ident, seq, nil)
 		if _, err := conn.WriteTo(req, addrs[target]); err == nil {
@@ -126,6 +135,7 @@ func (p *Pinger) cycle(ctx context.Context, conn pingConn, addrs map[string]net.
 			p.Logger.Warn("probe send failed",
 				"wan", p.Wan, "family", p.Family, "target", target, "err", err)
 			windows[target].Push(Sample{Lost: true})
+			sendFailed = true
 		}
 		seq++
 	}
@@ -137,20 +147,27 @@ func (p *Pinger) cycle(ctx context.Context, conn pingConn, addrs map[string]net.
 	}
 
 	// A shutdown that landed mid-send skips the read window — opening
-	// one would block out the whole Timeout before runWithConn could
-	// return. A shutdown *during* the read is caught instead by
-	// runWithConn's deadline poke.
+	// one would cost a needless read before the deadline pull below
+	// ends it.
 	if ctx.Err() != nil {
 		recordLoss()
-		return seq
+		return seq, sendFailed
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(p.Timeout))
+	// On cancellation, pull the deadline in so a blocked ReadFrom
+	// returns at once instead of waiting out the Timeout. Registered
+	// after the deadline is set, so the Timeout cannot overwrite it:
+	// AfterFunc runs at once when ctx is already cancelled.
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.SetReadDeadline(time.Now())
+	})
+	defer stop()
 	for len(inflight) > 0 {
 		n, _, err := conn.ReadFrom(buf)
 		if err != nil {
 			// os.ErrDeadlineExceeded ends the cycle normally — the
-			// per-cycle deadline, or runWithConn's cancellation poke.
+			// per-cycle deadline, or the cancellation's deadline pull.
 			// Anything else is a real socket fault worth surfacing.
 			if !errors.Is(err, os.ErrDeadlineExceeded) {
 				p.Logger.Warn("probe read failed",
@@ -172,7 +189,7 @@ func (p *Pinger) cycle(ctx context.Context, conn pingConn, addrs map[string]net.
 		windows[entry.target].Push(Sample{RTTMicros: rttMicros})
 	}
 	recordLoss()
-	return seq
+	return seq, sendFailed
 }
 
 // resolveTargets parses each Target string as an IP literal in the
@@ -197,8 +214,8 @@ func (p *Pinger) resolveTargets() (map[string]net.Addr, error) {
 	return out, nil
 }
 
-// dialICMP opens a raw ICMP socket for `family` and binds it to
-// `iface` via SO_BINDTODEVICE. Requires CAP_NET_RAW — the NixOS
+// dialICMP opens a raw ICMP socket for `family`, binds it to
+// `iface` via SO_BINDTODEVICE, and returns the bound ifindex. Requires CAP_NET_RAW — the NixOS
 // module hands the daemon that capability per docs/specs/probe-algorithm.md.
 //
 // We use net.ListenPacket rather than x/net/icmp because we own
@@ -206,7 +223,7 @@ func (p *Pinger) resolveTargets() (map[string]net.Addr, error) {
 // and net.IPConn exposes SyscallConn, which x/net/icmp's wrapper
 // doesn't surface — and SyscallConn is required for the
 // SO_BINDTODEVICE setsockopt that prevents probe-traffic leakage.
-func dialICMP(family Family, iface string) (pingConn, error) {
+func dialICMP(family Family, iface string) (pingConn, int, error) {
 	return dialICMPVia(family, iface, net.ListenPacket, bindToDevice)
 }
 
@@ -218,50 +235,59 @@ type listenPacketFn func(network, address string) (net.PacketConn, error)
 // bindToDeviceFn matches the bindToDevice signature for the same
 // reason — without it, tests of dialICMPVia would still need a
 // real raw socket to reach the bind step.
-type bindToDeviceFn func(conn *net.IPConn, iface string) error
+type bindToDeviceFn func(conn *net.IPConn, iface string) (int, error)
 
 // dialICMPVia is dialICMP parameterized on its two syscall-touching
 // dependencies. Same control flow, but the v4/v6 network-string
 // branch, the *net.IPConn type-assert branch, and the Close-on-
 // error branches are now testable without netlink permissions.
-func dialICMPVia(family Family, iface string, listen listenPacketFn, bind bindToDeviceFn) (pingConn, error) {
+func dialICMPVia(family Family, iface string, listen listenPacketFn, bind bindToDeviceFn) (pingConn, int, error) {
 	network := "ip4:icmp"
 	if family == FamilyV6 {
 		network = "ip6:ipv6-icmp"
 	}
 	pc, err := listen(network, "")
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	ipConn, ok := pc.(*net.IPConn)
 	if !ok {
 		_ = pc.Close()
-		return nil, fmt.Errorf("probe: net.ListenPacket(%s) returned %T, want *net.IPConn", network, pc)
+		return nil, 0, fmt.Errorf("probe: net.ListenPacket(%s) returned %T, want *net.IPConn", network, pc)
 	}
-	if err := bind(ipConn, iface); err != nil {
+	ifindex, err := bind(ipConn, iface)
+	if err != nil {
 		_ = ipConn.Close()
-		return nil, err
+		return nil, 0, err
 	}
-	return ipConn, nil
+	return ipConn, ifindex, nil
 }
 
 // bindToDevice applies SO_BINDTODEVICE so the socket egresses out
 // of the WAN under test rather than whichever interface the kernel
 // would route to by default. Without this, a probe from `backup`
 // could leak via `primary` and report `primary`'s health.
-func bindToDevice(conn *net.IPConn, iface string) error {
+//
+// It returns the ifindex the socket is bound to, read back from the
+// socket rather than looked up by name, so a concurrent recreation
+// of the interface cannot make the two disagree.
+func bindToDevice(conn *net.IPConn, iface string) (int, error) {
 	raw, err := conn.SyscallConn()
 	if err != nil {
-		return err
+		return 0, err
 	}
+	var ifindex int
 	var setErr error
 	ctrlErr := raw.Control(func(fd uintptr) {
 		setErr = unix.SetsockoptString(int(fd), unix.SOL_SOCKET, unix.SO_BINDTODEVICE, iface)
+		if setErr == nil {
+			ifindex, setErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_BINDTOIFINDEX)
+		}
 	})
 	if ctrlErr != nil {
-		return ctrlErr
+		return 0, ctrlErr
 	}
-	return wrapBindError(setErr)
+	return ifindex, wrapBindError(setErr)
 }
 
 // wrapBindError converts the raw SetsockoptString error returned by
