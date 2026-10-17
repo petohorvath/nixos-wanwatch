@@ -154,3 +154,64 @@ func TestPendingDecisionRetry(t *testing.T) {
 		})
 	}
 }
+
+// TestRouteRepair pins the retry of a failed Gateway refresh: the
+// selected WAN's next probe result rewrites every Family, and the
+// Repair is no Decision, so it delivers no Hook and keeps activeSince.
+func TestRouteRepair(t *testing.T) {
+	t.Parallel()
+	h := startHarness(t, baseConfig())
+	h.Trace() // the bootstrap rules belong to the startup tests
+	runSteps(t, h, []step{
+		primaryActive,
+		{
+			name: "v4 refresh fails",
+			do: func(h *harness) {
+				h.kernel.fail(opRoute, "eth0", probe.FamilyV4)
+				h.Route(gateway("eth0", probe.FamilyV4, "192.0.2.2"))
+			},
+			want:   []string{"route home v4 eth0 via 192.0.2.2 ✗"},
+			active: "primary",
+		},
+		{
+			name: "failed repair",
+			do:   func(h *harness) { h.Probe(healthy("primary", probe.FamilyV4)) },
+			want: []string{
+				"route home v4 eth0 via 192.0.2.2 ✗",
+				"route home v6 eth0 via 2001:db8::1",
+			},
+			active: "primary",
+		},
+		{
+			name: "next probe result repairs every Family",
+			do: func(h *harness) {
+				h.kernel.heal(opRoute, "eth0", probe.FamilyV4)
+				h.Probe(healthy("primary", probe.FamilyV4))
+			},
+			want: []string{
+				"route home v4 eth0 via 192.0.2.2",
+				"route home v6 eth0 via 2001:db8::1",
+			},
+			active: "primary",
+		},
+		{
+			name:   "repaired Selection writes nothing",
+			do:     func(h *harness) { h.Probe(healthy("primary", probe.FamilyV4)) },
+			active: "primary",
+		},
+	})
+	hooks := h.hooks()
+	if len(hooks) != 1 {
+		t.Fatalf("Hooks delivered = %d, want 1 (up)", len(hooks))
+	}
+	group := h.State().Groups["home"]
+	if group.DecisionsTotal != 1 {
+		t.Errorf("decisionsTotal = %d, want 1", group.DecisionsTotal)
+	}
+	if group.ActiveSince == nil || !group.ActiveSince.Equal(hooks[0].Timestamp) {
+		t.Errorf("activeSince = %v, want the up Hook's %v", group.ActiveSince, hooks[0].Timestamp)
+	}
+	if n := readCounter(t, h.metrics.ApplyRouteErrors.WithLabelValues("home", "v4")); n != 2 {
+		t.Errorf("apply_route_errors_total{home,v4} = %v, want 2", n)
+	}
+}

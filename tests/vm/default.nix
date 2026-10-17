@@ -18,6 +18,7 @@ in
   family-health-policy = import ./family-health-policy.nix testArgs;
   gateway-discovery = import ./gateway-discovery.nix testArgs;
   gateway-discovery-v6 = import ./gateway-discovery-v6.nix testArgs;
+  group-table-repair = import ./group-table-repair.nix testArgs;
   hooks = import ./hooks.nix testArgs;
   metrics = import ./metrics.nix testArgs;
   nftables-steering = import ./nftables-steering.nix testArgs;

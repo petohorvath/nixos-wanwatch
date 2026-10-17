@@ -101,6 +101,17 @@ rules (now applied informally — see `daemon-state.md`'s revised
 "Compatibility policy" section). Will need refining once schema 3
 lands. the TODO.md schema-evolution item.
 
+### Gauge for a due Group-table repair
+
+A failed route refresh leaves a Group due for a Repair
+([ADR-0017](./docs/adr/0017-repair-committed-group-table.md)), which
+only `wanwatch_apply_route_errors_total` and the logs reveal. A gauge
+such as `wanwatch_group_routes_converged{group}` would let an alert
+fire while the Group table lags its Selection, not only when a write
+fails. Adding it changes the metrics catalog in
+[`docs/metrics.md`](./docs/metrics.md).
+`daemon/internal/decision/group.go` (`repairDue`).
+
 ### Re-add `wanwatch_probe_samples_total`
 
 Cut from the v1 catalog — it was registered but never fed, because
