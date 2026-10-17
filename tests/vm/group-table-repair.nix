@@ -89,11 +89,11 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip -4 route del default table 1000")
     router.succeed('test -z "$(ip -4 route show default table 1000)"')
 
-    # networkd re-adds the main-table default with the same Gateway,
-    # which leaves the Gateway cache unchanged.
-    router.succeed(
-        "ip -4 route replace default via 192.168.1.1 dev eth1 proto static"
-    )
+    # A second main-table default with the same Gateway stands in for
+    # networkd's re-add and leaves the Gateway cache unchanged. The
+    # kernel notifies the addition, while replacing networkd's
+    # identical route is a silent no-op.
+    router.succeed("ip -4 route add default via 192.168.1.1 dev eth1 metric 100")
     observe.wait_default_route(
         "v4", "eth1", group="home", gateway="192.168.1.1", timeout=15
     )
