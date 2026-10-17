@@ -4,8 +4,8 @@
 # config don't drift.
 #
 # Formatting (gofumpt + goimports) is enforced by treefmt-nix, not
-# here — keep the responsibilities separated so `nix fmt --fail-on-
-# change` and `golangci-lint run` report distinct failure classes.
+# here — keep the responsibilities separated so the `treefmt` and
+# `lint` checks report distinct failure classes.
 version: "2"
 
 run:
