@@ -195,7 +195,7 @@ The v6 gateway-discovery scenario can flake on slower CI runners.
 Pattern: systemd-networkd installs the v6 default route some
 milliseconds _after_ wanwatchd's `rtnl.RouteSubscriber.Prime`
 returns (`primed=0` in the daemon log), then the subscription's
-`Run` is supposed to catch the RTM_NEWROUTE — and it _usually_
+`Run` is supposed to catch the `RTM_NEWROUTE` — and it _usually_
 does, but on at least one observed CI run it didn't, and
 `state.json`'s `wans.uplink.gateways.v6` never surfaced
 `fd00:1::1`.

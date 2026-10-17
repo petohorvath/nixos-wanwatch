@@ -1,8 +1,6 @@
-/*
-  treefmt-nix configuration: `nix fmt` formats and fixes the tree, and
-  the `treefmt` check fails when it would change a file or a tool
-  reports a finding it cannot fix.
-*/
+# treefmt-nix configuration: `nix fmt` formats and fixes the tree, and the
+# `treefmt` check fails when it would change a file or a tool reports a
+# finding it cannot fix.
 {
   programs = {
     nixfmt.enable = true;

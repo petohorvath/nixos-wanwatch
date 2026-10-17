@@ -1,8 +1,6 @@
-/*
-  `treefmtShell` supplies treefmt and every program that
-  `dev/treefmt.nix` enables, so the list holds only the other tools.
-  mkShell rather than mkShellNoCC: `go test -race` needs gcc.
-*/
+# `treefmtShell` supplies treefmt and every program that `dev/treefmt.nix`
+# enables, so the list holds only the other tools. mkShell rather than
+# mkShellNoCC: `go test -race` needs gcc.
 {
   git,
   go,
@@ -27,7 +25,8 @@ mkShell {
     nix
     git
     nil
-    # Formats the regenerated daemon-config golden (docs/specs/daemon-config.md).
+    # Formats the regenerated daemon-config golden
+    # (docs/specs/daemon-config.md).
     jq
   ];
 }
