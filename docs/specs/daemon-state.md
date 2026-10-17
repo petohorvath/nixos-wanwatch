@@ -93,12 +93,12 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
 }
 ```
 
-| Field            | Type                                | Meaning                                                       |
-| ---------------- | ----------------------------------- | ------------------------------------------------------------- |
-| `active`         | string \| null                      | Current Selection. `null` when no Member is healthy.          |
-| `activeSince`    | string (RFC 3339 nanos UTC) \| null | When `active` took its current value. `null` if never active. |
-| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start.          |
-| `strategy`       | string                              | Echo of `groups.<name>.strategy`.                             |
+| Field            | Type                                | Meaning                                                                                        |
+| ---------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `active`         | string \| null                      | Current Selection. `null` when no Member is healthy.                                           |
+| `activeSince`    | string (RFC 3339 nanos UTC) \| null | When `active` took its current value, including `null` after a `down`. `null` if never active. |
+| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start.                                           |
+| `strategy`       | string                              | Echo of `groups.<name>.strategy`.                                                              |
 
 ## Hook env-var contract
 

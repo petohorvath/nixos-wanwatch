@@ -148,8 +148,9 @@ func (g *Group) commit(ctx context.Context) *Commit {
 	committed := &Commit{Old: g.active, New: next, At: time.Now().UTC()}
 	g.active = next
 	g.pending = nil
-	// A repair that recommits the same WAN keeps its Selection's start.
-	if e := committed.Event(); e == state.EventUp || e == state.EventSwitch {
+	// Every Selection change restamps, a down included. A repair that
+	// recommits the same WAN keeps its Selection's start.
+	if committed.Event() != "" {
 		g.activeSince = committed.At
 	}
 	for _, m := range g.cfg.Members {

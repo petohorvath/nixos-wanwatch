@@ -61,7 +61,7 @@ Decisions per Group over the last hour:
 sum by (group) (increase(wanwatch_group_decisions_total[1h]))
 ```
 
-No metric records when a Decision happened. `state.json` records when each Group's active Member took over, as `groups.<name>.activeSince`.
+No metric records when a Decision happened. `state.json` records when each Group's Selection last changed, as `groups.<name>.activeSince`: when the active Member took over, or when the Group lost its last healthy Member.
 
 Group without a healthy active Member:
 
