@@ -48,7 +48,7 @@ nix build --override-input libnet path:/absolute/path/to/nix-libnet \
 
 ## Formatting and linting
 
-`nix fmt` runs treefmt with the programs in `dev/treefmt.nix`: nixfmt and deadnix for Nix, gofumpt and goimports for Go, shfmt and shellcheck for shell, ruff-format and ruff-check for Python, prettier for Markdown, YAML, and JSON, and actionlint for the workflows. deadnix and ruff-check apply their fixes, so review the diff before committing. A finding that a tool cannot fix fails `nix fmt` and the `treefmt` entry. treefmt skips `daemon/vendor/`, and prettier skips the `*.golden.json` files, whose bytes come from their generators.
+`nix fmt` runs treefmt with the programs in `dev/treefmt.nix`: nixfmt and deadnix for Nix, gofumpt and goimports for Go, shfmt and shellcheck for shell, ruff-format and ruff-check for Python, prettier for Markdown, YAML, and JSON, and actionlint for the workflows. deadnix and ruff-check apply their fixes, so review the diff before committing. A finding that a tool cannot fix fails `nix fmt` and the `treefmt` entry. Prettier runs with its defaults, so an editor that formats on save matches `nix fmt`. treefmt skips `daemon/vendor/`, and prettier skips the `*.golden.json` files, whose bytes come from their generators.
 
 statix and golangci-lint (`.golangci.yml`, v2 format) run in the `lint` entry instead, because treefmt runs only `statix fix`, which skips the lints it cannot fix, and passes golangci-lint single files instead of packages. golangci-lint checks lint only; formatting failures belong to treefmt. A shell file without a shebang starts with a `# shellcheck shell=bash` directive, as `.envrc` does.
 
