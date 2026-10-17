@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 from observation import Observation
 
-
 STATE = "cat /run/wanwatch/state.json"
 CONFIG = "cat /etc/wanwatch/config.json"
 SCRAPE = (
