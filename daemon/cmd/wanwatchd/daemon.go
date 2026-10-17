@@ -142,7 +142,7 @@ func (d *daemon) recomputeAffectedGroups(ctx context.Context, wan string, reason
 }
 
 // publishDecision externalizes a commit returned by the Group Decision
-// module. Failed Apply and Gateway refreshes return no commit. The module
+// module. Failed Apply and route refreshes return no commit. The module
 // has already updated its snapshot and gauges before publication begins.
 // Every commit publishes State, because its Decision was counted when it
 // became pending; only a commit that changes the Selection runs Hooks,
@@ -211,7 +211,7 @@ func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 
 // applyRoutes writes the default route per family of the active
 // WAN. With no `families` argument it writes every family the WAN
-// probes. The Decision module limits Gateway refreshes to the changed
+// probes. The Decision module limits a route refresh to the observed
 // family. Families the WAN doesn't probe are skipped either way.
 //
 // PointToPoint WANs get scope-link routes (no gateway needed);
@@ -295,9 +295,13 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 }
 
 // handleRouteEvent absorbs an rtnetlink default-route observation
-// into the gateway cache and forwards changes to the Group Decision
-// module for each WAN on the affected interface. The module owns
-// whether to retry a Decision or refresh a committed Selection.
+// into the gateway cache and forwards it to the Group Decision module
+// for each WAN on the affected interface, even when the Gateway is
+// unchanged: the kernel flushes IPv4 routes through a device that goes
+// down without an RTM_DELROUTE, so a re-added main-table default with
+// the same Gateway may be the only sign that a Group-table route is
+// gone (docs/adr/0017-repair-committed-group-table.md). The module
+// owns whether to retry a Decision or refresh a committed Selection.
 func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	prev, hadPrev := d.gateways.get(e.Iface, e.Family)
 	switch e.Op {
@@ -307,17 +311,12 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 		d.gateways.clear(e.Iface, e.Family)
 	}
 
-	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !prev.Equal(e.Gateway)
-	if !changed {
-		return
-	}
-
 	for wanName, wan := range d.cfg.Wans {
 		if wan.Interface != e.Iface {
 			continue
 		}
 		for name, g := range d.groups {
-			committed := g.GatewayChanged(ctx, wanName, probe.Family(e.Family))
+			committed := g.RouteObserved(ctx, wanName, probe.Family(e.Family))
 			d.publishDecision(ctx, d.cfg.Groups[name], committed)
 		}
 	}
@@ -327,7 +326,10 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	// already-active WAN, a gateway disappearing on the standby)
 	// wouldn't otherwise update state.json, leaving the
 	// wans[<name>].gateways[v4|v6] fields stale.
-	d.writeStateSnapshot(time.Time{})
+	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !prev.Equal(e.Gateway)
+	if changed {
+		d.writeStateSnapshot(time.Time{})
+	}
 }
 
 // writeStateSnapshot serializes the runtime state into the form

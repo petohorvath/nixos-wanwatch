@@ -84,3 +84,4 @@ _Avoid_: callback, handler, Apply
 - Each **Decision** triggers one **Apply**, followed by the **Hooks**.
 - A **Decision** counts when the **Strategy** chooses a new target, before its **Apply** converges. A target chosen while an earlier one is still pending can be the current **Selection** again; that **Decision** reapplies its routes but changes no **Selection** and runs no **Hooks**.
 - A **Gateway** is tracked per (**WAN**, **Family**) and independently of **Health**: a healthy **WAN** may not yet have a **Gateway**.
+- **Apply** also rewrites the committed **Selection**'s routes on each main-table default-route observation and, after a failed rewrite, repairs every **Family**. A repair is no **Decision**: it changes no **Selection** and runs no **Hooks**.

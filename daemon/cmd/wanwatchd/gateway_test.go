@@ -184,9 +184,10 @@ func routeStep(name, active string, want []string, events ...rtnl.RouteEvent) st
 }
 
 // TestGatewayDiscovery pins how RouteEvents reach the Gateway cache,
-// State, and the Selection's group-table routes: only a changed
-// Gateway of a probed Family on the selected WAN is rewritten, and
-// no Gateway change alone moves the Selection or delivers a Hook.
+// State, and the Selection's group-table routes: every observation of
+// a probed Family on the selected WAN rewrites that Family's route,
+// only a changed Gateway publishes State, and no Gateway change alone
+// moves the Selection or delivers a Hook.
 func TestGatewayDiscovery(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -291,6 +292,7 @@ func TestGatewayDiscovery(t *testing.T) {
 				routeStep(
 					"backup Gateways", "primary", nil,
 					gateway("wwan0", probe.FamilyV4, "198.51.100.1"),
+					gateway("wwan0", probe.FamilyV4, "198.51.100.1"),
 					gateway("wwan0", probe.FamilyV6, "2001:db8:1::1"),
 					gateway("wwan0", probe.FamilyV4, "198.51.100.2"),
 					gatewayGone("wwan0", probe.FamilyV6),
@@ -319,6 +321,9 @@ func TestGatewayDiscovery(t *testing.T) {
 				routeStep("scope-link v4 default appears", "primary",
 					[]string{"route home v4 eth0 scope link"},
 					gateway("eth0", probe.FamilyV4, "")),
+				routeStep("same scope-link v4 default again", "primary",
+					[]string{"route home v4 eth0 scope link"},
+					gateway("eth0", probe.FamilyV4, "")),
 			},
 			gateways: map[string]gatewayPair{"primary": {}},
 		},
@@ -345,7 +350,10 @@ func TestGatewayDiscovery(t *testing.T) {
 			gateways: map[string]gatewayPair{"primary": {"192.0.2.1", "2001:db8::1"}},
 		},
 		{
-			name: "duplicate Gateway event writes and publishes nothing",
+			// The kernel flushes IPv4 routes through a device that goes
+			// down without an RTM_DELROUTE, so the Group-table route can
+			// be gone while the cached Gateway is unchanged.
+			name: "duplicate Gateway event rewrites the route and publishes nothing",
 			steps: []step{
 				primaryActive,
 				routeStep("v4 Gateway changes", "primary",
@@ -360,6 +368,7 @@ func TestGatewayDiscovery(t *testing.T) {
 							h.tb.Errorf("duplicate Gateway event published State: %v → %v", before, after)
 						}
 					},
+					want:   []string{"route home v4 eth0 via 192.0.2.2"},
 					active: "primary",
 				},
 			},

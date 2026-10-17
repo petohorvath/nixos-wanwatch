@@ -675,6 +675,7 @@ func TestDecisionPublication(t *testing.T) {
 				{
 					name:   "the same v6 Gateway again",
 					do:     func(h *harness) { h.Route(gateway("eth0", probe.FamilyV6, "2001:db8::1")) },
+					want:   []string{"route home v6 eth0 via 2001:db8::1"},
 					active: "primary",
 				},
 			},
