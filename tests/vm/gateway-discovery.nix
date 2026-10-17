@@ -4,10 +4,7 @@
   publish it in State, and write a `via` default route into the
   Group's table.
 */
-{
-  pkgs,
-  nixosModule,
-}:
+{ inputs, pkgs }:
 
 pkgs.testers.runNixOSTest {
   name = "wanwatch-gateway-discovery";
@@ -21,9 +18,9 @@ pkgs.testers.runNixOSTest {
     };
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
       virtualisation.vlans = [ 1 ];
       networking.firewall.enable = lib.mkForce false;
 

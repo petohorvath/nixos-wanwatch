@@ -46,6 +46,18 @@
 
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Runs the nix-unit suites through its flake-parts module. Its
+    # nixpkgs follows the root input, and the dev partition takes the
+    # nix-unit package from nixpkgs.
+    nix-unit = {
+      url = "github:nix-community/nix-unit";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        treefmt-nix.follows = "";
+        nix-github-actions.follows = "";
+      };
+    };
   };
 
   outputs =
@@ -57,11 +69,10 @@
       ...
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
+      # The daemon and the NixOS module are Linux-only.
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
       ];
 
       # The development outputs evaluate in a separate partition, so

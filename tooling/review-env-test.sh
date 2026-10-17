@@ -2,7 +2,7 @@
 # Exercise the real review wrapper and toolchain, including command failures.
 set -euo pipefail
 
-repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 wrapper="$repo_root/tooling/review-env.sh"
 test_dir=$(mktemp -d -t wanwatch-review-test.XXXXXXXX)
 trap 'rm -rf -- "$test_dir"' EXIT

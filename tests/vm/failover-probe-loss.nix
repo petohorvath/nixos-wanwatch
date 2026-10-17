@@ -11,10 +11,7 @@
   Both WANs are pointToPoint. A 200 ms interval and
   consecutive{Up,Down} = 2 keep each transition under a second.
 */
-{
-  pkgs,
-  nixosModule,
-}:
+{ inputs, pkgs }:
 
 pkgs.testers.runNixOSTest {
   name = "wanwatch-failover-probe-loss";
@@ -40,9 +37,9 @@ pkgs.testers.runNixOSTest {
       };
 
     router =
-      { lib, ... }:
+      { lib, pkgs, ... }:
       {
-        imports = [ nixosModule ];
+        imports = [ inputs.self.nixosModules.default ];
         virtualisation.vlans = [
           1
           2

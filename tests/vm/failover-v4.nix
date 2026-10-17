@@ -7,18 +7,15 @@
   (docs/specs/failover.md) drives the Decision; a long probe interval keeps cooked
   verdicts out of the test window.
 */
-{
-  pkgs,
-  nixosModule,
-}:
+{ inputs, pkgs }:
 
 pkgs.testers.runNixOSTest {
   name = "wanwatch-failover-v4";
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
 
       boot.kernelModules = [ "dummy" ];
 

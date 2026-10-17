@@ -1,6 +1,6 @@
 /*
-  Fixtures shared by the unit suites; `default.nix` passes them to
-  every suite as `fixtures`.
+  Value-type fixtures shared by the unit suites; `test-context.nix`
+  passes them to every suite in `fixtures`.
 
     inputs           — a minimal and a full valid input per value type.
                        Each `full` input sets every field in its

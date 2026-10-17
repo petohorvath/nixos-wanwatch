@@ -4,18 +4,15 @@
   v6 default route in the Group's table is checked at every
   transition, so the kernel must follow the Selection in State.
 */
-{
-  pkgs,
-  nixosModule,
-}:
+{ inputs, pkgs }:
 
 pkgs.testers.runNixOSTest {
   name = "wanwatch-recovery-v6";
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
 
       boot.kernelModules = [ "dummy" ];
 

@@ -51,8 +51,8 @@ buildGoModule {
     "-X main.commit=${revision}"
   ];
 
-  # The tests run in the `daemon`, `coverage`, and `race` flake checks
-  # and the VM tier (AGENTS.md), not in the package build.
+  # The tests run in the `build-daemon` and `vm-*` flake checks
+  # (AGENTS.md), not in the package build.
   doCheck = false;
 
   meta = {

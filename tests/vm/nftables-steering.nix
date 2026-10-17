@@ -6,10 +6,7 @@
   the Group's table while an unmarked lookup finds no route. Single
   node; nftzones-integration covers the nftzones variant.
 */
-{
-  pkgs,
-  nixosModule,
-}:
+{ inputs, pkgs }:
 
 let
   # The README example, verbatim; keep the two in sync.
@@ -34,10 +31,10 @@ pkgs.testers.runNixOSTest {
   name = "wanwatch-nftables-steering";
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
       imports = [
-        nixosModule
+        inputs.self.nixosModules.default
         steering
       ];
 

@@ -3,18 +3,15 @@
   fail over to the backup and switch back, so a blip on the better
   link does not leave traffic on the backup.
 */
-{
-  pkgs,
-  nixosModule,
-}:
+{ inputs, pkgs }:
 
 pkgs.testers.runNixOSTest {
   name = "wanwatch-recovery";
 
   nodes.router =
-    { lib, ... }:
+    { lib, pkgs, ... }:
     {
-      imports = [ nixosModule ];
+      imports = [ inputs.self.nixosModules.default ];
 
       boot.kernelModules = [ "dummy" ];
 

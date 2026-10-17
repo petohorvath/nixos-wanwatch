@@ -1,22 +1,12 @@
-/*
-  nix-unit tests for the wanwatch library, exposed as the flake's
-  `tests.unit`. Each suite receives one test context and returns nested
-  `testFoo = { expr; expected; }` attrsets, which nix-unit walks.
-*/
-{
-  lib,
-  libnet,
-  wanwatch,
-}:
+# The unit entry point: nix-unit suites that evaluate the wanwatch
+# library and its option types. `dev/default.nix` passes the flake's
+# inputs.
+{ libnet, nixpkgs }:
 let
-  testContext = {
-    inherit lib libnet wanwatch;
-    fixtures = import ./fixtures.nix;
-    helpers = import ./helpers.nix { inherit lib; };
-  };
+  testContext = import ../test-context.nix { inherit libnet nixpkgs; };
 in
 {
-  composition = import ./composition.nix testContext;
+  lib = import ./lib.nix testContext;
   skeleton = import ./skeleton.nix testContext;
 
   internal = {

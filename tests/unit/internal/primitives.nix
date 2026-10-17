@@ -1,15 +1,16 @@
 # Tests for `lib/internal/primitives.nix`, which `lib/default.nix` does
-# not export, so the suite imports it directly.
+# not export, so the suite reaches it through `internal`.
 {
   fixtures,
   helpers,
+  internal,
   lib,
   ...
 }:
 let
   inherit (fixtures) cases;
   inherit (helpers) predicateTests;
-  primitives = import ../../../lib/internal/primitives.nix { inherit lib; };
+  inherit (internal) primitives;
 
   # Accepts positive numbers, so `partitionTry` sees both outcomes.
   parsePositive =
