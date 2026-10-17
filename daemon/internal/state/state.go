@@ -73,7 +73,7 @@ type FamilyHealth struct {
 // Group is the per-Group state slice.
 type Group struct {
 	Active         *string    `json:"active"`      // nil = no member healthy
-	ActiveSince    *time.Time `json:"activeSince"` // nil if never active
+	ActiveSince    *time.Time `json:"activeSince"` // last Selection change, a down included; nil if never active
 	DecisionsTotal int        `json:"decisionsTotal"`
 	Strategy       string     `json:"strategy"`
 }

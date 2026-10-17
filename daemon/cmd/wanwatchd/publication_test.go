@@ -81,8 +81,9 @@ func cachedGateways(h *harness) {
 }
 
 // assertDecisionTimes checks the State published after step s against
-// the Hooks of the Decisions s made. An up or switch Decision starts
-// its Group's Selection at its Hook timestamp, and no Decision is
+// the Hooks of the Decisions s made. Every Decision that runs a Hook
+// starts its Group's Selection, or its absence after a down, at its
+// Hook timestamp, and no Decision is
 // stamped after State's updatedAt: a later Health or Gateway
 // publication in the same step may restamp it. With s.decisionLast,
 // updatedAt equals the step's last Hook timestamp. Each Group may make
@@ -103,10 +104,8 @@ func assertDecisionTimes(tb testing.TB, h *harness, s step, decisions []state.Ho
 			tb.Errorf("step %q made more than one Decision in Group %q; split it so each is checked", s.name, d.Group)
 		}
 		groups[d.Group] = true
-		if d.Event != state.EventDown {
-			if since := st.Groups[d.Group].ActiveSince; since == nil || !since.Equal(d.Timestamp) {
-				tb.Errorf("step %q: %s activeSince = %v, want the Hook timestamp %v", s.name, d.Group, since, d.Timestamp)
-			}
+		if since := st.Groups[d.Group].ActiveSince; since == nil || !since.Equal(d.Timestamp) {
+			tb.Errorf("step %q: %s activeSince = %v, want the Hook timestamp %v", s.name, d.Group, since, d.Timestamp)
 		}
 		if st.UpdatedAt.Before(d.Timestamp) {
 			tb.Errorf("step %q: updatedAt = %v precedes the %s Decision at %v", s.name, st.UpdatedAt, d.Group, d.Timestamp)

@@ -192,8 +192,9 @@ func TestGroupProgression(t *testing.T) {
 					if got.At.Before(started) || got.At.After(time.Now()) || got.At.Location() != time.UTC {
 						t.Errorf("%s: invalid commit timestamp %v", s.name, got.At)
 					}
-					// Only a change to a WAN starts a new Selection.
-					if e := s.wantCommit.event; e == state.EventUp || e == state.EventSwitch {
+					// Every Selection change restamps, a down included;
+					// a commit that keeps its Selection does not.
+					if s.wantCommit.event != "" {
 						since = &got.At
 					}
 				}
