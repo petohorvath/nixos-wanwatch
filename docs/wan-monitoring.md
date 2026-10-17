@@ -27,16 +27,16 @@ services.wanwatch.wans.lte = {
 
 Every Probe field except `targets` has a default:
 
-| Field | Default |
-|---|---|
-| `method` | `icmp` |
-| `intervalMs` | `500` |
-| `timeoutMs` | `1000` |
-| `windowSize` | `10` |
-| `thresholds.lossPctUp` / `lossPctDown` | `10` / `30` |
-| `thresholds.rttMsUp` / `rttMsDown` | `250` / `500` |
-| `hysteresis.consecutiveUp` / `consecutiveDown` | `5` / `3` |
-| `familyHealthPolicy` | `all` |
+| Field                                          | Default       |
+| ---------------------------------------------- | ------------- |
+| `method`                                       | `icmp`        |
+| `intervalMs`                                   | `500`         |
+| `timeoutMs`                                    | `1000`        |
+| `windowSize`                                   | `10`          |
+| `thresholds.lossPctUp` / `lossPctDown`         | `10` / `30`   |
+| `thresholds.rttMsUp` / `rttMsDown`             | `250` / `500` |
+| `hysteresis.consecutiveUp` / `consecutiveDown` | `5` / `3`     |
+| `familyHealthPolicy`                           | `all`         |
 
 Override them per WAN:
 
@@ -64,10 +64,10 @@ Every `intervalMs`, the Probe sends one ICMP echo per Target. A reply within `ti
 
 The most recent `windowSize` Samples per Target form the Window, which yields three statistics:
 
-| Statistic | Computation |
-|---|---|
-| `LossRatio` | `lost / total`, in `[0, 1]` |
-| `MeanRTT` | mean over non-lost Samples |
+| Statistic      | Computation                                         |
+| -------------- | --------------------------------------------------- |
+| `LossRatio`    | `lost / total`, in `[0, 1]`                         |
+| `MeanRTT`      | mean over non-lost Samples                          |
 | `JitterMicros` | population standard deviation over non-lost Samples |
 
 Per-Target statistics average into a per-Family aggregate, which the thresholds evaluate. The full algorithm is in [`specs/probe-algorithm.md`](./specs/probe-algorithm.md).
@@ -76,10 +76,10 @@ Per-Target statistics average into a per-Family aggregate, which the thresholds 
 
 Two thresholds per metric form a band:
 
-| Current Health | Becomes unhealthy when | Becomes healthy when |
-|---|---|---|
-| healthy | `loss ≥ lossPctDown` or `rtt ≥ rttMsDown` | — |
-| unhealthy | — | `loss ≤ lossPctUp` and `rtt ≤ rttMsUp` |
+| Current Health | Becomes unhealthy when                    | Becomes healthy when                   |
+| -------------- | ----------------------------------------- | -------------------------------------- |
+| healthy        | `loss ≥ lossPctDown` or `rtt ≥ rttMsDown` | —                                      |
+| unhealthy      | —                                         | `loss ≤ lossPctUp` and `rtt ≤ rttMsUp` |
 
 Between the bands, Health holds. The Nix validator enforces `Up < Down` for both metrics, so the band is never empty.
 
@@ -98,10 +98,10 @@ Carrier loss makes the WAN unhealthy immediately, without waiting for Probe time
 
 Each (WAN, Family) has its own Health. `probe.familyHealthPolicy` combines them into WAN Health:
 
-| Policy | WAN is healthy when |
-|---|---|
-| `all` (default) | every probed Family is healthy |
-| `any` | at least one probed Family is healthy |
+| Policy          | WAN is healthy when                   |
+| --------------- | ------------------------------------- |
+| `all` (default) | every probed Family is healthy        |
+| `any`           | at least one probed Family is healthy |
 
 A Family without a full Window yet counts as healthy. See [`selector.md`](./selector.md#family-policy-aggregation) and [ADR 0005](./adr/0005-family-health-policy-defaults-to-all.md).
 

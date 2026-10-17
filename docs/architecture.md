@@ -187,10 +187,10 @@ A full queue drops the newest event, so slow Hooks cannot stall routing or watch
 
 ## Where to look
 
-| Goal | Read |
-|---|---|
-| Add a Strategy | `lib/internal/group.nix` (`validStrategies`), `lib/internal/selector.nix`, `daemon/internal/selector/`. `tests/unit/internal/selector.nix:testStrategiesMatchGroupValidStrategies` catches cross-language drift. |
-| Change a metric | `daemon/internal/metrics/metrics.go`, `docs/metrics.md` |
-| Add a Hook env var | `daemon/internal/state/hooks.go` (`Env*` constants), `docs/specs/daemon-state.md` |
-| Tune Probe defaults | `lib/internal/probe.nix` (`defaults`) |
-| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`, and `docs/specs/daemon-config.md`; after the first release, also bump `schemaVersion` in both |
+| Goal                                 | Read                                                                                                                                                                                                             |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a Strategy                       | `lib/internal/group.nix` (`validStrategies`), `lib/internal/selector.nix`, `daemon/internal/selector/`. `tests/unit/internal/selector.nix:testStrategiesMatchGroupValidStrategies` catches cross-language drift. |
+| Change a metric                      | `daemon/internal/metrics/metrics.go`, `docs/metrics.md`                                                                                                                                                          |
+| Add a Hook env var                   | `daemon/internal/state/hooks.go` (`Env*` constants), `docs/specs/daemon-state.md`                                                                                                                                |
+| Tune Probe defaults                  | `lib/internal/probe.nix` (`defaults`)                                                                                                                                                                            |
+| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`, and `docs/specs/daemon-config.md`; after the first release, also bump `schemaVersion` in both                                                     |

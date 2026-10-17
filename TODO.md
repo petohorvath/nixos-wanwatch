@@ -48,12 +48,12 @@ stays at its fixed path ([ADR-0014](./docs/adr/0014-module-owns-identity-and-pat
 
 ### Pre-apply hooks
 
-Add a `<hooksDir>/pre-{up,down,switch}.d/*` tier that fires *before*
+Add a `<hooksDir>/pre-{up,down,switch}.d/*` tier that fires _before_
 the route apply, complementing the existing hooks (which fire after
 the apply converges). Useful for "about to switch" notifications or
 staging work.
 
-Pre-hooks stay notification-only: a pre-hook that *gates* or *blocks*
+Pre-hooks stay notification-only: a pre-hook that _gates_ or _blocks_
 the apply would make hooks part of the apply transaction, which
 [ADR-0009](./docs/adr/0009-publish-after-apply-converges.md) rules
 out — promoting them would need a new ADR first. `daemon/cmd/wanwatchd/daemon.go` (notifyHooks / publishDecision),
@@ -193,9 +193,9 @@ to dodge collision. `daemon/internal/rtnl/route_test.go`.
 
 The v6 gateway-discovery scenario can flake on slower CI runners.
 Pattern: systemd-networkd installs the v6 default route some
-milliseconds *after* wanwatchd's `rtnl.RouteSubscriber.Prime`
+milliseconds _after_ wanwatchd's `rtnl.RouteSubscriber.Prime`
 returns (`primed=0` in the daemon log), then the subscription's
-`Run` is supposed to catch the RTM_NEWROUTE — and it *usually*
+`Run` is supposed to catch the `RTM_NEWROUTE` — and it _usually_
 does, but on at least one observed CI run it didn't, and
 `state.json`'s `wans.uplink.gateways.v6` never surfaced
 `fd00:1::1`.
@@ -236,7 +236,7 @@ Fix candidates depending on which leg:
 - Option 2: replace the netlink library's Gw decode with a
   manual RTA_GATEWAY parse for v6, or update the library pin.
 - Option 3: explicitly set `Groups = RTNLGRP_IPV4_ROUTE |
-  RTNLGRP_IPV6_ROUTE` in `RouteSubscribeOptions` rather than
+RTNLGRP_IPV6_ROUTE` in `RouteSubscribeOptions` rather than
   relying on the default.
 
 ---

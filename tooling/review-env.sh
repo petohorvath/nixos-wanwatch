@@ -18,8 +18,8 @@ if [[ $# == 0 ]]; then
   exit 2
 fi
 case "$(uname -s).$(uname -m)" in
-  Linux.x86_64|Linux.aarch64) ;;
-  *) blocked 'daemon review requires x86_64-linux or aarch64-linux' ;;
+Linux.x86_64 | Linux.aarch64) ;;
+*) blocked 'daemon review requires x86_64-linux or aarch64-linux' ;;
 esac
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -63,8 +63,8 @@ if ! command -v nix >/dev/null 2>&1; then
   printf '%s  %s\n' \
     bf6d12da4aeaae38ab509dc736df648597bcdee051046ea76d3d53d5b18fa54a \
     "$installer_dir/install" | sha256sum --check --status || blocked 'upstream Nix installer checksum mismatch'
-  sh "$installer_dir/install" --no-daemon --yes --no-channel-add --no-modify-profile \
-    || blocked 'upstream Nix installation failed'
+  sh "$installer_dir/install" --no-daemon --yes --no-channel-add --no-modify-profile ||
+    blocked 'upstream Nix installation failed'
 fi
 
 command -v nix >/dev/null 2>&1 || blocked 'the installer did not provide a Nix executable'

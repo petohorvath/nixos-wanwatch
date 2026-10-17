@@ -20,14 +20,14 @@ The runtime path is: NixOS configuration → `lib` validation and rendering → 
 
 Before changing a contract, read its sources and documentation together:
 
-| Contract | Sources and documentation |
-|---|---|
-| Nix options and outputs | `lib/types/`, `nixos/`, `README.md` |
-| Daemon config JSON | `lib/internal/config.nix`, `daemon/internal/config/`, the golden `daemon/internal/config/testdata/config.golden.json`, `docs/specs/daemon-config.md` |
-| State and Hooks | `daemon/internal/state/`, `docs/specs/daemon-state.md` |
-| Selection and failover | the Nix and Go selectors, `docs/selector.md`, `docs/specs/failover.md` |
-| Metrics | `daemon/internal/metrics/`, `docs/metrics.md` |
-| Firewall composition | `docs/nftzones-integration.md` |
+| Contract                | Sources and documentation                                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nix options and outputs | `lib/types/`, `nixos/`, `README.md`                                                                                                                  |
+| Daemon config JSON      | `lib/internal/config.nix`, `daemon/internal/config/`, the golden `daemon/internal/config/testdata/config.golden.json`, `docs/specs/daemon-config.md` |
+| State and Hooks         | `daemon/internal/state/`, `docs/specs/daemon-state.md`                                                                                               |
+| Selection and failover  | the Nix and Go selectors, `docs/selector.md`, `docs/specs/failover.md`                                                                               |
+| Metrics                 | `daemon/internal/metrics/`, `docs/metrics.md`                                                                                                        |
+| Firewall composition    | `docs/nftzones-integration.md`                                                                                                                       |
 
 Keep schema versions synchronized across producers, consumers, tests, and specs. Plaintext secrets stay out of source, Nix expressions, command lines, and the Nix store.
 
@@ -37,7 +37,7 @@ Use the [`GLOSSARY.md`](./GLOSSARY.md) terms exactly in code, comments, commit m
 
 ## Development environment
 
-The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, formatter, and the nix-unit `tests` output ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). The tests follow the devnix-labs test standard ([ADR-0015](./docs/adr/0015-adopt-test-standard.md)): `dev/default.nix` runs the nix-unit suites through nix-unit's flake-parts module, `tests/default.nix` assembles the build and VM entries, and `dev/checks.nix` adds the formatting, lint, and package entries. `nix develop` provides Go, gopls, golangci-lint, statix, deadnix, and the treefmt wrapper. The flake supports `x86_64-linux` and `aarch64-linux` only, because the daemon and the NixOS module are Linux-only.
+The flake is the only entry point. `flake.nix` assembles the public outputs with flake-parts; the `dev` partition in `dev/` defines the checks, development shells, formatter, and the nix-unit `tests` output ([ADR-0011](./docs/adr/0011-flake-parts-with-dev-partition.md)). The tests follow the devnix-labs test standard ([ADR-0015](./docs/adr/0015-adopt-test-standard.md)): `dev/default.nix` runs the nix-unit suites through nix-unit's flake-parts module, `tests/default.nix` assembles the build and VM entries, and `dev/checks.nix` adds the lint and package entries. Formatting and linting follow the devnix-labs code quality standard ([ADR-0016](./docs/adr/0016-adopt-code-quality-standard.md)): treefmt-nix's flake-parts module, configured in `dev/treefmt.nix`, provides `nix fmt` and the `treefmt` entry. `nix develop` provides Go, gopls, golangci-lint, statix, and treefmt with every program that `dev/treefmt.nix` enables. The flake supports `x86_64-linux` and `aarch64-linux` only, because the daemon and the NixOS module are Linux-only.
 
 Override sibling flakes with absolute paths:
 
@@ -48,12 +48,15 @@ nix build --override-input libnet path:/absolute/path/to/nix-libnet \
 
 ## Formatting and linting
 
-`nix fmt` runs treefmt (`nixfmt`, `gofumpt`, `goimports`). golangci-lint (`.golangci.yml`, v2 format) checks lint only; formatting failures belong to treefmt.
+`nix fmt` runs treefmt with the programs in `dev/treefmt.nix`: nixfmt and deadnix for Nix, gofumpt and goimports for Go, shfmt and shellcheck for shell, ruff-format and ruff-check for Python, prettier for Markdown, YAML, and JSON, and actionlint for the workflows. deadnix and ruff-check apply their fixes, so review the diff before committing. A finding that a tool cannot fix fails `nix fmt` and the `treefmt` entry. Prettier runs with its defaults, so an editor that formats on save matches `nix fmt`. treefmt skips `daemon/vendor/` and the `*.golden.json` files, whose bytes come from their generators.
+
+statix and golangci-lint (`.golangci.yml`, v2 format) run in the `lint` entry instead, because treefmt runs only `statix fix`, which skips the lints it cannot fix, and passes golangci-lint single files instead of packages. golangci-lint checks lint only; formatting failures belong to treefmt. A shell file without a shebang starts with a `# shellcheck shell=bash` directive, as `.envrc` does.
 
 ```sh
 nix fmt
+nix build .#checks.x86_64-linux.treefmt
+nix build .#checks.x86_64-linux.lint
 nix develop --command statix check .
-nix develop --command deadnix --fail .
 nix develop --command bash -c 'cd daemon && go vet ./... && golangci-lint run ./...'
 git diff --check
 ```
@@ -62,15 +65,15 @@ git diff --check
 
 Run the smallest checks that exercise the change first. The examples use `x86_64-linux`.
 
-| Check | Covers |
-|---|---|
-| `formatting` | treefmt formatting drift |
-| `lint` | statix and deadnix over the repository, and the `.golangci.yml` linters over the daemon |
-| `nix-unit` | The nix-unit suites: `unit` (pure-Nix library tests, including the value-type skeleton tests) and `integration` (NixOS module evaluation, rendered config, Telegraf wiring, expected rejections, and the flake's outputs) |
-| `build-daemon` | All Go tests in a hermetic, network-disabled build (`tests`), the per-package coverage floors defined in `tests/build/daemon.nix` (`coverage`), and all Go tests with the race detector (`race`) |
-| `build-observation` | The VM observation helpers' contract tests, without a VM |
-| `package-wanwatchd` | The production daemon derivation |
-| `vm-<scenario>` | NixOS VM scenarios (Linux with KVM) |
+| Check               | Covers                                                                                                                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `treefmt`           | Every program in `dev/treefmt.nix`: fails when a tool would change a file or reports a finding it cannot fix                                                                                                              |
+| `lint`              | statix over the repository, and the `.golangci.yml` linters over the daemon                                                                                                                                               |
+| `nix-unit`          | The nix-unit suites: `unit` (pure-Nix library tests, including the value-type skeleton tests) and `integration` (NixOS module evaluation, rendered config, Telegraf wiring, expected rejections, and the flake's outputs) |
+| `build-daemon`      | All Go tests in a hermetic, network-disabled build (`tests`), the per-package coverage floors defined in `tests/build/daemon.nix` (`coverage`), and all Go tests with the race detector (`race`)                          |
+| `build-observation` | The VM observation helpers' contract tests, without a VM                                                                                                                                                                  |
+| `package-wanwatchd` | The production daemon derivation                                                                                                                                                                                          |
+| `vm-<scenario>`     | NixOS VM scenarios (Linux with KVM)                                                                                                                                                                                       |
 
 The flake has one nixpkgs input, pinned to the stable branch. To run a check against nixos-unstable, override that input; `--override-input` leaves `flake.lock` unchanged ([ADR-0012](./docs/adr/0012-single-nixpkgs-input.md)).
 
@@ -126,12 +129,12 @@ Coverage floors, lint rules, security hardening, and CI gates stay at their curr
 
 ## Audit cadence
 
-| Audit | Cadence | Mechanism |
-|---|---|---|
-| Vulnerabilities | None (paused) | No workflow runs `govulncheck` or `vulnix`; [`TODO.md`](./TODO.md) tracks restoring the audit |
-| Primary nixpkgs | Monthly | Manual `nix flake update nixpkgs` on the pinned stable branch; merge after reviewing the lock delta and CI |
-| Other dependencies | Monthly | Manual review of `go.mod` and other `flake.lock` deltas |
-| Public API, glossary, and convention drift | Each minor version | Manual review of `lib/default.nix`, daemon exports, `GLOSSARY.md`, and this file against the code |
+| Audit                                      | Cadence            | Mechanism                                                                                                  |
+| ------------------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Vulnerabilities                            | None (paused)      | No workflow runs `govulncheck` or `vulnix`; [`TODO.md`](./TODO.md) tracks restoring the audit              |
+| Primary nixpkgs                            | Monthly            | Manual `nix flake update nixpkgs` on the pinned stable branch; merge after reviewing the lock delta and CI |
+| Other dependencies                         | Monthly            | Manual review of `go.mod` and other `flake.lock` deltas                                                    |
+| Public API, glossary, and convention drift | Each minor version | Manual review of `lib/default.nix`, daemon exports, `GLOSSARY.md`, and this file against the code          |
 
 ## Documentation map
 

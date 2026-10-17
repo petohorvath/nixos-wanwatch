@@ -4,21 +4,21 @@ The v1 contract is **single-active per Group, deterministic Strategy, atomic App
 
 ## Definitions
 
-| Term | Meaning |
-|---|---|
-| **Selection** | The current chosen Member per Group. `null` means no Selection. |
-| **Decision** | A Selection change, old → new. Starts the Apply pipeline. |
-| **Apply** | Route write, State snapshot, Hook dispatch, and metric update, in that order. |
+| Term          | Meaning                                                                       |
+| ------------- | ----------------------------------------------------------------------------- |
+| **Selection** | The current chosen Member per Group. `null` means no Selection.               |
+| **Decision**  | A Selection change, old → new. Starts the Apply pipeline.                     |
+| **Apply**     | Route write, State snapshot, Hook dispatch, and metric update, in that order. |
 
 A Group always has exactly one Selection, which may be `null`. The selector emits at most one Decision per recompute.
 
 ## When a Decision fires
 
-| Event | Trigger | Reason label |
-|---|---|---|
-| `ProbeResult` flips a Family's Health | `wan.healthy` aggregate changes | `health` |
-| `LinkEvent` flips `carrierUp()` | rtnl carrier or operstate change | `carrier` |
-| Daemon startup | Initial Selection from cold-start carrier-only Health | `carrier`, from the startup link dump |
+| Event                                 | Trigger                                               | Reason label                          |
+| ------------------------------------- | ----------------------------------------------------- | ------------------------------------- |
+| `ProbeResult` flips a Family's Health | `wan.healthy` aggregate changes                       | `health`                              |
+| `LinkEvent` flips `carrierUp()`       | rtnl carrier or operstate change                      | `carrier`                             |
+| Daemon startup                        | Initial Selection from cold-start carrier-only Health | `carrier`, from the startup link dump |
 
 An event recomputes every Group containing the affected WAN. Each `decision.Group` owns its Selection independently, so one Group's pending Decision never blocks another's commit.
 
@@ -90,14 +90,14 @@ Replaying the same event sequence (config, ProbeResults, LinkEvents) always prod
 
 ## Failure modes
 
-| Failure mode | Daemon behavior |
-|---|---|
-| `apply.WriteDefault` errors | The Decision stays pending; the committed Selection and Hooks stay unchanged. Probe cycles or Gateway changes on the pending WAN retry Apply. `wanwatch_apply_route_errors_total{group,family}` increments. |
-| `state.Writer.Write` errors | Logged and counted; the previous `state.json` stays in place (atomic write). |
-| A Hook times out (5 s default) | Logged and counted; the remaining Hooks in the `.d` directory still run. |
-| ProbeResult arrives during a Decision | Buffered on its channel; processed after the current Decision completes. |
-| LinkEvent arrives during a Decision | Same: one goroutine drains both channels in order. |
-| All Members unhealthy | A transition to `active = null` commits without route writes and emits a `down` Hook if a Member was active. Routes stay in place; repeated all-down observations emit no Decision. |
+| Failure mode                          | Daemon behavior                                                                                                                                                                                             |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apply.WriteDefault` errors           | The Decision stays pending; the committed Selection and Hooks stay unchanged. Probe cycles or Gateway changes on the pending WAN retry Apply. `wanwatch_apply_route_errors_total{group,family}` increments. |
+| `state.Writer.Write` errors           | Logged and counted; the previous `state.json` stays in place (atomic write).                                                                                                                                |
+| A Hook times out (5 s default)        | Logged and counted; the remaining Hooks in the `.d` directory still run.                                                                                                                                    |
+| ProbeResult arrives during a Decision | Buffered on its channel; processed after the current Decision completes.                                                                                                                                    |
+| LinkEvent arrives during a Decision   | Same: one goroutine drains both channels in order.                                                                                                                                                          |
+| All Members unhealthy                 | A transition to `active = null` commits without route writes and emits a `down` Hook if a Member was active. Routes stay in place; repeated all-down observations emit no Decision.                         |
 
 Keeping stale routes when every Member is unhealthy is intentional: removing the last default route would leave no egress at all. Operators who want a different policy can add a `down` Hook that runs `ip route flush table <T>`.
 

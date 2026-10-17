@@ -3,7 +3,11 @@
 # this partition.
 { inputs, self, ... }:
 {
-  imports = [ inputs.nix-unit.modules.flake.default ];
+  imports = [
+    inputs.nix-unit.modules.flake.default
+    # Sets `formatter` and adds the `treefmt` check.
+    inputs.treefmt-nix.flakeModule
+  ];
 
   perSystem =
     {
@@ -12,19 +16,18 @@
       system,
       ...
     }:
-    let
-      treefmt = inputs.treefmt-nix.lib.evalModule pkgs ./formatter.nix;
-    in
     {
-      formatter = treefmt.config.build.wrapper;
+      treefmt.imports = [ ./treefmt.nix ];
 
       devShells = {
-        default = pkgs.callPackage ./shell.nix { inherit (config) formatter; };
+        default = pkgs.callPackage ./shell.nix {
+          treefmtShell = config.treefmt.build.devShell;
+        };
         review = pkgs.callPackage ./review-shell.nix { };
       };
 
       checks = import ./checks.nix {
-        inherit inputs pkgs treefmt;
+        inherit inputs pkgs;
         packages = self.packages.${system};
       };
 

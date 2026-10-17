@@ -58,12 +58,12 @@ return Selection{Active: Active{Wan: healthy[0].Member.Wan, Has: true}}
 
 The lowest `priority` wins, and ties go to the lexicographically first WAN name, so equal priorities stay deterministic.
 
-| Members (priority, Health) | Active |
-|---|---|
-| `[primary=1 ✓, backup=2 ✓]` | `primary` |
-| `[primary=1 ✗, backup=2 ✓]` | `backup` |
-| `[primary=1 ✗, backup=2 ✗]` | `NoActive` |
-| `[a=1 ✓, b=1 ✓, c=1 ✓]` | `a` (tie, lexicographic name) |
+| Members (priority, Health)                | Active                             |
+| ----------------------------------------- | ---------------------------------- |
+| `[primary=1 ✓, backup=2 ✓]`               | `primary`                          |
+| `[primary=1 ✗, backup=2 ✓]`               | `backup`                           |
+| `[primary=1 ✗, backup=2 ✗]`               | `NoActive`                         |
+| `[a=1 ✓, b=1 ✓, c=1 ✓]`                   | `a` (tie, lexicographic name)      |
 | `[primary=2 ✗, backup=2 ✓, fallback=3 ✓]` | `backup` (lowest healthy priority) |
 
 ## Strategy registry
@@ -82,10 +82,10 @@ Two stages turn raw Samples into the boolean Health the selector consumes.
 
 ### Stage 1: band-pass thresholds (per Family)
 
-| Current Health | Becomes unhealthy when | Becomes healthy when |
-|---|---|---|
-| healthy | `loss ≥ lossPctDown` or `rtt ≥ rttMsDown` | — |
-| unhealthy | — | `loss ≤ lossPctUp` and `rtt ≤ rttMsUp` |
+| Current Health | Becomes unhealthy when                    | Becomes healthy when                   |
+| -------------- | ----------------------------------------- | -------------------------------------- |
+| healthy        | `loss ≥ lossPctDown` or `rtt ≥ rttMsDown` | —                                      |
+| unhealthy      | —                                         | `loss ≤ lossPctUp` and `rtt ≤ rttMsUp` |
 
 Between the bands, Health holds. The Nix option type enforces `Up < Down` for both metrics.
 

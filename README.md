@@ -20,12 +20,12 @@ Only packets that carry a Group's mark follow its routing table. The daemon leav
 
 The flake exposes these outputs:
 
-| Output | Contents |
-|---|---|
-| `nixosModules.default`, also `nixosModules.wanwatch` | The `services.wanwatch` module: options, rendered daemon config, a `wanwatch` system user, and a hardened systemd service |
-| `nixosModules.telegraf` | Optional `services.wanwatch.telegraf` module that scrapes the daemon's metrics with Telegraf |
-| `packages.<system>.wanwatchd`, also `packages.<system>.default` | The Go daemon, for `x86_64-linux` and `aarch64-linux` |
-| `lib` | The pure-Nix library behind the module: validated WAN, Probe, Member, Group, and global-settings values, option types, and the config renderer |
+| Output                                                          | Contents                                                                                                                                       |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nixosModules.default`, also `nixosModules.wanwatch`            | The `services.wanwatch` module: options, rendered daemon config, a `wanwatch` system user, and a hardened systemd service                      |
+| `nixosModules.telegraf`                                         | Optional `services.wanwatch.telegraf` module that scrapes the daemon's metrics with Telegraf                                                   |
+| `packages.<system>.wanwatchd`, also `packages.<system>.default` | The Go daemon, for `x86_64-linux` and `aarch64-linux`                                                                                          |
+| `lib`                                                           | The pure-Nix library behind the module: validated WAN, Probe, Member, Group, and global-settings values, option types, and the config renderer |
 
 The sources live in [`nixos/`](./nixos/), [`daemon/`](./daemon/), and [`lib/`](./lib/); [`docs/architecture.md`](./docs/architecture.md) describes how the layers fit together.
 
@@ -181,21 +181,21 @@ The daemon serves Prometheus metrics on the Unix socket `/run/wanwatch/metrics.s
 
 `services.wanwatch.global` sets the daemon's log level and Hook timeout:
 
-| Option | Default |
-|---|---|
-| `logLevel` | `info` |
-| `hookTimeoutMs` | `5000` |
+| Option          | Default |
+| --------------- | ------- |
+| `logLevel`      | `info`  |
+| `hookTimeoutMs` | `5000`  |
 
 ## Paths
 
 The daemon runs as the `wanwatch` user and group, which the module creates. Its systemd sandbox makes the file system read-only apart from `/run/wanwatch` and a private `/tmp`, so the module fixes the daemon's paths ([ADR-0014](./docs/adr/0014-module-owns-identity-and-paths.md)):
 
-| Path | Contents |
-|---|---|
-| `/etc/wanwatch/config.json` | The rendered configuration; [`docs/specs/daemon-config.md`](./docs/specs/daemon-config.md) specifies its format |
-| `/etc/wanwatch/hooks/` | Hook scripts in `up.d/`, `down.d/`, and `switch.d/` |
-| `/run/wanwatch/state.json` | State |
-| `/run/wanwatch/metrics.sock` | Prometheus metrics |
+| Path                         | Contents                                                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `/etc/wanwatch/config.json`  | The rendered configuration; [`docs/specs/daemon-config.md`](./docs/specs/daemon-config.md) specifies its format |
+| `/etc/wanwatch/hooks/`       | Hook scripts in `up.d/`, `down.d/`, and `switch.d/`                                                             |
+| `/run/wanwatch/state.json`   | State                                                                                                           |
+| `/run/wanwatch/metrics.sock` | Prometheus metrics                                                                                              |
 
 ## Documentation
 

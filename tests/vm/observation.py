@@ -53,7 +53,7 @@ class Observation:
             # must not hide the others or replace the original timeout message.
             try:
                 output = self._command(command, _time.monotonic() + 2)
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001
                 output = f"<unavailable: {error}>"
             sections.append(f"===== {title} =====\n{output}")
         return "\n".join(sections)

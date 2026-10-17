@@ -44,8 +44,13 @@
       };
     };
 
-    treefmt-nix.url = "github:numtide/treefmt-nix";
-    treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+    # Formats and lints the repository through its flake-parts module:
+    # `nix fmt` and the `treefmt` check. Its nixpkgs follows the root
+    # input, so the tools come from the locked nixpkgs.
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # Runs the nix-unit suites through its flake-parts module. Its
     # nixpkgs follows the root input, and the dev partition takes the

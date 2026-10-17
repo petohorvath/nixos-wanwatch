@@ -27,12 +27,12 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 }
 ```
 
-| Field | Type | Meaning |
-|---|---|---|
-| `schema` | int | The daemon's `SchemaVersion`. |
+| Field       | Type                        | Meaning                                                                                                                                                           |
+| ----------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`    | int                         | The daemon's `SchemaVersion`.                                                                                                                                     |
 | `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon fills it with the current time unless the caller supplies one; a Decision supplies the same timestamp it passes to Hooks as `WANWATCH_TS`. |
-| `wans` | object | Map from WAN name to per-WAN State. |
-| `groups` | object | Map from Group name to per-Group State. |
+| `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                               |
+| `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                           |
 
 An absent value is always `null`, never `""`: a Gateway not yet known, no active Member, or no `activeSince`. Hook env vars are strings, so they encode the same absences as `""`.
 
@@ -52,15 +52,15 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
 }
 ```
 
-| Field | Type | Meaning |
-|---|---|---|
-| `interface` | string | Linux interface name. |
-| `carrier` | string | `"up"`, `"down"`, or `"unknown"`. |
-| `operstate` | string | IFLA_OPERSTATE text: `up`, `down`, `dormant`, `lowerlayerdown`, `notpresent`, `testing`, `unknown`. |
-| `healthy` | bool | WAN Health, aggregated under `probe.familyHealthPolicy`. |
+| Field         | Type           | Meaning                                                                                                                           |
+| ------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `interface`   | string         | Linux interface name.                                                                                                             |
+| `carrier`     | string         | `"up"`, `"down"`, or `"unknown"`.                                                                                                 |
+| `operstate`   | string         | IFLA_OPERSTATE text: `up`, `down`, `dormant`, `lowerlayerdown`, `notpresent`, `testing`, `unknown`.                               |
+| `healthy`     | bool           | WAN Health, aggregated under `probe.familyHealthPolicy`.                                                                          |
 | `gateways.v4` | string \| null | Discovered v4 Gateway, or `null` when the kernel has no v4 default on this interface or the route is scope-link (`pointToPoint`). |
-| `gateways.v6` | string \| null | Same for v6. |
-| `families` | object | One entry per Family present in `probe.targets`. |
+| `gateways.v6` | string \| null | Same for v6.                                                                                                                      |
+| `families`    | object         | One entry per Family present in `probe.targets`.                                                                                  |
 
 ## `wans.<name>.families.<v4|v6>`
 
@@ -70,17 +70,17 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
   "rttSeconds": 0.0124,
   "jitterSeconds": 0.0012,
   "lossRatio": 0.0,
-  "targets": [ "1.1.1.1" ]
+  "targets": ["1.1.1.1"]
 }
 ```
 
-| Field | Type | Meaning |
-|---|---|---|
-| `healthy` | bool | Verdict after thresholds and Hysteresis. `false` until the first ProbeResult cooks the Family; see [Cold-start invariant](./failover.md#cold-start-invariant). |
-| `rttSeconds` | float | Mean RTT across the Family's Targets, in seconds. |
-| `jitterSeconds` | float | Mean jitter (stddev) across the Family's Targets, in seconds. |
-| `lossRatio` | float | Mean loss in `[0, 1]`. |
-| `targets` | array<string> | The Family's Targets, echoed from config. |
+| Field           | Type          | Meaning                                                                                                                                                        |
+| --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `healthy`       | bool          | Verdict after thresholds and Hysteresis. `false` until the first ProbeResult cooks the Family; see [Cold-start invariant](./failover.md#cold-start-invariant). |
+| `rttSeconds`    | float         | Mean RTT across the Family's Targets, in seconds.                                                                                                              |
+| `jitterSeconds` | float         | Mean jitter (stddev) across the Family's Targets, in seconds.                                                                                                  |
+| `lossRatio`     | float         | Mean loss in `[0, 1]`.                                                                                                                                         |
+| `targets`       | array<string> | The Family's Targets, echoed from config.                                                                                                                      |
 
 ## `groups.<name>`
 
@@ -93,39 +93,39 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
 }
 ```
 
-| Field | Type | Meaning |
-|---|---|---|
-| `active` | string \| null | Current Selection. `null` when no Member is healthy. |
-| `activeSince` | string (RFC 3339 nanos UTC) \| null | When `active` took its current value. `null` if never active. |
-| `decisionsTotal` | int | Decisions emitted for this Group since daemon start. |
-| `strategy` | string | Echo of `groups.<name>.strategy`. |
+| Field            | Type                                | Meaning                                                       |
+| ---------------- | ----------------------------------- | ------------------------------------------------------------- |
+| `active`         | string \| null                      | Current Selection. `null` when no Member is healthy.          |
+| `activeSince`    | string (RFC 3339 nanos UTC) \| null | When `active` took its current value. `null` if never active. |
+| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start.          |
+| `strategy`       | string                              | Echo of `groups.<name>.strategy`.                             |
 
 ## Hook env-var contract
 
 Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these env vars. `daemon/internal/state/hooks.go` exports the names as `state.Env*` constants. Like `state.json`, Hooks run only after Apply succeeds; a hard route-write failure holds them back. A Family whose Gateway is not yet known is skipped rather than failed, so a switch Hook does not prove that every Family already routes through the new WAN; that Family's route follows when its Gateway appears.
 
-| Variable | Value (always set) |
-|---|---|
-| `WANWATCH_EVENT` | `up`, `down`, or `switch`. |
-| `WANWATCH_GROUP` | Group name. |
-| `WANWATCH_WAN_OLD` | Previously active WAN; empty if none. |
-| `WANWATCH_WAN_NEW` | Newly active WAN; empty if none. |
-| `WANWATCH_IFACE_OLD` / `_NEW` | Linux interface names; empty when the corresponding WAN is unset. |
+| Variable                           | Value (always set)                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `WANWATCH_EVENT`                   | `up`, `down`, or `switch`.                                                                                                |
+| `WANWATCH_GROUP`                   | Group name.                                                                                                               |
+| `WANWATCH_WAN_OLD`                 | Previously active WAN; empty if none.                                                                                     |
+| `WANWATCH_WAN_NEW`                 | Newly active WAN; empty if none.                                                                                          |
+| `WANWATCH_IFACE_OLD` / `_NEW`      | Linux interface names; empty when the corresponding WAN is unset.                                                         |
 | `WANWATCH_GATEWAY_V4_OLD` / `_NEW` | Discovered v4 Gateway on the WAN's interface; empty when the kernel has no v4 default there or the WAN is `pointToPoint`. |
-| `WANWATCH_GATEWAY_V6_OLD` / `_NEW` | Same for v6. |
-| `WANWATCH_FAMILIES` | Comma-joined probed Families of the new WAN; `""` when the new WAN is null. |
-| `WANWATCH_TABLE` | Routing-table ID (int as string). |
-| `WANWATCH_MARK` | fwmark (int as string). |
-| `WANWATCH_TS` | Emit time, RFC 3339 nanos UTC. |
+| `WANWATCH_GATEWAY_V6_OLD` / `_NEW` | Same for v6.                                                                                                              |
+| `WANWATCH_FAMILIES`                | Comma-joined probed Families of the new WAN; `""` when the new WAN is null.                                               |
+| `WANWATCH_TABLE`                   | Routing-table ID (int as string).                                                                                         |
+| `WANWATCH_MARK`                    | fwmark (int as string).                                                                                                   |
+| `WANWATCH_TS`                      | Emit time, RFC 3339 nanos UTC.                                                                                            |
 
 ### Event matrix
 
-| `WAN_OLD` | `WAN_NEW` | `EVENT` |
-|---|---|---|
-| `""` | `"primary"` | `up` |
-| `"primary"` | `""` | `down` |
-| `"primary"` | `"backup"` | `switch` |
-| identical | identical | *(no event)* |
+| `WAN_OLD`   | `WAN_NEW`   | `EVENT`      |
+| ----------- | ----------- | ------------ |
+| `""`        | `"primary"` | `up`         |
+| `"primary"` | `""`        | `down`       |
+| `"primary"` | `"backup"`  | `switch`     |
+| identical   | identical   | _(no event)_ |
 
 ### Hook execution
 
