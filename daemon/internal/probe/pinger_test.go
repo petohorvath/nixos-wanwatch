@@ -16,16 +16,24 @@ import (
 )
 
 // fakeConn is an in-memory pingConn. WriteTo records the outgoing
-// bytes; ReadFrom drains a pre-loaded queue of replies and returns
-// os.ErrDeadlineExceeded once empty so cycle's read-deadline path
-// is exercised.
+// bytes and, with echo set, queues the matching reply; ReadFrom
+// drains the reply queue. Read deadlines behave as on a real
+// socket: a passed deadline fails ReadFrom even with a reply
+// queued, ReadFrom with no reply queued blocks until the deadline,
+// and a deadline moved while ReadFrom blocks takes effect at once.
 type fakeConn struct {
 	mu       sync.Mutex
 	sent     [][]byte
 	replies  [][]byte
+	echo     bool  // if set, WriteTo queues the echo reply for each request
 	writeErr error // if set, WriteTo returns it
 	readErr  error // if set, ReadFrom returns it instead of draining replies
-	closed   bool
+	deadline time.Time
+	moved    chan struct{} // closed and replaced by each SetReadDeadline
+	// onSetReadDeadline, if set, runs once, at the start of the
+	// first SetReadDeadline call and before its deadline is stored.
+	onSetReadDeadline func()
+	closed            bool
 }
 
 func (f *fakeConn) WriteTo(b []byte, _ net.Addr) (int, error) {
@@ -37,32 +45,166 @@ func (f *fakeConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 	cp := make([]byte, len(b))
 	copy(cp, b)
 	f.sent = append(f.sent, cp)
+	if f.echo {
+		family := FamilyV4
+		if b[0] == 128 { // ICMPv6 echo-request
+			family = FamilyV6
+		}
+		ident := uint16(b[4])<<8 | uint16(b[5])
+		seq := uint16(b[6])<<8 | uint16(b[7])
+		f.replies = append(f.replies, echoReplyFor(family, ident, seq))
+		f.wakeLocked()
+	}
 	return len(b), nil
 }
 
 func (f *fakeConn) ReadFrom(b []byte) (int, net.Addr, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.readErr != nil {
-		return 0, nil, f.readErr
+	for {
+		f.mu.Lock()
+		if f.readErr != nil {
+			f.mu.Unlock()
+			return 0, nil, f.readErr
+		}
+		if !f.deadline.IsZero() && !time.Now().Before(f.deadline) {
+			f.mu.Unlock()
+			return 0, nil, os.ErrDeadlineExceeded
+		}
+		if len(f.replies) > 0 {
+			n := copy(b, f.replies[0])
+			f.replies = f.replies[1:]
+			f.mu.Unlock()
+			return n, &net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}, nil
+		}
+		if f.moved == nil {
+			f.moved = make(chan struct{})
+		}
+		moved := f.moved
+		var expired <-chan time.Time
+		if !f.deadline.IsZero() {
+			timer := time.NewTimer(time.Until(f.deadline))
+			defer timer.Stop()
+			expired = timer.C
+		}
+		f.mu.Unlock()
+		select {
+		case <-expired:
+		case <-moved:
+		}
 	}
-	if len(f.replies) == 0 {
-		// Mimic SetReadDeadline expiring — cycle distinguishes this
-		// from a real socket fault via errors.Is(os.ErrDeadlineExceeded).
-		return 0, nil, os.ErrDeadlineExceeded
-	}
-	n := copy(b, f.replies[0])
-	f.replies = f.replies[1:]
-	return n, &net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}, nil
 }
 
-func (f *fakeConn) SetReadDeadline(time.Time) error {
+func (f *fakeConn) SetReadDeadline(t time.Time) error {
+	f.mu.Lock()
+	hook := f.onSetReadDeadline
+	f.onSetReadDeadline = nil
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deadline = t
+	f.wakeLocked()
 	return nil
+}
+
+// wakeLocked wakes a blocked ReadFrom. The caller holds f.mu.
+func (f *fakeConn) wakeLocked() {
+	if f.moved != nil {
+		close(f.moved)
+	}
+	f.moved = make(chan struct{})
 }
 
 func (f *fakeConn) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.closed = true
 	return nil
+}
+
+func (f *fakeConn) isClosed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed
+}
+
+func (f *fakeConn) queued() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.replies)
+}
+
+// dialer is a scripted dialFn: each call returns the next step,
+// and the last step repeats.
+type dialer struct {
+	mu    sync.Mutex
+	steps []dialStep
+	calls int
+}
+
+type dialStep struct {
+	conn    *fakeConn
+	ifindex int
+	err     error
+}
+
+func (d *dialer) dial(Family, string) (pingConn, int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	step := d.steps[min(d.calls, len(d.steps)-1)]
+	d.calls++
+	if step.err != nil {
+		return nil, 0, step.err
+	}
+	return step.conn, step.ifindex, nil
+}
+
+func (d *dialer) count() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+// ifindexIs returns an ifindex lookup that reports the interface
+// at index ifindex.
+func ifindexIs(ifindex int) func(string) (int, error) {
+	return func(string) (int, error) { return ifindex, nil }
+}
+
+// runUntil runs p over sock until a ProbeResult satisfies done,
+// then cancels the run and checks that it stopped cleanly. It
+// returns every ProbeResult received.
+func runUntil(t *testing.T, p *Pinger, sock *socket, done func(ProbeResult) bool) []ProbeResult {
+	t.Helper()
+	out := make(chan ProbeResult)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- p.run(ctx, sock, out) }()
+
+	var results []ProbeResult
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case r := <-out:
+			results = append(results, r)
+			if !done(r) {
+				continue
+			}
+			cancel()
+			if err := <-errCh; !errors.Is(err, context.Canceled) {
+				t.Errorf("run err = %v, want context.Canceled", err)
+			}
+			return results
+		case err := <-errCh:
+			t.Fatalf("run returned %v before the expected ProbeResult", err)
+		case <-deadline:
+			cancel()
+			<-errCh
+			t.Fatalf("no expected ProbeResult within 5s; got %d results", len(results))
+		}
+	}
 }
 
 func newPinger(targets []string) *Pinger {
@@ -73,7 +215,7 @@ func newPinger(targets []string) *Pinger {
 		Targets:    targets,
 		Ident:      0x1234,
 		Interval:   10 * time.Millisecond,
-		Timeout:    100 * time.Millisecond,
+		Timeout:    20 * time.Millisecond,
 		WindowSize: 4,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -120,7 +262,7 @@ func TestCycleRecordsRTTOnMatchedReply(t *testing.T) {
 	conn := &fakeConn{replies: [][]byte{reply}}
 
 	buf := make([]byte, 1500)
-	nextSeq := p.cycle(context.Background(), conn, addrs, windows, buf, 0)
+	nextSeq, _ := p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
 	if nextSeq != 1 {
 		t.Errorf("nextSeq = %d, want 1 (one target ⇒ one seq consumed)", nextSeq)
@@ -166,33 +308,16 @@ func TestCycleIgnoresWrongIdent(t *testing.T) {
 	}
 }
 
-func TestRunWithConnEmitsProbeResultPerCycle(t *testing.T) {
+func TestRunEmitsProbeResultPerCycle(t *testing.T) {
 	t.Parallel()
 	p := newPinger([]string{"1.1.1.1"})
 	p.Interval = 5 * time.Millisecond
-	addrs, _ := p.resolveTargets()
-	_ = addrs
-	conn := &fakeConn{} // all cycles will be Lost — fine
+	d := &dialer{steps: []dialStep{{conn: &fakeConn{}, ifindex: 1}}} // all cycles Lost — fine
+	sock := p.newSocket(d.dial, ifindexIs(1))
 
-	out := make(chan ProbeResult, 4)
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- p.runWithConn(ctx, conn, out) }()
-
-	// Wait for at least one cycle then cancel.
-	select {
-	case r := <-out:
-		if r.Wan != "primary" || r.Family != FamilyV4 {
-			t.Errorf("result = %+v, want primary/v4", r)
-		}
-	case <-time.After(time.Second):
-		cancel()
-		<-errCh
-		t.Fatal("no ProbeResult emitted within 1s")
-	}
-	cancel()
-	if err := <-errCh; !errors.Is(err, context.Canceled) {
-		t.Errorf("runWithConn err = %v, want context.Canceled", err)
+	results := runUntil(t, p, sock, func(ProbeResult) bool { return true })
+	if r := results[0]; r.Wan != "primary" || r.Family != FamilyV4 {
+		t.Errorf("result = %+v, want primary/v4", r)
 	}
 }
 
@@ -265,7 +390,7 @@ func TestDialICMPViaV4PicksIP4ICMP(t *testing.T) {
 		gotNetwork = network
 		return nil, errors.New("intentional")
 	}
-	_, _ = dialICMPVia(FamilyV4, "eth0", listen, nil)
+	_, _, _ = dialICMPVia(FamilyV4, "eth0", listen, nil)
 	if gotNetwork != "ip4:icmp" {
 		t.Errorf("v4 → network = %q, want ip4:icmp", gotNetwork)
 	}
@@ -278,7 +403,7 @@ func TestDialICMPViaV6PicksIP6ICMP(t *testing.T) {
 		gotNetwork = network
 		return nil, errors.New("intentional")
 	}
-	_, _ = dialICMPVia(FamilyV6, "eth0", listen, nil)
+	_, _, _ = dialICMPVia(FamilyV6, "eth0", listen, nil)
 	if gotNetwork != "ip6:ipv6-icmp" {
 		t.Errorf("v6 → network = %q, want ip6:ipv6-icmp", gotNetwork)
 	}
@@ -291,7 +416,7 @@ func TestDialICMPViaPropagatesListenError(t *testing.T) {
 	t.Parallel()
 	want := errors.New("listen exploded")
 	listen := func(string, string) (net.PacketConn, error) { return nil, want }
-	_, err := dialICMPVia(FamilyV4, "eth0", listen, nil)
+	_, _, err := dialICMPVia(FamilyV4, "eth0", listen, nil)
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want listen error passthrough", err)
 	}
@@ -305,11 +430,11 @@ func TestDialICMPViaRejectsNonIPConn(t *testing.T) {
 	t.Parallel()
 	fake := &nonIPConn{}
 	listen := func(string, string) (net.PacketConn, error) { return fake, nil }
-	bind := func(*net.IPConn, string) error {
+	bind := func(*net.IPConn, string) (int, error) {
 		t.Fatal("bind called despite type-assert failure")
-		return nil
+		return 0, nil
 	}
-	_, err := dialICMPVia(FamilyV4, "eth0", listen, bind)
+	_, _, err := dialICMPVia(FamilyV4, "eth0", listen, bind)
 	if err == nil {
 		t.Fatal("dialICMPVia(non-IPConn) = nil err, want type-assert failure")
 	}
@@ -349,8 +474,8 @@ func TestDialICMPViaPropagatesBindError(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 
 	listen := func(string, string) (net.PacketConn, error) { return conn, nil }
-	bind := func(*net.IPConn, string) error { return bindErr }
-	_, gotErr := dialICMPVia(FamilyV4, "eth0", listen, bind)
+	bind := func(*net.IPConn, string) (int, error) { return 0, bindErr }
+	_, _, gotErr := dialICMPVia(FamilyV4, "eth0", listen, bind)
 	if !errors.Is(gotErr, bindErr) {
 		t.Errorf("err = %v, want bind-error passthrough", gotErr)
 	}
@@ -426,8 +551,8 @@ func TestCycleSkipsReadOnCancelledContext(t *testing.T) {
 	if windows["1.1.1.1"].LossRatio() != 1.0 {
 		t.Errorf("loss = %v, want 1.0 (cancelled ctx ⇒ read window skipped)", windows["1.1.1.1"].LossRatio())
 	}
-	if len(conn.replies) != 1 {
-		t.Errorf("queued reply was consumed (%d left, want 1) — read window not skipped", len(conn.replies))
+	if conn.queued() != 1 {
+		t.Errorf("queued reply was consumed (%d left, want 1) — read window not skipped", conn.queued())
 	}
 }
 
@@ -453,8 +578,8 @@ func TestCycleIgnoresUnknownSequence(t *testing.T) {
 	if windows["1.1.1.1"].LossRatio() != 1.0 {
 		t.Errorf("loss = %v, want 1.0 (no matching-seq reply ⇒ inflight lost)", windows["1.1.1.1"].LossRatio())
 	}
-	if len(conn.replies) != 0 {
-		t.Errorf("stale reply still queued (%d left); the unknown-seq path didn't consume it", len(conn.replies))
+	if conn.queued() != 0 {
+		t.Errorf("stale reply still queued (%d left); the unknown-seq path didn't consume it", conn.queued())
 	}
 }
 
@@ -478,7 +603,7 @@ func TestResolveTargetsRejectsV4UnderV6(t *testing.T) {
 
 // TestDialICMPViaReturnsConnWhenBindSucceeds: the happy-path
 // return — listen yields a *net.IPConn, bind reports success,
-// dialICMPVia returns the conn unchanged. Covers the
+// dialICMPVia returns the conn unchanged with the bound ifindex. Covers the
 // `return ipConn, nil` line that the existing skip-on-no-CAP_NET_RAW
 // test never reaches.
 //
@@ -493,13 +618,16 @@ func TestDialICMPViaReturnsConnWhenBindSucceeds(t *testing.T) {
 		return typedNil, nil
 	}
 	var bindCalled bool
-	bind := func(*net.IPConn, string) error {
+	bind := func(*net.IPConn, string) (int, error) {
 		bindCalled = true
-		return nil
+		return 7, nil
 	}
-	got, err := dialICMPVia(FamilyV4, "eth0", listen, bind)
+	got, ifindex, err := dialICMPVia(FamilyV4, "eth0", listen, bind)
 	if err != nil {
 		t.Fatalf("dialICMPVia(bind-ok) = %v, want nil err", err)
+	}
+	if ifindex != 7 {
+		t.Errorf("ifindex = %d, want 7 from bind", ifindex)
 	}
 	if !bindCalled {
 		t.Error("bind was not invoked on the listen-success path")

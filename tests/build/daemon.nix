@@ -32,7 +32,7 @@ pkgs.linkFarm "wanwatch-daemon" {
       internal/decision:100
       internal/health:100
       internal/metrics:88
-      internal/probe:86
+      internal/probe:91
       internal/rtnl:91
       internal/selector:100
       internal/state:94

@@ -6,6 +6,11 @@ The daemon runs one Pinger goroutine per (WAN, Family). Each cycle sends one ICM
 
 ```text
 on every tick (intervalMs):
+    open the socket if none is open (see "Socket lifetime")
+    if no socket is open:
+        for each target in Targets: windows[target].Push(Sample{Lost: true})
+        emit ProbeResult{stats: Aggregate(windows)}
+        continue
     for each target in Targets:
         seq := next sequence (per-Pinger uint16, monotonic mod 2^16)
         sendEcho(target, ident=identForWanFamily, seq=seq)
@@ -23,10 +28,13 @@ on every tick (intervalMs):
         remove seq' from pending
     for each remaining target in pending:
         windows[target].Push(Sample{Lost: true})
+    if any send failed: recheck the socket (see "Socket lifetime")
     emit ProbeResult{stats: Aggregate(windows)}
 ```
 
-Source: `daemon/internal/probe/pinger.go:cycle`.
+A failed send records its Sample as Lost at once. Cancellation pulls the read deadline in, so a shutdown ends a blocked read without waiting out `timeoutMs`; the pull is armed after the cycle sets its deadline, so the cycle cannot overwrite it.
+
+Source: `daemon/internal/probe/pinger.go:run` and `cycle`.
 
 ## ICMP identifier allocation
 
@@ -78,6 +86,20 @@ unix.SetsockoptString(fd, SOL_SOCKET, SO_BINDTODEVICE, wanIface)
 `SO_BINDTODEVICE` is critical. Without it, a Probe from `backup` could egress via `primary` and report `primary`'s Health. The bind applies to both directions: it forces the egress device and accepts only packets from that device.
 
 The socket requires `CAP_NET_RAW`, which the NixOS module grants through `AmbientCapabilities`. An EPERM on the bind surfaces with an explicit "need CAP_NET_RAW" hint.
+
+## Socket lifetime
+
+A Pinger keeps its socket open while the WAN interface keeps its ifindex, and re-dials when the interface is recreated. `SO_BINDTODEVICE` resolves the interface name to an ifindex once, at bind time. A PPP, WireGuard, LTE, or VLAN interface that is torn down and recreated gets a new ifindex, so every send on the old socket fails.
+
+| Event                                  | Socket                                                                                                                      | Samples                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Interface absent when the Pinger opens | No socket; the Pinger retries the dial every `intervalMs`.                                                                  | Lost until the dial succeeds. |
+| Interface down                         | Kept: the ifindex is unchanged, so a new socket would fail the same way.                                                    | Lost while sends fail.        |
+| Interface recreated or removed         | Closed after the first failed send; the next tick re-dials, and keeps retrying every `intervalMs` while the name is absent. | Lost until the re-dial.       |
+
+The send error does not distinguish these cases: a recreated interface fails sends with `ENODEV` on v4 but `ENETUNREACH` on v6, the same error as a down link. After a failed send, the Pinger instead compares the ifindex its socket is bound to, read back with `SO_BINDTOIFINDEX`, with the interface's current ifindex. It re-dials when they differ or when the lookup fails.
+
+A dial that fails with `ENODEV` means the interface is absent and is retried. Any other dial error, such as EPERM without `CAP_NET_RAW`, stops the Pinger, which stops the daemon so that systemd restarts it.
 
 ## Window statistics
 
