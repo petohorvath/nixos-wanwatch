@@ -82,8 +82,19 @@ it to `null`; either is a `state.json` contract change.
 Conntrack flushing runs per Group, but source addresses belong to
 WANs. When two Groups share a WAN and only one switches off it, the
 flush also resets the other Group's flows, which still leave through
-that WAN. Flush only addresses that no Group still selects.
+that WAN. They reconnect at once, so this is disruptive but
+recoverable.
+
+Skipping the flush while another Group still selects the WAN is no
+fix: the switched Group's SNATted flows would keep the old source
+address and be black-holed until their entries time out. Group marks
+are packet marks (`meta mark set`), so a conntrack entry does not
+record its Group. A fix needs the firewall to copy the mark into the
+connection (`ct mark set meta mark`) so the flush can match address
+and mark, which changes the firewall composition contract. Worth it
+only once a deployment runs several Groups on one WAN.
 `daemon/cmd/wanwatchd/daemon.go` (`flushSwitchedConntrack`),
+`daemon/internal/apply/conntrack.go`,
 [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
 
 ### Low-latency state subscription
