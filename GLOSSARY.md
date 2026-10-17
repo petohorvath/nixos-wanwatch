@@ -82,4 +82,5 @@ _Avoid_: callback, handler, Apply
 - A **Probe**, its **Health**, and its **Hysteresis** belong to the **WAN**, so a **WAN** turns unhealthy in every **Group** at once.
 - A **Group** has one **Strategy** and exactly one **Selection** at a time.
 - Each **Decision** triggers one **Apply**, followed by the **Hooks**.
+- A **Decision** counts when the **Strategy** chooses a new target, before its **Apply** converges. A target chosen while an earlier one is still pending can be the current **Selection** again; that **Decision** reapplies its routes but changes no **Selection** and runs no **Hooks**.
 - A **Gateway** is tracked per (**WAN**, **Family**) and independently of **Health**: a healthy **WAN** may not yet have a **Gateway**.

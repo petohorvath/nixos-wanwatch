@@ -14,8 +14,8 @@
 //   - subscribers.go  — startLinkSubscriber, startRouteSubscriber
 //   - eventloop.go    — eventLoop (central event dispatch) and serve
 //   - kernel.go       — the kernel seam and its netlink adapter
-//   - decision.go     — pure helpers (groupContainsWAN, hookEventFor)
-//     and the decisionReason enum
+//   - decision.go     — pure helper groupContainsWAN and the
+//     decisionReason enum
 //   - gateway.go      — GatewayCache (kernel default-route mirror)
 //   - helpers.go      — small free utilities (interfaceIndex, …)
 //   - buildinfo.go    — version / commit / goVersion (ldflags)

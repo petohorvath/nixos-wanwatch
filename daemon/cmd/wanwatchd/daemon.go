@@ -144,13 +144,21 @@ func (d *daemon) recomputeAffectedGroups(ctx context.Context, wan string, reason
 // publishDecision externalizes a commit returned by the Group Decision
 // module. Failed Apply and Gateway refreshes return no commit. The module
 // has already updated its snapshot and gauges before publication begins.
+// Every commit publishes State, because its Decision was counted when it
+// became pending; only a commit that changes the Selection runs Hooks,
+// and only a switch flushes conntrack.
 func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committed *decision.Commit) {
 	if committed == nil {
 		return
 	}
-	d.flushSwitchedConntrack(ctx, g, committed.Old, committed.New)
+	event := committed.Event()
+	if event == state.EventSwitch {
+		d.flushSwitchedConntrack(ctx, g, committed.Old)
+	}
 	d.writeStateSnapshot(committed.At)
-	d.notifyHooks(g, committed.Old, committed.New, committed.At)
+	if event != "" {
+		d.notifyHooks(g, event, committed)
+	}
 }
 
 // flushSwitchedConntrack clears the conntrack entries pinned to the
@@ -158,15 +166,13 @@ func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committe
 // old WAN re-establish via the new one instead of being black-holed
 // until their conntrack entries time out.
 //
-// Switch-only: it runs when both old and next are present. On a
+// Switch-only: publishDecision calls it only for a switch. On a
 // `down` there is no healthy successor and the old default route is
-// left in place, so a flush would only churn. Best-effort per
+// left in place, and a commit that keeps its WAN vacates nothing, so a
+// flush would only churn or reset live flows. Best-effort per
 // docs/nftzones-integration.md — a resolve or flush failure is logged and metered but
 // never fails the Decision; the routes have already converged.
-func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, old, next selector.Active) {
-	if !old.Has || !next.Has {
-		return
-	}
+func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, old selector.Active) {
 	wan, ok := d.cfg.Wans[old.Wan]
 	if !ok {
 		return
@@ -357,12 +363,8 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 
 // notifyHooks captures the Decision data on the event-loop goroutine before
 // submitting it to the notifier. The worker never reads daemon-owned state.
-func (d *daemon) notifyHooks(g selector.Group, old, next selector.Active, now time.Time) {
-	event := hookEventFor(old, next)
-	if event == "" {
-		return
-	}
-
+func (d *daemon) notifyHooks(g selector.Group, event state.Event, committed *decision.Commit) {
+	old, next := committed.Old, committed.New
 	oldIface := ifaceFor(d.cfg.Wans, old)
 	nextIface := ifaceFor(d.cfg.Wans, next)
 	hookCtx := state.HookContext{
@@ -383,7 +385,7 @@ func (d *daemon) notifyHooks(g selector.Group, old, next selector.Active, now ti
 		Families:     probedFamiliesFor(d.cfg.Wans, next),
 		Table:        g.Table,
 		Mark:         g.Mark,
-		Timestamp:    now,
+		Timestamp:    committed.At,
 	}
 	d.hooks.Notify(hookCtx)
 }
