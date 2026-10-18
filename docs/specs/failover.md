@@ -18,7 +18,7 @@ A Group always has exactly one Selection, which may be `null`. The selector emit
 | ------------------------------------- | ----------------------------------------------------- | ------------------------------------- |
 | `ProbeResult` flips a Family's Health | `wan.healthy` aggregate changes                       | `health`                              |
 | `LinkEvent` flips `carrierUp()`       | rtnl carrier or operstate change                      | `carrier`                             |
-| Daemon startup                        | Initial Selection from cold-start carrier-only Health | `carrier`, from the startup link dump |
+| Daemon startup                        | Initial Selection from cold-start carrier-only Health | `carrier`, from the startup snapshots |
 
 An event recomputes every Group containing the affected WAN. Each `decision.Group` owns its Selection independently, so one Group's pending Decision never blocks another's commit.
 
@@ -27,11 +27,13 @@ An event recomputes every Group containing the affected WAN. Each `decision.Grou
 Until a (WAN, Family) delivers its first `ProbeResult` with a full Window (`WindowFilled`), that Family is uncooked and votes healthy in `combineFamilies`. Combined with `carrierUp()`, a healthy boot runs this chain in under a second, before any Window fills:
 
 1. The daemon boots and installs rules; no Probes have completed.
-2. rtnl reports `carrier=up, operstate=up` on the primary.
+2. The startup snapshots report each WAN's Gateways and `carrier=up, operstate=up` on the primary.
 3. `Wans.MemberHealth` marks the primary healthy.
 4. `selector.Select` picks the primary.
 5. `apply.WriteDefault` writes the default route.
 6. State and Hooks fire.
+
+The daemon folds both snapshots in before it handles any event: the Gateways first, then every link as one batch. Each Group therefore recomputes once, makes at most one startup Decision, onto its preferred healthy Member whatever order the snapshot lists the WANs in, and writes every Family whose Gateway is known.
 
 Results that arrive before the Window fills update metrics and retry pending Applies, but leave Health alone, so a Lost first Sample cannot seed a spurious down→up Decision pair. The first full Window seeds Hysteresis directly from its threshold verdict, bypassing the consecutive-cycle ramp. If that verdict is unhealthy, the WAN flips down at once; later Windows go through the normal `consecutiveUp` and `consecutiveDown` ramp.
 

@@ -3,6 +3,7 @@ package rtnl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -287,7 +288,7 @@ func TestLinkSubscriberStartWrapsSubscribeError(t *testing.T) {
 		t.Error("LinkList called after subscribe failed")
 		return nil, nil
 	}
-	exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent, 1))
+	_, exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent, 1))
 	if !errors.Is(err, want) || exited != nil {
 		t.Fatalf("Start = %v, %v; want no worker and subscribe-error chained via %%w", exited, err)
 	}
@@ -317,7 +318,7 @@ func TestLinkSubscriberStartWiresSubscribeToRunLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, emptyLinkList, getFn, out)
+	_, exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, emptyLinkList, getFn, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +355,7 @@ func TestLinkSubscriberStartSurfacesErrorCallbackCause(t *testing.T) {
 		close(ch)
 		return nil
 	}
-	exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, emptyLinkList, unexpectedLinkByName(t), make(chan LinkEvent, 1))
+	_, exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, emptyLinkList, unexpectedLinkByName(t), make(chan LinkEvent, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +376,7 @@ func TestLinkSubscriberPrimeViaWrapsListError(t *testing.T) {
 	want := errors.New("netlink: link list denied")
 	listFn := func() ([]netlink.Link, error) { return nil, want }
 
-	err := (&LinkSubscriber{}).primeVia(context.Background(), listFn, map[string]LinkState{}, make(chan LinkEvent, 1))
+	_, err := (&LinkSubscriber{}).primeVia(listFn, map[string]LinkState{})
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want list-error chained via %%w", err)
 	}
@@ -384,7 +385,7 @@ func TestLinkSubscriberPrimeViaWrapsListError(t *testing.T) {
 	}
 }
 
-// TestLinkSubscriberPrimeViaEmitsWatchedLinks: priming must emit one
+// TestLinkSubscriberPrimeViaEmitsWatchedLinks: priming must return one
 // LinkEvent per watched interface LinkList returns — carrier and
 // operstate decoded from RawFlags — and drop interfaces outside the
 // watched set.
@@ -397,14 +398,14 @@ func TestLinkSubscriberPrimeViaEmitsWatchedLinks(t *testing.T) {
 		}, nil
 	}
 	s := &LinkSubscriber{Interfaces: map[string]struct{}{"eth0": {}}}
-	out := make(chan LinkEvent, 4)
-	if err := s.primeVia(context.Background(), listFn, map[string]LinkState{}, out); err != nil {
+	snapshot, err := s.primeVia(listFn, map[string]LinkState{})
+	if err != nil {
 		t.Fatalf("primeVia = %v, want nil", err)
 	}
-	if got := len(out); got != 1 {
-		t.Fatalf("len(out) = %d, want 1 (eth0 only; lo filtered)", got)
+	if got := len(snapshot); got != 1 {
+		t.Fatalf("len(snapshot) = %d, want 1 (eth0 only; lo filtered)", got)
 	}
-	ev := <-out
+	ev := snapshot[0]
 	if ev.Name != "eth0" || ev.Carrier != CarrierUp || ev.Operstate != OperstateUp {
 		t.Errorf("event = %+v, want eth0/up/up", ev)
 	}
@@ -449,8 +450,9 @@ func TestTranslateSubClose(t *testing.T) {
 }
 
 // TestLinkSubscriberStartCapturesCarrierDuringSnapshot: a carrier
-// change that lands just after the link dump must still reach out.
-// Only a subscription opened before the dump catches it.
+// change that lands just after the link dump must still reach out,
+// after the snapshot that Start returns. Only a subscription opened
+// before the dump catches it.
 func TestLinkSubscriberStartCapturesCarrierDuringSnapshot(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -473,8 +475,8 @@ func TestLinkSubscriberStartCapturesCarrierDuringSnapshot(t *testing.T) {
 	}
 	getFn := func(string) (netlink.Link, error) { return current, nil }
 	s := &LinkSubscriber{Interfaces: map[string]struct{}{"wan1": {}}}
-	out := make(chan LinkEvent, 2)
-	exited, err := s.StartWith(ctx, subscribe, listFn, getFn, out)
+	out := make(chan LinkEvent, 1)
+	snapshot, exited, err := s.StartWith(ctx, subscribe, listFn, getFn, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,15 +488,16 @@ func TestLinkSubscriberStartCapturesCarrierDuringSnapshot(t *testing.T) {
 			t.Error("subscriber did not stop after cancellation")
 		}
 	})
-	for _, want := range []Carrier{CarrierDown, CarrierUp} {
-		select {
-		case ev := <-out:
-			if ev.Name != "wan1" || ev.Carrier != want {
-				t.Errorf("event = %+v, want wan1/%v", ev, want)
-			}
-		case <-ctx.Done():
-			t.Fatalf("no wan1/%v event: carrier change during subscriber startup was missed", want)
+	if len(snapshot) != 1 || snapshot[0].Name != "wan1" || snapshot[0].Carrier != CarrierDown {
+		t.Errorf("snapshot = %+v, want wan1/down", snapshot)
+	}
+	select {
+	case ev := <-out:
+		if ev.Name != "wan1" || ev.Carrier != CarrierUp {
+			t.Errorf("event = %+v, want wan1/up", ev)
 		}
+	case <-ctx.Done():
+		t.Fatal("no wan1/up event: carrier change during subscriber startup was missed")
 	}
 }
 
@@ -509,69 +512,75 @@ func closeLinkUpdatesOnStop(ch chan<- netlink.LinkUpdate, done <-chan struct{}) 
 // TestLinkSubscriberStartReconcilesQueuedChanges: notifications
 // queued before the snapshot describe history it may already
 // include. Each must be read as the link's current state and
-// deduplicated against the snapshot, so stale history never reaches
-// out as a transient flap, while a change the snapshot missed still
-// does, in notification order across interfaces.
+// deduplicated against the snapshot that Start returns, so stale
+// history never reaches out as a transient flap, while a change the
+// snapshot missed still does, in notification order across
+// interfaces.
 func TestLinkSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 	t.Parallel()
 	up := func(name string) netlink.Link { return mkLink(name, unix.IFF_LOWER_UP, netlink.OperUp) }
 	down := func(name string) netlink.Link { return mkLink(name, 0, netlink.OperDown) }
 	for _, tc := range []struct {
-		name     string
-		snapshot []netlink.Link
-		current  []netlink.Link // links that exist after the snapshot
-		queued   []netlink.LinkUpdate
-		want     []string
+		name         string
+		snapshot     []netlink.Link
+		current      []netlink.Link // links that exist after the snapshot
+		queued       []netlink.LinkUpdate
+		wantSnapshot []string // the snapshot Start returns
+		wantLive     []string // the events queued on out afterwards
 	}{
 		{
-			name:     "flap before snapshot",
-			snapshot: []netlink.Link{up("wan0")},
-			current:  []netlink.Link{up("wan0")},
-			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
-			want:     []string{"wan0 up/up"},
+			name:         "flap before snapshot",
+			snapshot:     []netlink.Link{up("wan0")},
+			current:      []netlink.Link{up("wan0")},
+			queued:       []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			wantSnapshot: []string{"wan0 up/up"},
 		},
 		{
-			name:     "carrier lost after snapshot",
-			snapshot: []netlink.Link{up("wan0")},
-			current:  []netlink.Link{down("wan0")},
-			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown)},
-			want:     []string{"wan0 up/up", "wan0 down/down"},
+			name:         "carrier lost after snapshot",
+			snapshot:     []netlink.Link{up("wan0")},
+			current:      []netlink.Link{down("wan0")},
+			queued:       []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown)},
+			wantSnapshot: []string{"wan0 up/up"},
+			wantLive:     []string{"wan0 down/down"},
 		},
 		{
-			name:     "carrier gained after snapshot",
-			snapshot: []netlink.Link{down("wan0")},
-			current:  []netlink.Link{up("wan0")},
-			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
-			want:     []string{"wan0 down/down", "wan0 up/up"},
+			name:         "carrier gained after snapshot",
+			snapshot:     []netlink.Link{down("wan0")},
+			current:      []netlink.Link{up("wan0")},
+			queued:       []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			wantSnapshot: []string{"wan0 down/down"},
+			wantLive:     []string{"wan0 up/up"},
 		},
 		{
-			name:     "re-created before snapshot",
-			snapshot: []netlink.Link{up("wan0")},
-			current:  []netlink.Link{up("wan0")},
-			queued:   []netlink.LinkUpdate{mkDelete("wan0"), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
-			want:     []string{"wan0 up/up"},
+			name:         "re-created before snapshot",
+			snapshot:     []netlink.Link{up("wan0")},
+			current:      []netlink.Link{up("wan0")},
+			queued:       []netlink.LinkUpdate{mkDelete("wan0"), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			wantSnapshot: []string{"wan0 up/up"},
 		},
 		{
-			name:     "deleted after snapshot",
-			snapshot: []netlink.Link{up("wan0")},
-			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkDelete("wan0")},
-			want:     []string{"wan0 up/up", "wan0 down/notpresent"},
+			name:         "deleted after snapshot",
+			snapshot:     []netlink.Link{up("wan0")},
+			queued:       []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkDelete("wan0")},
+			wantSnapshot: []string{"wan0 up/up"},
+			wantLive:     []string{"wan0 down/notpresent"},
 		},
 		{
 			// vm-recovery: wan1 gains carrier just after the dump, then
 			// wan0 loses carrier.
-			name:     "carrier moves to another link after snapshot",
-			snapshot: []netlink.Link{up("wan0"), down("wan1")},
-			current:  []netlink.Link{down("wan0"), up("wan1")},
-			queued:   []netlink.LinkUpdate{mkUpdate("wan1", unix.IFF_LOWER_UP, netlink.OperUp), mkUpdate("wan0", 0, netlink.OperDown)},
-			want:     []string{"wan0 up/up", "wan1 down/down", "wan1 up/up", "wan0 down/down"},
+			name:         "carrier moves to another link after snapshot",
+			snapshot:     []netlink.Link{up("wan0"), down("wan1")},
+			current:      []netlink.Link{down("wan0"), up("wan1")},
+			queued:       []netlink.LinkUpdate{mkUpdate("wan1", unix.IFF_LOWER_UP, netlink.OperUp), mkUpdate("wan0", 0, netlink.OperDown)},
+			wantSnapshot: []string{"wan0 up/up", "wan1 down/down"},
+			wantLive:     []string{"wan1 up/up", "wan0 down/down"},
 		},
 		{
-			name:     "flap on one link before snapshot",
-			snapshot: []netlink.Link{up("wan0"), up("wan1")},
-			current:  []netlink.Link{up("wan0"), up("wan1")},
-			queued:   []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
-			want:     []string{"wan0 up/up", "wan1 up/up"},
+			name:         "flap on one link before snapshot",
+			snapshot:     []netlink.Link{up("wan0"), up("wan1")},
+			current:      []netlink.Link{up("wan0"), up("wan1")},
+			queued:       []netlink.LinkUpdate{mkUpdate("wan0", 0, netlink.OperDown), mkUpdate("wan0", unix.IFF_LOWER_UP, netlink.OperUp)},
+			wantSnapshot: []string{"wan0 up/up", "wan1 up/up"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -599,15 +608,13 @@ func TestLinkSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 				return nil, netlink.LinkNotFoundError{}
 			}
 			s := &LinkSubscriber{Interfaces: map[string]struct{}{"wan0": {}, "wan1": {}}}
-			out := make(chan LinkEvent, len(tc.queued)+len(tc.snapshot))
-			exited, err := s.StartWith(ctx, subscribe, listFn, getFn, out)
+			out := make(chan LinkEvent, len(tc.queued))
+			snapshot, exited, err := s.StartWith(ctx, subscribe, listFn, getFn, out)
 			if err != nil {
 				t.Fatal(err)
 			}
-			// No consumer runs during Start, so snapshot events must be
-			// available synchronously without waiting for the live loop.
-			if len(out) < len(tc.snapshot) {
-				t.Fatal("Start returned before queuing the link snapshot")
+			if got := linkEventStrings(snapshot); !slices.Equal(got, tc.wantSnapshot) {
+				t.Errorf("snapshot = %v, want %v", got, tc.wantSnapshot)
 			}
 			select {
 			case err := <-exited:
@@ -617,15 +624,58 @@ func TestLinkSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("subscriber did not finish draining queued changes")
 			}
-			var got []string
+			var live []LinkEvent
 			for len(out) > 0 {
-				ev := <-out
-				got = append(got, ev.Name+" "+ev.Carrier.String()+"/"+ev.Operstate.String())
+				live = append(live, <-out)
 			}
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("events = %v, want %v", got, tc.want)
+			if got := linkEventStrings(live); !slices.Equal(got, tc.wantLive) {
+				t.Errorf("live events = %v, want %v", got, tc.wantLive)
 			}
 		})
+	}
+}
+
+// linkEventStrings renders events as "<name> <carrier>/<operstate>".
+func linkEventStrings(events []LinkEvent) []string {
+	var out []string
+	for _, ev := range events {
+		out = append(out, ev.Name+" "+ev.Carrier.String()+"/"+ev.Operstate.String())
+	}
+	return out
+}
+
+// TestLinkSubscriberStartReturnsSnapshotLargerThanOut: Start returns
+// the snapshot instead of queuing it, so a dump with more watched
+// links than out can hold cannot block startup before a consumer
+// reads out.
+func TestLinkSubscriberStartReturnsSnapshotLargerThanOut(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, _ netlink.LinkSubscribeOptions) error {
+		closeLinkUpdatesOnStop(ch, done)
+		return nil
+	}
+	var links []netlink.Link
+	for i := range 100 {
+		links = append(links, mkLink(fmt.Sprintf("wan%d", i), unix.IFF_LOWER_UP, netlink.OperUp))
+	}
+	listFn := func() ([]netlink.Link, error) { return links, nil }
+	started := make(chan []LinkEvent, 1)
+	go func() {
+		snapshot, _, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent))
+		if err != nil {
+			t.Error(err)
+		}
+		started <- snapshot
+	}()
+	select {
+	case snapshot := <-started:
+		if len(snapshot) != len(links) {
+			t.Errorf("len(snapshot) = %d, want %d", len(snapshot), len(links))
+		}
+	case <-ctx.Done():
+		t.Fatal("Start blocked on a snapshot larger than out")
 	}
 }
 
@@ -639,7 +689,7 @@ func TestLinkSubscriberStartClosesSubscriptionOnSnapshotFailure(t *testing.T) {
 		return nil
 	}
 	listFn := func() ([]netlink.Link, error) { return nil, want }
-	exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent, 1))
+	_, exited, err := (&LinkSubscriber{}).StartWith(context.Background(), subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent, 1))
 	if !errors.Is(err, want) || exited != nil {
 		t.Fatalf("Start = %v, %v; want no worker and wrapped snapshot failure", exited, err)
 	}
@@ -674,7 +724,7 @@ func TestLinkSubscriberStartCancelsBlockedDelivery(t *testing.T) {
 			}
 			getFn := func(string) (netlink.Link, error) { return link, nil }
 			out := make(chan LinkEvent) // No consumer: every event send blocks.
-			exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, listFn, getFn, out)
+			_, exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, listFn, getFn, out)
 			if phase == "snapshot" {
 				if !errors.Is(err, context.Canceled) || exited != nil {
 					t.Fatalf("Start = %v, %v; want no worker and context.Canceled", exited, err)
@@ -745,7 +795,7 @@ func TestLinkSubscriberStartSnapshotFailureUnblocksReceiver(t *testing.T) {
 				}
 				return nil, want
 			}
-			_, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent))
+			_, _, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, listFn, unexpectedLinkByName(t), make(chan LinkEvent))
 			if !errors.Is(err, want) {
 				t.Fatalf("Start = %v, want %v", err, want)
 			}
@@ -786,7 +836,7 @@ func TestLinkSubscriberReadFailureUnblocksReceiver(t *testing.T) {
 	}
 	getFn := func(string) (netlink.Link, error) { return nil, want }
 	out := make(chan LinkEvent, 1)
-	exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, emptyLinkList, getFn, out)
+	_, exited, err := (&LinkSubscriber{}).StartWith(ctx, subscribe, emptyLinkList, getFn, out)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -156,12 +156,12 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		cancel(fmt.Errorf("probers: %w", err))
 		return exitError(ctx, metricsDone, logger)
 	}
-	linkEvents, err := startLinkSubscriber(ctx, cancel, &cfg, logger)
+	linkSnapshot, linkEvents, err := startLinkSubscriber(ctx, cancel, &cfg, logger)
 	if err != nil {
 		cancel(fmt.Errorf("link subscriber: %w", err))
 		return exitError(ctx, metricsDone, logger)
 	}
-	routeEvents, err := startRouteSubscriber(ctx, cancel, &cfg, logger)
+	routeSnapshot, routeEvents, err := startRouteSubscriber(ctx, cancel, &cfg, logger)
 	if err != nil {
 		cancel(fmt.Errorf("route subscriber: %w", err))
 		return exitError(ctx, metricsDone, logger)
@@ -179,7 +179,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 	watchdogChallenges := make(chan watchdogChallenge)
 	go runWatchdog(ctx, logger, watchdogChallenges)
 
-	serve(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
+	serve(ctx, d, startupSnapshot{links: linkSnapshot, routes: routeSnapshot}, probeResults, linkEvents, routeEvents, watchdogChallenges)
 	return exitError(ctx, metricsDone, logger)
 }
 

@@ -92,17 +92,22 @@ func buildHarness(tb testing.TB, cfg *config.Config, hooks func(*harness, *slog.
 	return h
 }
 
-// Start runs bootstrap, then serve on its own goroutine, as run()
-// does once the probers and subscribers are wired. The test's cleanup
-// stops it.
+// Start is StartFrom with empty startup snapshots.
 func (h *harness) Start() error {
+	return h.StartFrom(startupSnapshot{})
+}
+
+// StartFrom runs bootstrap, then serve from snapshot on its own
+// goroutine, as run() does once the probers and subscribers are
+// wired. The test's cleanup stops it.
+func (h *harness) StartFrom(snapshot startupSnapshot) error {
 	if err := h.d.bootstrap(h.ctx); err != nil {
 		return err
 	}
 	h.done = make(chan struct{})
 	go func() {
 		defer close(h.done)
-		serve(h.ctx, h.d, h.probes, h.links, h.routes, h.challenges)
+		serve(h.ctx, h.d, snapshot, h.probes, h.links, h.routes, h.challenges)
 	}()
 	h.tb.Cleanup(h.Stop)
 	return nil
