@@ -195,6 +195,32 @@ func TestStartupSnapshot(t *testing.T) {
 	}
 }
 
+// TestStartupPrimesBeforeReady covers readiness: run() primes before
+// it sends READY=1, so units ordered after wanwatch find the startup
+// Decision's routes and State in place. StartFrom mirrors run(), so
+// its return, without a barrier, stands for READY.
+func TestStartupPrimesBeforeReady(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, baseConfig())
+	err := h.StartFrom(startupSnapshot{
+		links:  []rtnl.LinkEvent{carrier("eth0", true)},
+		routes: []rtnl.RouteEvent{gateway("eth0", probe.FamilyV4, "192.0.2.1")},
+	})
+	if err != nil {
+		t.Fatalf("StartFrom = %v, want nil", err)
+	}
+	got := slices.DeleteFunc(h.Trace(), func(line string) bool {
+		return strings.HasPrefix(line, "rule ")
+	})
+	assertTrace(t, "at READY", got, []string{
+		"route home v4 eth0 via 192.0.2.1",
+		"hook up home →primary",
+	})
+	if active := selectionOf(h.State(), "home"); active != "primary" {
+		t.Errorf("State Selection at READY = %q, want %q", active, "primary")
+	}
+}
+
 // TestStartupLinkHistory delivers the LinkEvents the link subscriber
 // queues after its snapshot, once it has reconciled notifications that
 // raced the snapshot (internal/rtnl tests that reconciliation). Each

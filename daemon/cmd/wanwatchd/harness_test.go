@@ -97,17 +97,18 @@ func (h *harness) Start() error {
 	return h.StartFrom(startupSnapshot{})
 }
 
-// StartFrom runs bootstrap, then serve from snapshot on its own
-// goroutine, as run() does once the probers and subscribers are
-// wired. The test's cleanup stops it.
+// StartFrom runs bootstrap and primes from snapshot, then runs serve
+// on its own goroutine, as run() does once the probers and subscribers
+// are wired. Its return stands for READY. The test's cleanup stops it.
 func (h *harness) StartFrom(snapshot startupSnapshot) error {
 	if err := h.d.bootstrap(h.ctx); err != nil {
 		return err
 	}
+	h.d.prime(h.ctx, snapshot)
 	h.done = make(chan struct{})
 	go func() {
 		defer close(h.done)
-		serve(h.ctx, h.d, snapshot, h.probes, h.links, h.routes, h.challenges)
+		serve(h.ctx, h.d, h.probes, h.links, h.routes, h.challenges)
 	}()
 	h.tb.Cleanup(h.Stop)
 	return nil

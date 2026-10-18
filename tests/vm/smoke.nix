@@ -1,8 +1,9 @@
 /*
   smoke — boot a single-node router and verify the daemon lifecycle:
   the unit reaches active, State and the metrics socket appear under
-  /run/wanwatch/, and the fwmark rules land in both family RIBs. No
-  probe target is reachable; the failover-* scenarios cover failover.
+  /run/wanwatch/, the fwmark rules land in both family RIBs, and the
+  startup Decision's Group-table route is in place at READY. No probe
+  target is reachable; the failover-* scenarios cover failover.
 */
 { inputs, pkgs }:
 
@@ -113,5 +114,26 @@ pkgs.testers.runNixOSTest {
     router.wait_until_succeeds(
         f"ip -6 rule show fwmark 0x{int(mark):x} | grep -q .", timeout=10
     )
+
+    # 6. The daemon primes before sd_notify READY (docs/specs/failover.md),
+    #    so the startup Decision's Group-table route and State are in
+    #    place once the unit is active. The unit starts on
+    #    network-pre.target, possibly before wan0 is up, so wait for
+    #    wan0's carrier, then restart; for a Type=notify unit,
+    #    `systemctl restart` returns at READY. Assert once, without
+    #    polling: the 5 s cold Window keeps primary healthy meanwhile.
+    router.wait_until_succeeds("ip link show wan0 | grep -q LOWER_UP", timeout=30)
+    router.succeed("systemctl restart wanwatch.service")
+    table = router.succeed(
+        "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
+    ).strip()
+    routes = router.succeed(f"ip route show table {table}")
+    assert "default dev wan0" in routes, (
+        f"table {table} at READY lacks the startup route:\n{routes}"
+    )
+    active = router.succeed(
+        "jq -r '.groups.\"home-uplink\".active' /run/wanwatch/state.json"
+    ).strip()
+    assert active == "primary", f"Selection at READY = {active!r}, want 'primary'"
   '';
 }
