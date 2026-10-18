@@ -58,6 +58,10 @@ _Avoid_: active WAN, choice, Decision
 A change of a Group's Selection from one value to another.
 _Avoid_: switch event, Selection
 
+**Priming**:
+Learning every WAN's Gateways and carrier at startup, before reacting to any change, so that each Group makes at most one startup Decision.
+_Avoid_: bootstrap, warm-up, cold start
+
 ## Effects
 
 **Gateway**:
