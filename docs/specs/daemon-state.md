@@ -9,7 +9,7 @@ The daemon publishes this JSON snapshot to the config's `global.statePath`, whic
 The daemon republishes on every observable state transition, not only on Selection changes:
 
 - **Bootstrap**: once at startup, before any event is processed, so early consumers see the configured WANs and Groups before the first Sample.
-- **Priming**: once more after the daemon folds in the startup route and link dumps, when they report a Gateway, carrier, or operstate, and still before any event is processed. A startup Decision publishes on its own as well. Both writes land before the daemon reports `READY=1` to systemd.
+- **Priming**: once more after the daemon folds in the startup route and link dumps, when they report a Gateway, carrier, or operstate, and still before any event is processed. A startup Decision publishes on its own as well. Both writes, when they happen, land before the daemon reports `READY=1` to systemd.
 - **Decision commit**: when a Group's `active` Member changes and every route write has succeeded, except for Families skipped because no Gateway is known yet. Hooks fire immediately after.
 - **Per-Family Health transition**: when a (WAN, Family) flips its `healthy` verdict. Without this trigger, a flip that leaves the WAN aggregate unchanged (for example, v4 drops while v6 holds under `familyHealthPolicy = "any"`) would never reach `state.json`.
 - **Carrier or operstate change**: any rtnetlink LinkEvent that changes `wans.<name>.carrier` or `wans.<name>.operstate`.

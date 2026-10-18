@@ -166,8 +166,8 @@ in
 
       serviceConfig = {
         # The daemon reports READY=1 once every subsystem runs and the
-        # startup Decision is applied, then sends WATCHDOG=1 at half of
-        # WatchdogSec, so systemd restarts a stuck event loop.
+        # startup snapshots are folded in, then sends WATCHDOG=1 at half
+        # of WatchdogSec, so systemd restarts a stuck event loop.
         Type = "notify";
         ExecStart = "${cfg.package}/bin/wanwatchd -config /etc/wanwatch/config.json";
         Restart = "on-failure";

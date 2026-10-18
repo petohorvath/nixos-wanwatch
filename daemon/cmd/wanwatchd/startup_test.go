@@ -116,7 +116,8 @@ func TestStartupInstallsFwmarkRules(t *testing.T) {
 // Group therefore makes at most one Decision, onto its preferred
 // healthy Member, with every Gateway known, whatever order the
 // snapshots list the WANs in. State then shows every Gateway, even
-// when no Decision fires.
+// when no Decision fires. All of it holds once StartFrom returns, which
+// stands for READY.
 func TestStartupSnapshot(t *testing.T) {
 	t.Parallel()
 	routes := []rtnl.RouteEvent{
@@ -192,32 +193,6 @@ func TestStartupSnapshot(t *testing.T) {
 				t.Errorf("state_publications_total = %v, want %v", n, tc.publications)
 			}
 		})
-	}
-}
-
-// TestStartupPrimesBeforeReady covers readiness: run() primes before
-// it sends READY=1, so units ordered after wanwatch find the startup
-// Decision's routes and State in place. StartFrom mirrors run(), so
-// its return, without a barrier, stands for READY.
-func TestStartupPrimesBeforeReady(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, baseConfig())
-	err := h.StartFrom(startupSnapshot{
-		links:  []rtnl.LinkEvent{carrier("eth0", true)},
-		routes: []rtnl.RouteEvent{gateway("eth0", probe.FamilyV4, "192.0.2.1")},
-	})
-	if err != nil {
-		t.Fatalf("StartFrom = %v, want nil", err)
-	}
-	got := slices.DeleteFunc(h.Trace(), func(line string) bool {
-		return strings.HasPrefix(line, "rule ")
-	})
-	assertTrace(t, "at READY", got, []string{
-		"route home v4 eth0 via 192.0.2.1",
-		"hook up home →primary",
-	})
-	if active := selectionOf(h.State(), "home"); active != "primary" {
-		t.Errorf("State Selection at READY = %q, want %q", active, "primary")
 	}
 }
 
@@ -317,10 +292,12 @@ func TestStartupRouteHistory(t *testing.T) {
 }
 
 // primingTrace returns the trace since Start without bootstrap's
-// fwmark rule installs, once priming has finished.
+// fwmark rule installs. It does not wait for the event loop: StartFrom
+// primes before it returns, as run() does before READY, so priming has
+// finished. The harness records Hooks synchronously; in run() they may
+// still be running at READY.
 func primingTrace(h *harness) []string {
 	h.tb.Helper()
-	h.barrier()
 	return slices.DeleteFunc(h.Trace(), func(line string) bool {
 		return strings.HasPrefix(line, "rule ")
 	})
