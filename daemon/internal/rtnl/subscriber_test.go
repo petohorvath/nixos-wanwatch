@@ -376,7 +376,7 @@ func TestLinkSubscriberReadSnapshotWrapsListError(t *testing.T) {
 	want := errors.New("netlink: link list denied")
 	listFn := func() ([]netlink.Link, error) { return nil, want }
 
-	_, err := (&LinkSubscriber{}).readSnapshot(listFn, map[string]LinkState{})
+	_, err := (&LinkSubscriber{}).readSnapshot(t.Context(), listFn, map[string]LinkState{})
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want list-error chained via %%w", err)
 	}
@@ -398,7 +398,7 @@ func TestLinkSubscriberReadSnapshotEmitsWatchedLinks(t *testing.T) {
 		}, nil
 	}
 	s := &LinkSubscriber{Interfaces: map[string]struct{}{"eth0": {}}}
-	snapshot, err := s.readSnapshot(listFn, map[string]LinkState{})
+	snapshot, err := s.readSnapshot(t.Context(), listFn, map[string]LinkState{})
 	if err != nil {
 		t.Fatalf("readSnapshot = %v, want nil", err)
 	}

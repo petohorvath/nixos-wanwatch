@@ -80,7 +80,7 @@ func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscrib
 		return nil, nil, fmt.Errorf("rtnl: RouteSubscribe: %w", err)
 	}
 	stop := func() { closeAndDrain(done, updates) }
-	snapshot, err := s.readSnapshot(listFn)
+	snapshot, err := s.readSnapshot(ctx, listFn)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -104,14 +104,15 @@ type routeListFn func(link netlink.Link, family int) ([]netlink.Route, error)
 // routeSubscribeFn matches netlink.RouteSubscribeWithOptions.
 type routeSubscribeFn func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, opts netlink.RouteSubscribeOptions) error
 
-// readSnapshot reads the route snapshot before the subscription is drained.
-func (s *RouteSubscriber) readSnapshot(listFn routeListFn) ([]RouteEvent, error) {
+// readSnapshot reads the route snapshot before the subscription is
+// drained. An interrupted dump of a Family is read again.
+func (s *RouteSubscriber) readSnapshot(ctx context.Context, listFn routeListFn) ([]RouteEvent, error) {
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
 	}
 	var snapshot []RouteEvent
 	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
-		routes, err := listFn(nil, family)
+		routes, err := retryDump(ctx, func() ([]netlink.Route, error) { return listFn(nil, family) })
 		if err != nil {
 			return nil, fmt.Errorf("rtnl: RouteList family=%d: %w", family, err)
 		}
@@ -158,12 +159,13 @@ func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Ro
 }
 
 // reconcileVia returns an Add for the current default, or a Del only if
-// the interface/family has none. A stale delete must not clear a replacement.
+// the interface/family has none. A stale delete must not clear a replacement,
+// so an interrupted dump is read again rather than trusted.
 func (s *RouteSubscriber) reconcileVia(ctx context.Context, listFn routeListFn, ev RouteEvent) (RouteEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return RouteEvent{}, err
 	}
-	routes, err := listFn(nil, int(ev.Family))
+	routes, err := retryDump(ctx, func() ([]netlink.Route, error) { return listFn(nil, int(ev.Family)) })
 	if err != nil {
 		return RouteEvent{}, fmt.Errorf("rtnl: RouteList family=%d: %w", ev.Family, err)
 	}

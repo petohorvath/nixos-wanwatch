@@ -449,7 +449,7 @@ func TestRouteSubscriberReadSnapshotWrapsListError(t *testing.T) {
 	listFn := func(netlink.Link, int) ([]netlink.Route, error) { return nil, want }
 
 	s := &RouteSubscriber{}
-	_, err := s.readSnapshot(listFn)
+	_, err := s.readSnapshot(t.Context(), listFn)
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want list-error chained via %%w", err)
 	}
@@ -485,7 +485,7 @@ func TestRouteSubscriberReadSnapshotEmitsPerFamilyDefaults(t *testing.T) {
 			return "", errors.New("not found")
 		},
 	}
-	snapshot, err := s.readSnapshot(listFn)
+	snapshot, err := s.readSnapshot(t.Context(), listFn)
 	if err != nil {
 		t.Fatalf("readSnapshot = %v, want nil", err)
 	}
