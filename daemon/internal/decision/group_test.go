@@ -71,9 +71,9 @@ func TestGroupProgression(t *testing.T) {
 	t.Parallel()
 	type step struct {
 		name          string
-		healthy       []string // Recompute unless probeWAN or gatewayWAN is set.
+		healthy       []string // Recompute unless probeWAN or routeWAN is set.
 		probeWAN      string
-		gatewayWAN    string
+		routeWAN      string
 		family        probe.Family
 		reason        string
 		fail          bool
@@ -83,6 +83,9 @@ func TestGroupProgression(t *testing.T) {
 		wantRoutes    []routeAttempt
 	}
 	all := func(wan string) []routeAttempt { return []routeAttempt{{wan: wan}} }
+	only := func(wan string, family probe.Family) []routeAttempt {
+		return []routeAttempt{{wan, []probe.Family{family}}}
+	}
 	cases := []struct {
 		name  string
 		steps []step
@@ -91,7 +94,7 @@ func TestGroupProgression(t *testing.T) {
 			name: "cold start, switch, all-down and recovery",
 			steps: []step{
 				{name: "no healthy members"},
-				{name: "no Selection to refresh", gatewayWAN: "primary", family: probe.FamilyV4},
+				{name: "no Selection to refresh", routeWAN: "primary", family: probe.FamilyV4},
 				{name: "up", healthy: []string{"primary", "backup"}, reason: "carrier", wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
 				{name: "unchanged", healthy: []string{"primary", "backup"}, wantActive: "primary", wantDecisions: 1},
 				{name: "switch", healthy: []string{"backup"}, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"primary", "backup", state.EventSwitch}, wantRoutes: all("backup")},
@@ -106,13 +109,70 @@ func TestGroupProgression(t *testing.T) {
 				{name: "unchanged pending target", healthy: []string{"primary"}, wantDecisions: 1},
 				{name: "unrelated Probe", probeWAN: "backup", wantDecisions: 1},
 				{name: "failed Probe retry", probeWAN: "primary", fail: true, wantDecisions: 1, wantRoutes: all("primary")},
-				{name: "unrelated Gateway", gatewayWAN: "backup", family: probe.FamilyV4, wantDecisions: 1},
-				{name: "failed Gateway retry uses all families", gatewayWAN: "primary", family: probe.FamilyV4, fail: true, wantDecisions: 1, wantRoutes: all("primary")},
+				{name: "unrelated Gateway", routeWAN: "backup", family: probe.FamilyV4, wantDecisions: 1},
+				{name: "failed Gateway retry uses all families", routeWAN: "primary", family: probe.FamilyV4, fail: true, wantDecisions: 1, wantRoutes: all("primary")},
 				{name: "Probe commits", probeWAN: "primary", wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
 				{name: "committed Probe does nothing", probeWAN: "primary", wantActive: "primary", wantDecisions: 1},
-				{name: "v4 refresh", gatewayWAN: "primary", family: probe.FamilyV4, wantActive: "primary", wantDecisions: 1, wantRoutes: []routeAttempt{{"primary", []probe.Family{probe.FamilyV4}}}},
-				{name: "failed v6 refresh", gatewayWAN: "primary", family: probe.FamilyV6, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: []routeAttempt{{"primary", []probe.Family{probe.FamilyV6}}}},
-				{name: "refresh failure creates no pending Decision", probeWAN: "primary", wantActive: "primary", wantDecisions: 1},
+				{name: "v4 refresh", routeWAN: "primary", family: probe.FamilyV4, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV4)},
+				{name: "failed v6 refresh", routeWAN: "primary", family: probe.FamilyV6, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV6)},
+				{name: "refresh failure creates no pending Decision, Probe repairs every family", probeWAN: "primary", wantActive: "primary", wantDecisions: 1, wantRoutes: all("primary")},
+				{name: "repaired Selection Probe does nothing", probeWAN: "primary", wantActive: "primary", wantDecisions: 1},
+			},
+		},
+		{
+			name: "failed refresh retries on the selected WAN's Probe cycles",
+			steps: []step{
+				{name: "primary committed", healthy: []string{"primary", "backup"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
+				{name: "failed v4 refresh", routeWAN: "primary", family: probe.FamilyV4, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV4)},
+				{name: "unselected WAN Probe does not repair", probeWAN: "backup", wantActive: "primary", wantDecisions: 1},
+				{name: "failed repair", probeWAN: "primary", fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: all("primary")},
+				{name: "repair", probeWAN: "primary", wantActive: "primary", wantDecisions: 1, wantRoutes: all("primary")},
+				{name: "repaired Selection Probe does nothing", probeWAN: "primary", wantActive: "primary", wantDecisions: 1},
+			},
+		},
+		{
+			name: "route observation refreshes its family, or every family after a failure",
+			steps: []step{
+				{name: "primary committed", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
+				{name: "unchanged v4 observation refreshes v4", routeWAN: "primary", family: probe.FamilyV4, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV4)},
+				{name: "unselected WAN observation does nothing", routeWAN: "backup", family: probe.FamilyV4, wantActive: "primary", wantDecisions: 1},
+				{name: "failed v6 refresh", routeWAN: "primary", family: probe.FamilyV6, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV6)},
+				{name: "failed repair on v4 observation", routeWAN: "primary", family: probe.FamilyV4, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: all("primary")},
+				{name: "v4 observation repairs every family", routeWAN: "primary", family: probe.FamilyV4, wantActive: "primary", wantDecisions: 1, wantRoutes: all("primary")},
+				{name: "repaired: v4 observation refreshes v4", routeWAN: "primary", family: probe.FamilyV4, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV4)},
+			},
+		},
+		{
+			name: "a switch replaces a due Repair",
+			steps: []step{
+				{name: "primary committed", healthy: []string{"primary", "backup"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
+				{name: "failed v4 refresh", routeWAN: "primary", family: probe.FamilyV4, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV4)},
+				{name: "switch", healthy: []string{"backup"}, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"primary", "backup", state.EventSwitch}, wantRoutes: all("backup")},
+				{name: "switched Selection Probe does nothing", probeWAN: "backup", wantActive: "backup", wantDecisions: 2},
+				{name: "old Selection Probe does nothing", probeWAN: "primary", wantActive: "backup", wantDecisions: 2},
+			},
+		},
+		{
+			name: "a pending switch holds a due Repair until its revert commits",
+			steps: []step{
+				{name: "primary committed", healthy: []string{"primary", "backup"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
+				{name: "failed v4 refresh", routeWAN: "primary", family: probe.FamilyV4, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV4)},
+				{name: "backup pending", healthy: []string{"backup"}, fail: true, wantActive: "primary", wantDecisions: 2, wantRoutes: all("backup")},
+				{name: "old Selection Probe does not repair", probeWAN: "primary", wantActive: "primary", wantDecisions: 2},
+				{name: "revert reapplies primary", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 3, wantCommit: &transition{"primary", "primary", ""}, wantRoutes: all("primary")},
+				{name: "reverted Selection Probe does nothing", probeWAN: "primary", wantActive: "primary", wantDecisions: 3},
+			},
+		},
+		{
+			name: "a down drops a due Repair",
+			steps: []step{
+				{name: "primary committed", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
+				{name: "failed v4 refresh", routeWAN: "primary", family: probe.FamilyV4, fail: true, wantActive: "primary", wantDecisions: 1, wantRoutes: only("primary", probe.FamilyV4)},
+				{name: "down retains routes", wantDecisions: 2, wantCommit: &transition{"primary", "", state.EventDown}},
+				{name: "no Selection to repair", probeWAN: "primary", wantDecisions: 2},
+				{name: "no Selection to refresh", routeWAN: "primary", family: probe.FamilyV4, wantDecisions: 2},
+				{name: "recovery", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 3, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
+				{name: "recovered Selection Probe does nothing", probeWAN: "primary", wantActive: "primary", wantDecisions: 3},
 			},
 		},
 		{
@@ -121,8 +181,8 @@ func TestGroupProgression(t *testing.T) {
 				{name: "primary pending", healthy: []string{"primary", "backup"}, fail: true, wantDecisions: 1, wantRoutes: all("primary")},
 				{name: "backup supersedes primary", healthy: []string{"backup"}, fail: true, wantDecisions: 2, wantRoutes: all("backup")},
 				{name: "superseded Probe ignored", probeWAN: "primary", wantDecisions: 2},
-				{name: "superseded Gateway ignored", gatewayWAN: "primary", family: probe.FamilyV4, wantDecisions: 2},
-				{name: "backup commits", gatewayWAN: "backup", family: probe.FamilyV4, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"", "backup", state.EventUp}, wantRoutes: all("backup")},
+				{name: "superseded Gateway ignored", routeWAN: "primary", family: probe.FamilyV4, wantDecisions: 2},
+				{name: "backup commits", routeWAN: "backup", family: probe.FamilyV4, wantActive: "backup", wantDecisions: 2, wantCommit: &transition{"", "backup", state.EventUp}, wantRoutes: all("backup")},
 			},
 		},
 		{
@@ -130,9 +190,9 @@ func TestGroupProgression(t *testing.T) {
 			steps: []step{
 				{name: "primary committed", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 1, wantCommit: &transition{"", "primary", state.EventUp}, wantRoutes: all("primary")},
 				{name: "backup pending", healthy: []string{"backup"}, fail: true, wantActive: "primary", wantDecisions: 2, wantRoutes: all("backup")},
-				{name: "old Selection Gateway ignored", gatewayWAN: "primary", family: probe.FamilyV6, wantActive: "primary", wantDecisions: 2},
+				{name: "old Selection Gateway ignored", routeWAN: "primary", family: probe.FamilyV6, wantActive: "primary", wantDecisions: 2},
 				{name: "old Selection Probe ignored", probeWAN: "primary", wantActive: "primary", wantDecisions: 2},
-				{name: "recovery reapplies primary to repair partial switch", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 3, wantCommit: &transition{"primary", "primary", ""}, wantRoutes: all("primary")},
+				{name: "recovery reapplies primary over the partial switch", healthy: []string{"primary"}, wantActive: "primary", wantDecisions: 3, wantCommit: &transition{"primary", "primary", ""}, wantRoutes: all("primary")},
 				{name: "superseded backup Probe ignored", probeWAN: "backup", wantActive: "primary", wantDecisions: 3},
 			},
 		},
@@ -176,8 +236,8 @@ func TestGroupProgression(t *testing.T) {
 				switch {
 				case s.probeWAN != "":
 					got = g.Probe(t.Context(), s.probeWAN)
-				case s.gatewayWAN != "":
-					got = g.GatewayChanged(t.Context(), s.gatewayWAN, s.family)
+				case s.routeWAN != "":
+					got = g.RouteObserved(t.Context(), s.routeWAN, s.family)
 				default:
 					got = g.Recompute(t.Context(), memberHealth(s.healthy...), reason)
 				}

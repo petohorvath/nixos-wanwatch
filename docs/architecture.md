@@ -119,7 +119,7 @@ LinkEvent → health.Wans.Link ────────────────�
                                                      │
                                                      ▼
 ProbeResult → Group.Probe ──────────────→ pending Selection → Apply
-RouteEvent → Gateway cache → Group.GatewayChanged ────┘        │
+RouteEvent → Gateway cache → Group.RouteObserved ─────┘        │
                                                              ▼
                                                    committed Selection
                                                              │
@@ -135,9 +135,9 @@ The health package owns WAN Health: threshold verdicts, Hysteresis, the cold-sta
 
 The decision package owns pending and committed Selections, Decision counts, active-Member gauges, and commit timestamps. The daemon forwards events and publishes returned commits; `Snapshot` supplies each Group's State. Strategies stay pure in `internal/selector`.
 
-A hard Apply failure leaves the target Selection pending, and State and Hooks stay on the committed Selection. Probe cycles and Gateway changes retry every Family for the pending target, and a newer Selection supersedes it.
+A hard Apply failure leaves the target Selection pending, and State and Hooks stay on the committed Selection. Probe cycles and route observations retry every Family for the pending target, and a newer Selection supersedes it.
 
-A missing Gateway is a soft skip: a commit can leave that Family's existing route untouched. A Gateway change on a committed Selection refreshes only the changed Family and produces no Decision or Hook.
+A missing Gateway is a soft skip: a commit can leave that Family's existing route untouched. Every main-table default-route observation on a committed Selection's WAN rewrites the observed Family, even when its Gateway is unchanged, because the kernel flushes IPv4 routes on link down without a notification. A failed rewrite leaves a Repair due, and the WAN's next Probe cycle or route observation rewrites every Family. Neither produces a Decision or Hook ([ADR-0017](./adr/0017-repair-committed-group-table.md)).
 
 ## Families and Gateways
 

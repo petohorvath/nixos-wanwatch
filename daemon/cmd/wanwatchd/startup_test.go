@@ -154,7 +154,7 @@ func TestStartupLinkHistory(t *testing.T) {
 // The subscriber reconciles each notification to the current Gateway
 // (internal/rtnl tests that), so only the current Gateway reaches
 // Apply and State, whether the link or the route snapshot is handled
-// first.
+// first. Each observation on the selected WAN rewrites its route.
 func TestStartupRouteHistory(t *testing.T) {
 	t.Parallel()
 	for _, fam := range probe.AllFamilies {
@@ -173,9 +173,9 @@ func TestStartupRouteHistory(t *testing.T) {
 				steps: []step{
 					{name: "eth0 up", do: link("eth0", true), want: []string{"hook up home →primary"}, active: "primary"},
 					{name: "snapshot: current Gateway", do: reconciled, want: []string{route}, active: "primary"},
-					{name: "queued: old Gateway added", do: reconciled, active: "primary"},
-					{name: "queued: old Gateway deleted", do: reconciled, active: "primary"},
-					{name: "queued: current Gateway added", do: reconciled, active: "primary"},
+					{name: "queued: old Gateway added", do: reconciled, want: []string{route}, active: "primary"},
+					{name: "queued: old Gateway deleted", do: reconciled, want: []string{route}, active: "primary"},
+					{name: "queued: current Gateway added", do: reconciled, want: []string{route}, active: "primary"},
 				},
 			},
 			{
