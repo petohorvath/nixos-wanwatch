@@ -3,6 +3,7 @@ package rtnl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -79,7 +80,7 @@ func TestRetryDump(t *testing.T) {
 			t.Parallel()
 			calls := 0
 			got, err := retryDump(t.Context(), tc.dump(&calls))
-			if !errors.Is(err, tc.wantErr) || (tc.wantErr == nil && err != nil) {
+			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
 			if got != tc.wantValue {
@@ -92,13 +93,13 @@ func TestRetryDump(t *testing.T) {
 	}
 }
 
-// TestRetryDumpNamesAttemptsWhenExhausted: the fatal error says the
-// dump was retried, so a restart under churn is diagnosable.
+// TestRetryDumpNamesAttemptsWhenExhausted: the fatal error says how
+// many times the dump was tried, so a restart under churn is diagnosable.
 func TestRetryDumpNamesAttemptsWhenExhausted(t *testing.T) {
 	t.Parallel()
 	calls := 0
 	_, err := retryDump(t.Context(), interruptedThen(dumpAttempts, 0, 1, &calls))
-	if want := "attempts"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := fmt.Sprintf("all %d attempts", dumpAttempts); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("err = %v, want it to mention %q", err, want)
 	}
 }
