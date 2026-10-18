@@ -50,17 +50,27 @@ func eventLoop(
 	}
 }
 
-// serve runs the event loop until ctx is cancelled, then closes Hook
-// delivery. run() calls it once every subsystem is wired; the test
-// harness drives the same sequence.
+// startupSnapshot holds the link and route snapshots the subscribers
+// read before the event loop starts; their channels carry only later
+// changes.
+type startupSnapshot struct {
+	links  []rtnl.LinkEvent
+	routes []rtnl.RouteEvent
+}
+
+// serve primes the daemon from snapshot, runs the event loop until ctx
+// is cancelled, then closes Hook delivery. run() calls it once every
+// subsystem is wired; the test harness drives the same sequence.
 func serve(
 	ctx context.Context,
 	d *daemon,
+	snapshot startupSnapshot,
 	probeResults <-chan probe.ProbeResult,
 	linkEvents <-chan rtnl.LinkEvent,
 	routeEvents <-chan rtnl.RouteEvent,
 	watchdogChallenges <-chan watchdogChallenge,
 ) {
+	d.prime(ctx, snapshot)
 	eventLoop(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
 	d.hooks.Close()
 }

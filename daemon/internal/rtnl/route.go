@@ -44,25 +44,27 @@ type RouteSubscriber struct {
 }
 
 // Start subscribes before taking the initial v4 + v6 route snapshot,
-// queues its default routes on out, then reconciles live notifications.
-// Each matching notification triggers a current-route read: its payload may
-// describe history already superseded by the snapshot, even when it reaches
-// the receiver after Start returns. Replaying that payload could regress
-// consumers that immediately Apply the Gateway. Both phases own the
-// interface cache sequentially.
+// returns its default routes as that snapshot, then reconciles live
+// notifications onto out. Each matching notification triggers a
+// current-route read: its payload may describe history already
+// superseded by the snapshot, even when it reaches the receiver after
+// Start returns. Replaying that payload could regress consumers that
+// immediately Apply the Gateway. Both phases own the interface cache
+// sequentially.
 //
-// Start returns after queuing the snapshot. Unless a consumer is already
-// reading, out must have room for every matching route. The returned
-// channel receives one terminal error and closes when ctx is cancelled
-// or the subscription fails. Start does not close out.
-func (s *RouteSubscriber) Start(ctx context.Context, out chan<- RouteEvent) (<-chan error, error) {
+// Returning the snapshot rather than queuing it lets the caller learn
+// every Gateway before its event loop starts, and keeps a large dump
+// from blocking on out before anything reads it. The returned channel
+// receives one terminal error and closes when ctx is cancelled or the
+// subscription fails. Start does not close out.
+func (s *RouteSubscriber) Start(ctx context.Context, out chan<- RouteEvent) ([]RouteEvent, <-chan error, error) {
 	return s.StartWith(ctx, netlink.RouteSubscribeWithOptions, netlink.RouteList, out)
 }
 
 // StartWith runs Start with supplied netlink operations. The subscription must
 // close its update channel when done closes, just like RouteSubscribeWithOptions.
 // This seam lets integration tests exercise discovery and its consumers together.
-func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscribeFn, listFn routeListFn, out chan<- RouteEvent) (<-chan error, error) {
+func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscribeFn, listFn routeListFn, out chan<- RouteEvent) ([]RouteEvent, <-chan error, error) {
 	updates := make(chan netlink.RouteUpdate, routeUpdateBuffer)
 	done := make(chan struct{})
 	var subErr atomic.Pointer[error]
@@ -75,12 +77,16 @@ func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscrib
 	}
 	if err := subscribe(updates, done, opts); err != nil {
 		close(done)
-		return nil, fmt.Errorf("rtnl: RouteSubscribe: %w", err)
+		return nil, nil, fmt.Errorf("rtnl: RouteSubscribe: %w", err)
 	}
 	stop := func() { closeAndDrain(done, updates) }
-	if err := s.primeVia(ctx, listFn, out); err != nil {
+	snapshot, err := s.readSnapshot(listFn)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
 		stop()
-		return nil, err
+		return nil, nil, err
 	}
 	exited := make(chan error, 1)
 	go func() {
@@ -89,7 +95,7 @@ func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscrib
 		stop()
 		exited <- err
 	}()
-	return exited, nil
+	return snapshot, exited, nil
 }
 
 // routeListFn matches netlink.RouteList.
@@ -98,32 +104,28 @@ type routeListFn func(link netlink.Link, family int) ([]netlink.Route, error)
 // routeSubscribeFn matches netlink.RouteSubscribeWithOptions.
 type routeSubscribeFn func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, opts netlink.RouteSubscribeOptions) error
 
-// primeVia queues snapshot events before the subscription is drained.
-func (s *RouteSubscriber) primeVia(ctx context.Context, listFn routeListFn, out chan<- RouteEvent) error {
+// readSnapshot reads the route snapshot before the subscription is drained.
+func (s *RouteSubscriber) readSnapshot(listFn routeListFn) ([]RouteEvent, error) {
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
 	}
+	var snapshot []RouteEvent
 	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
 		routes, err := listFn(nil, family)
 		if err != nil {
-			return fmt.Errorf("rtnl: RouteList family=%d: %w", family, err)
+			return nil, fmt.Errorf("rtnl: RouteList family=%d: %w", family, err)
 		}
 		for _, r := range routes {
 			ev, emit := s.handleUpdate(netlink.RouteUpdate{
 				Type:  unix.RTM_NEWROUTE,
 				Route: r,
 			})
-			if !emit {
-				continue
-			}
-			select {
-			case out <- ev:
-			case <-ctx.Done():
-				return ctx.Err()
+			if emit {
+				snapshot = append(snapshot, ev)
 			}
 		}
 	}
-	return nil
+	return snapshot, nil
 }
 
 // runLoop treats matching updates as invalidations, reads the affected

@@ -60,25 +60,22 @@ func translateSubClose(err error, subErr *atomic.Pointer[error], label string) e
 }
 
 // Start subscribes to RTNLGRP_LINK before taking the initial link
-// snapshot, queues one LinkEvent per watched interface on out, then
-// reconciles live notifications. Subscribing first means a carrier
-// change during startup cannot fall between the dump and the
-// subscription. Each matching notification triggers a current-link
-// read: a notification queued before the snapshot may describe
-// history the snapshot already supersedes, and replaying it would
-// show the selector a transient flap. Both phases share one state
-// map, so a read that matches the last emitted state emits nothing.
+// snapshot, returns one LinkEvent per watched interface as that
+// snapshot, then reconciles live notifications onto out. Subscribing
+// first means a carrier change during startup cannot fall between the
+// dump and the subscription. Each matching notification triggers a
+// current-link read: a notification queued before the snapshot may
+// describe history the snapshot already supersedes, and replaying it
+// would show the selector a transient flap. Both phases share one
+// state map, so out carries only changes since the snapshot.
 //
-// Start returns after queuing the snapshot, so each WAN's carrier
-// and operstate is known on the event loop's first iteration.
-// Without it the daemon starts every WAN at carrier-unknown — which
-// it treats as down — so a probe result arriving before the first
-// transition would leave an up WAN unselected. Unless a consumer is
-// already reading, out must have room for every watched interface.
+// Returning the snapshot rather than queuing it lets the caller fold
+// every WAN's carrier and operstate before its event loop starts, and
+// keeps a large dump from blocking on out before anything reads it.
 // The returned channel receives one terminal error and closes when
 // ctx is cancelled or the subscription fails. Start does not close
 // out.
-func (s *LinkSubscriber) Start(ctx context.Context, out chan<- LinkEvent) (<-chan error, error) {
+func (s *LinkSubscriber) Start(ctx context.Context, out chan<- LinkEvent) ([]LinkEvent, <-chan error, error) {
 	return s.StartWith(ctx, netlink.LinkSubscribeWithOptions, netlink.LinkList, netlink.LinkByName, out)
 }
 
@@ -86,7 +83,7 @@ func (s *LinkSubscriber) Start(ctx context.Context, out chan<- LinkEvent) (<-cha
 // subscription must close its update channel when done closes, just
 // like LinkSubscribeWithOptions, and getFn must report a missing
 // link with netlink.LinkNotFoundError, just like LinkByName.
-func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeFn, listFn linkListFn, getFn linkByNameFn, out chan<- LinkEvent) (<-chan error, error) {
+func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeFn, listFn linkListFn, getFn linkByNameFn, out chan<- LinkEvent) ([]LinkEvent, <-chan error, error) {
 	updates := make(chan netlink.LinkUpdate, updateChanBuffer)
 	done := make(chan struct{})
 	// subErr captures the netlink library's fatal error from its
@@ -94,19 +91,23 @@ func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeF
 	var subErr atomic.Pointer[error]
 	opts := netlink.LinkSubscribeOptions{
 		// ListExisting is omitted: the snapshot comes from LinkList
-		// after subscribing, so it is queued before Start returns.
+		// after subscribing, so Start can return it.
 		ReceiveBufferSize: netlinkRcvBufBytes,
 		ErrorCallback:     func(err error) { subErr.Store(&err) },
 	}
 	if err := subscribe(updates, done, opts); err != nil {
 		close(done)
-		return nil, fmt.Errorf("rtnl: LinkSubscribe: %w", err)
+		return nil, nil, fmt.Errorf("rtnl: LinkSubscribe: %w", err)
 	}
 	stop := func() { closeAndDrain(done, updates) }
 	state := make(map[string]LinkState)
-	if err := s.primeVia(ctx, listFn, state, out); err != nil {
+	snapshot, err := s.readSnapshot(listFn, state)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
 		stop()
-		return nil, err
+		return nil, nil, err
 	}
 	exited := make(chan error, 1)
 	go func() {
@@ -115,7 +116,7 @@ func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeF
 		stop()
 		exited <- err
 	}()
-	return exited, nil
+	return snapshot, exited, nil
 }
 
 // linkSubscribeFn matches netlink.LinkSubscribeWithOptions.
@@ -127,25 +128,20 @@ type linkListFn func() ([]netlink.Link, error)
 // linkByNameFn matches netlink.LinkByName.
 type linkByNameFn func(name string) (netlink.Link, error)
 
-// primeVia queues snapshot events before the subscription is
+// readSnapshot reads the link snapshot before the subscription is
 // drained, recording each watched link in state.
-func (s *LinkSubscriber) primeVia(ctx context.Context, listFn linkListFn, state map[string]LinkState, out chan<- LinkEvent) error {
+func (s *LinkSubscriber) readSnapshot(listFn linkListFn, state map[string]LinkState) ([]LinkEvent, error) {
 	links, err := listFn()
 	if err != nil {
-		return fmt.Errorf("rtnl: LinkList: %w", err)
+		return nil, fmt.Errorf("rtnl: LinkList: %w", err)
 	}
+	var snapshot []LinkEvent
 	for _, link := range links {
-		ev, emit := s.handleUpdate(state, linkUpdateFromLink(link))
-		if !emit {
-			continue
-		}
-		select {
-		case out <- ev:
-		case <-ctx.Done():
-			return ctx.Err()
+		if ev, emit := s.handleUpdate(state, linkUpdateFromLink(link)); emit {
+			snapshot = append(snapshot, ev)
 		}
 	}
-	return nil
+	return snapshot, nil
 }
 
 // runLoop treats each update on a watched interface as an

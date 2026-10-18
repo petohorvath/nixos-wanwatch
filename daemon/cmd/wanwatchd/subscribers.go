@@ -10,52 +10,53 @@ import (
 )
 
 // startLinkSubscriber opens an rtnetlink subscription filtered to the
-// daemon's WAN interfaces and returns the LinkEvent channel. A
-// subscriber that exits with anything other than context
-// cancellation calls `cancel` with the cause, taking the daemon down
-// for a systemd restart rather than running on blind.
+// daemon's WAN interfaces and returns the startup link snapshot and
+// the LinkEvent channel. A subscriber that exits with anything other
+// than context cancellation calls `cancel` with the cause, taking the
+// daemon down for a systemd restart rather than running on blind.
 //
-// Start establishes the live subscription before queuing the initial
-// link snapshot synchronously, so each WAN's carrier/operstate is on
-// the channel before the event loop's first iteration and a carrier
-// change during startup cannot be missed — see rtnl.LinkSubscriber.Start.
-func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.LinkEvent, error) {
+// Start establishes the live subscription before reading the link
+// snapshot, so a carrier change during startup cannot be missed, and
+// the channel carries only changes since the snapshot — see
+// rtnl.LinkSubscriber.Start.
+func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) ([]rtnl.LinkEvent, <-chan rtnl.LinkEvent, error) {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.LinkSubscriber{Interfaces: watched}
 	events := make(chan rtnl.LinkEvent, 64)
-	exited, err := s.Start(ctx, events)
+	snapshot, exited, err := s.Start(ctx, events)
 	if err != nil {
-		return nil, fmt.Errorf("rtnl link subscriber start: %w", err)
+		return nil, nil, fmt.Errorf("rtnl link subscriber start: %w", err)
 	}
 	go func() {
 		onSubsystemExit(cancel, logger, "link subscriber", <-exited)
 	}()
-	logger.Info("rtnl link subscriber started", "interfaces", len(watched), "queued", len(events))
-	return events, nil
+	logger.Info("rtnl link subscriber started", "interfaces", len(watched), "snapshot", len(snapshot))
+	return snapshot, events, nil
 }
 
 // startRouteSubscriber opens an rtnetlink route subscription filtered
-// to the daemon's WAN interfaces and returns the RouteEvent channel.
-// The daemon uses these events to learn the current default-route
-// gateway on each WAN's interface from the kernel's main RIB.
+// to the daemon's WAN interfaces and returns the startup route
+// snapshot and the RouteEvent channel. The daemon uses these events to
+// learn the current default-route gateway on each WAN's interface from
+// the kernel's main RIB.
 //
-// Start establishes the live subscription before queuing the initial
-// route snapshot synchronously. Buffered and subsequent notifications
-// trigger current-route reads, so startup captures new defaults without
-// exposing obsolete route history to Apply or State.
-func startRouteSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan rtnl.RouteEvent, error) {
+// Start establishes the live subscription before reading the route
+// snapshot. Buffered and subsequent notifications trigger current-route
+// reads, so startup captures new defaults without exposing obsolete
+// route history to Apply or State.
+func startRouteSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) ([]rtnl.RouteEvent, <-chan rtnl.RouteEvent, error) {
 	watched := watchedInterfaces(cfg)
 	s := &rtnl.RouteSubscriber{Interfaces: watched}
 	events := make(chan rtnl.RouteEvent, 64)
-	exited, err := s.Start(ctx, events)
+	snapshot, exited, err := s.Start(ctx, events)
 	if err != nil {
-		return nil, fmt.Errorf("rtnl route subscriber start: %w", err)
+		return nil, nil, fmt.Errorf("rtnl route subscriber start: %w", err)
 	}
 	go func() {
 		onSubsystemExit(cancel, logger, "route subscriber", <-exited)
 	}()
-	logger.Info("rtnl route subscriber started", "interfaces", len(watched), "queued", len(events))
-	return events, nil
+	logger.Info("rtnl route subscriber started", "interfaces", len(watched), "snapshot", len(snapshot))
+	return snapshot, events, nil
 }
 
 // watchedInterfaces is the set of interface names the daemon

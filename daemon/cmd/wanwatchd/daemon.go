@@ -92,6 +92,32 @@ func (d *daemon) bootstrap(ctx context.Context) error {
 	return nil
 }
 
+// prime folds the startup snapshots in before the event loop handles
+// any event. It learns every Gateway first, so the first Decision
+// writes its routes and its Hook carries them. It then folds every
+// LinkEvent into WAN Health before recomputing any Group, so a Group
+// makes at most one startup Decision, onto its preferred healthy
+// Member, whatever order the link snapshot lists the WANs in. A snapshot that changes the Gateway cache or Health
+// republishes State once at the end, so it shows every Gateway even
+// when no Decision fires. A cancelled ctx primes nothing.
+func (d *daemon) prime(ctx context.Context, snapshot startupSnapshot) {
+	if ctx.Err() != nil {
+		return
+	}
+	// The route snapshot lists only installed routes, so every event
+	// is an add.
+	for _, e := range snapshot.routes {
+		d.gateways.set(e.Iface, e.Family, e.Gateway)
+	}
+	change := health.Change{Republish: len(snapshot.routes) > 0}
+	for _, e := range snapshot.links {
+		c := d.health.Link(e)
+		change.Flipped = append(change.Flipped, c.Flipped...)
+		change.Republish = change.Republish || c.Republish
+	}
+	d.publishHealthChange(ctx, change, reasonCarrier)
+}
+
 // handleProbeResult forwards a per-cycle result to WAN Health, then
 // retries r.Wan's pending Decisions, including during cold start: a
 // probe result means the WAN is reachable. Health goes first so a
