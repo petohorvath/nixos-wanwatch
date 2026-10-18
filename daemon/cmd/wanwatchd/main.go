@@ -167,19 +167,24 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		return exitError(ctx, metricsDone, logger)
 	}
 
-	// Every subsystem is wired — tell systemd the daemon is ready and
-	// start the watchdog keepalive. Both no-op outside a Type=notify
-	// unit, so a non-systemd launch is unaffected. A failed READY send
-	// isn't fatal: systemd's start timeout would restart us anyway,
-	// and crashing on a transient socket hiccup while otherwise
-	// healthy would be worse.
+	// Prime before READY, so units ordered after wanwatch find the
+	// startup Decision's Apply attempted and State published. Hooks
+	// run asynchronously and may still be running at READY.
+	d.prime(ctx, startupSnapshot{links: linkSnapshot, routes: routeSnapshot})
+
+	// Every subsystem is wired and primed — tell systemd the daemon
+	// is ready and start the watchdog keepalive. Both no-op outside a
+	// Type=notify unit, so a non-systemd launch is unaffected. A
+	// failed READY send isn't fatal: systemd's start timeout would
+	// restart us anyway, and crashing on a transient socket hiccup
+	// while otherwise healthy would be worse.
 	if err := sdNotify("READY=1"); err != nil {
 		logger.Warn("sd_notify READY failed", "err", err)
 	}
 	watchdogChallenges := make(chan watchdogChallenge)
 	go runWatchdog(ctx, logger, watchdogChallenges)
 
-	serve(ctx, d, startupSnapshot{links: linkSnapshot, routes: routeSnapshot}, probeResults, linkEvents, routeEvents, watchdogChallenges)
+	serve(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
 	return exitError(ctx, metricsDone, logger)
 }
 

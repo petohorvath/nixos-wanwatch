@@ -113,11 +113,11 @@ func TestStopDropsQueuedEvents(t *testing.T) {
 	}
 }
 
-// TestServePrimesNothingOnceCancelled: a daemon cancelled before serve
-// starts primes nothing from its startup snapshots, as the event loop
+// TestPrimesNothingOnceCancelled: a daemon cancelled before priming
+// primes nothing from its startup snapshots, as the event loop
 // dispatches nothing once cancelled. Priming would otherwise drive
 // Apply with the cancelled context and publish State during shutdown.
-func TestServePrimesNothingOnceCancelled(t *testing.T) {
+func TestPrimesNothingOnceCancelled(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, baseConfig())
 	if err := h.d.bootstrap(h.ctx); err != nil {
@@ -127,12 +127,13 @@ func TestServePrimesNothingOnceCancelled(t *testing.T) {
 	stateBefore := readStateFile(t, h)
 
 	h.cancel()
-	serve(h.ctx, h.d, startupSnapshot{
+	h.d.prime(h.ctx, startupSnapshot{
 		links:  []rtnl.LinkEvent{carrier("eth0", true)},
 		routes: []rtnl.RouteEvent{gateway("eth0", probe.FamilyV4, "192.0.2.1")},
-	}, h.probes, h.links, h.routes, h.challenges)
+	})
+	serve(h.ctx, h.d, h.probes, h.links, h.routes, h.challenges)
 
-	assertTrace(t, "serve", h.Trace(), []string{"hooks closed"})
+	assertTrace(t, "prime and serve", h.Trace(), []string{"hooks closed"})
 	if got := readStateFile(t, h); !bytes.Equal(got, stateBefore) {
 		t.Errorf("State rewritten during shutdown:\nbefore: %s\nafter:  %s", stateBefore, got)
 	}

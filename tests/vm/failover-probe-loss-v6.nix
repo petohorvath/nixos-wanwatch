@@ -254,7 +254,8 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("systemctl restart wanwatch.service")
     router.wait_for_unit("wanwatch.service")
-    # READY gates the new bootstrap State; wait for its Selection.
+    # READY follows priming, so State already holds the startup
+    # Selection.
     observe.wait_active("home-uplink", "primary", timeout=15)
 
     # Probe Health returns within the Window cook time (~2 s) plus

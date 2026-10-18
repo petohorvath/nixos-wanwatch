@@ -58,19 +58,17 @@ type startupSnapshot struct {
 	routes []rtnl.RouteEvent
 }
 
-// serve primes the daemon from snapshot, runs the event loop until ctx
-// is cancelled, then closes Hook delivery. run() calls it once every
-// subsystem is wired; the test harness drives the same sequence.
+// serve runs the event loop until ctx is cancelled, then closes Hook
+// delivery. run() calls it once the daemon is primed and READY is
+// sent; the test harness drives the same sequence.
 func serve(
 	ctx context.Context,
 	d *daemon,
-	snapshot startupSnapshot,
 	probeResults <-chan probe.ProbeResult,
 	linkEvents <-chan rtnl.LinkEvent,
 	routeEvents <-chan rtnl.RouteEvent,
 	watchdogChallenges <-chan watchdogChallenge,
 ) {
-	d.prime(ctx, snapshot)
 	eventLoop(ctx, d, probeResults, linkEvents, routeEvents, watchdogChallenges)
 	d.hooks.Close()
 }

@@ -116,7 +116,8 @@ func TestStartupInstallsFwmarkRules(t *testing.T) {
 // Group therefore makes at most one Decision, onto its preferred
 // healthy Member, with every Gateway known, whatever order the
 // snapshots list the WANs in. State then shows every Gateway, even
-// when no Decision fires.
+// when no Decision fires. All of it holds once StartFrom returns, which
+// stands for READY.
 func TestStartupSnapshot(t *testing.T) {
 	t.Parallel()
 	routes := []rtnl.RouteEvent{
@@ -291,10 +292,12 @@ func TestStartupRouteHistory(t *testing.T) {
 }
 
 // primingTrace returns the trace since Start without bootstrap's
-// fwmark rule installs, once priming has finished.
+// fwmark rule installs. It does not wait for the event loop: StartFrom
+// primes before it returns, as run() does before READY, so priming has
+// finished. The harness records Hooks synchronously; in run() they may
+// still be running at READY.
 func primingTrace(h *harness) []string {
 	h.tb.Helper()
-	h.barrier()
 	return slices.DeleteFunc(h.Trace(), func(line string) bool {
 		return strings.HasPrefix(line, "rule ")
 	})
