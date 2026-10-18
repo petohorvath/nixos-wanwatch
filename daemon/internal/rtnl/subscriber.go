@@ -101,7 +101,7 @@ func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeF
 	}
 	stop := func() { closeAndDrain(done, updates) }
 	state := make(map[string]LinkState)
-	snapshot, err := s.readSnapshot(listFn, state)
+	snapshot, err := s.readSnapshot(ctx, listFn, state)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -129,9 +129,10 @@ type linkListFn func() ([]netlink.Link, error)
 type linkByNameFn func(name string) (netlink.Link, error)
 
 // readSnapshot reads the link snapshot before the subscription is
-// drained, recording each watched link in state.
-func (s *LinkSubscriber) readSnapshot(listFn linkListFn, state map[string]LinkState) ([]LinkEvent, error) {
-	links, err := listFn()
+// drained, recording each watched link in state. An interrupted dump
+// is read again, so state records complete dumps only.
+func (s *LinkSubscriber) readSnapshot(ctx context.Context, listFn linkListFn, state map[string]LinkState) ([]LinkEvent, error) {
+	links, err := retryDump(ctx, listFn)
 	if err != nil {
 		return nil, fmt.Errorf("rtnl: LinkList: %w", err)
 	}
