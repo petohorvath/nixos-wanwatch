@@ -101,7 +101,7 @@ func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeF
 	}
 	stop := func() { closeAndDrain(done, updates) }
 	state := make(map[string]LinkState)
-	snapshot, err := s.primeVia(listFn, state)
+	snapshot, err := s.readSnapshot(listFn, state)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -128,9 +128,9 @@ type linkListFn func() ([]netlink.Link, error)
 // linkByNameFn matches netlink.LinkByName.
 type linkByNameFn func(name string) (netlink.Link, error)
 
-// primeVia reads the link snapshot before the subscription is
+// readSnapshot reads the link snapshot before the subscription is
 // drained, recording each watched link in state.
-func (s *LinkSubscriber) primeVia(listFn linkListFn, state map[string]LinkState) ([]LinkEvent, error) {
+func (s *LinkSubscriber) readSnapshot(listFn linkListFn, state map[string]LinkState) ([]LinkEvent, error) {
 	links, err := listFn()
 	if err != nil {
 		return nil, fmt.Errorf("rtnl: LinkList: %w", err)

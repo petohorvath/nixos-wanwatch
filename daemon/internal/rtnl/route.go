@@ -80,7 +80,7 @@ func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscrib
 		return nil, nil, fmt.Errorf("rtnl: RouteSubscribe: %w", err)
 	}
 	stop := func() { closeAndDrain(done, updates) }
-	snapshot, err := s.primeVia(listFn)
+	snapshot, err := s.readSnapshot(listFn)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -104,8 +104,8 @@ type routeListFn func(link netlink.Link, family int) ([]netlink.Route, error)
 // routeSubscribeFn matches netlink.RouteSubscribeWithOptions.
 type routeSubscribeFn func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, opts netlink.RouteSubscribeOptions) error
 
-// primeVia reads the route snapshot before the subscription is drained.
-func (s *RouteSubscriber) primeVia(listFn routeListFn) ([]RouteEvent, error) {
+// readSnapshot reads the route snapshot before the subscription is drained.
+func (s *RouteSubscriber) readSnapshot(listFn routeListFn) ([]RouteEvent, error) {
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
 	}

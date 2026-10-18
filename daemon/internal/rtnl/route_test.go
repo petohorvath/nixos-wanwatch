@@ -441,15 +441,15 @@ func TestRouteSubscriberStartWiresSubscribeToRunLoop(t *testing.T) {
 	}
 }
 
-// TestRouteSubscriberPrimeViaWrapsListError: a RouteList failure
+// TestRouteSubscriberReadSnapshotWrapsListError: a RouteList failure
 // for either family must be wrapped with the daemon-side prefix.
-func TestRouteSubscriberPrimeViaWrapsListError(t *testing.T) {
+func TestRouteSubscriberReadSnapshotWrapsListError(t *testing.T) {
 	t.Parallel()
 	want := errors.New("netlink: route list denied")
 	listFn := func(netlink.Link, int) ([]netlink.Route, error) { return nil, want }
 
 	s := &RouteSubscriber{}
-	_, err := s.primeVia(listFn)
+	_, err := s.readSnapshot(listFn)
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want list-error chained via %%w", err)
 	}
@@ -458,11 +458,11 @@ func TestRouteSubscriberPrimeViaWrapsListError(t *testing.T) {
 	}
 }
 
-// TestRouteSubscriberPrimeViaEmitsPerFamilyDefaults: a non-empty
+// TestRouteSubscriberReadSnapshotEmitsPerFamilyDefaults: a non-empty
 // RouteList for each family must return a RouteEvent per default
 // route on a watched iface. The stub returns a single v4 default
 // for the first call and nothing for v6 — assert one event.
-func TestRouteSubscriberPrimeViaEmitsPerFamilyDefaults(t *testing.T) {
+func TestRouteSubscriberReadSnapshotEmitsPerFamilyDefaults(t *testing.T) {
 	t.Parallel()
 	calls := 0
 	listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
@@ -485,9 +485,9 @@ func TestRouteSubscriberPrimeViaEmitsPerFamilyDefaults(t *testing.T) {
 			return "", errors.New("not found")
 		},
 	}
-	snapshot, err := s.primeVia(listFn)
+	snapshot, err := s.readSnapshot(listFn)
 	if err != nil {
-		t.Fatalf("primeVia = %v, want nil", err)
+		t.Fatalf("readSnapshot = %v, want nil", err)
 	}
 	if calls != 2 {
 		t.Errorf("RouteList calls = %d, want 2 (one per family)", calls)

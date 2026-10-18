@@ -95,10 +95,9 @@ func (d *daemon) bootstrap(ctx context.Context) error {
 // prime folds the startup snapshots in before the event loop handles
 // any event. It learns every Gateway first, so the first Decision
 // writes its routes and its Hook carries them. It then folds every
-// LinkEvent into WAN Health before recomputing each affected Group
-// once, so a Group makes at most one startup Decision, onto its
-// preferred healthy Member, whatever order the link snapshot lists
-// the WANs in. A snapshot that changes the Gateway cache or Health
+// LinkEvent into WAN Health before recomputing any Group, so a Group
+// makes at most one startup Decision, onto its preferred healthy
+// Member, whatever order the link snapshot lists the WANs in. A snapshot that changes the Gateway cache or Health
 // republishes State once at the end, so it shows every Gateway even
 // when no Decision fires. A cancelled ctx primes nothing.
 func (d *daemon) prime(ctx context.Context, snapshot startupSnapshot) {
@@ -110,23 +109,13 @@ func (d *daemon) prime(ctx context.Context, snapshot startupSnapshot) {
 	for _, e := range snapshot.routes {
 		d.gateways.set(e.Iface, e.Family, e.Gateway)
 	}
-	republish := len(snapshot.routes) > 0
-	var flipped []string
+	change := health.Change{Republish: len(snapshot.routes) > 0}
 	for _, e := range snapshot.links {
 		c := d.health.Link(e)
-		flipped = append(flipped, c.Flipped...)
-		republish = republish || c.Republish
+		change.Flipped = append(change.Flipped, c.Flipped...)
+		change.Republish = change.Republish || c.Republish
 	}
-	for name, g := range d.cfg.Groups {
-		if !slices.ContainsFunc(flipped, func(wan string) bool { return groupContainsWAN(g, wan) }) {
-			continue
-		}
-		committed := d.groups[name].Recompute(ctx, d.health.MemberHealth(g), string(reasonCarrier))
-		d.publishDecision(ctx, g, committed)
-	}
-	if republish {
-		d.writeStateSnapshot(time.Time{})
-	}
+	d.publishHealthChange(ctx, change, reasonCarrier)
 }
 
 // handleProbeResult forwards a per-cycle result to WAN Health, then

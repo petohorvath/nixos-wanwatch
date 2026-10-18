@@ -172,7 +172,7 @@ func TestStartupSnapshot(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t, baseConfig())
 			if err := h.StartFrom(startupSnapshot{links: tc.links, routes: routes}); err != nil {
-				t.Fatalf("Start = %v, want nil", err)
+				t.Fatalf("StartFrom = %v, want nil", err)
 			}
 			assertTrace(t, "priming", primingTrace(h), tc.want)
 			s := h.State()
@@ -233,7 +233,7 @@ func TestStartupLinkHistory(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t, baseConfig())
 			if err := h.StartFrom(startupSnapshot{links: tc.snapshot}); err != nil {
-				t.Fatalf("Start = %v, want nil", err)
+				t.Fatalf("StartFrom = %v, want nil", err)
 			}
 			assertTrace(t, "priming", primingTrace(h), tc.want)
 			if active := selectionOf(h.State(), "home"); active != tc.active {
@@ -269,7 +269,7 @@ func TestStartupRouteHistory(t *testing.T) {
 				routes: []rtnl.RouteEvent{gateway("eth0", fam, current)},
 			})
 			if err != nil {
-				t.Fatalf("Start = %v, want nil", err)
+				t.Fatalf("StartFrom = %v, want nil", err)
 			}
 			want := []string{route, "hook up home →primary"}
 			assertTrace(t, "priming", primingTrace(h), want)
