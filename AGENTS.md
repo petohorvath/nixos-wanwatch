@@ -166,4 +166,4 @@ Single-context: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`
 
 Keep each commit to one logical change, with its tests and documentation. Use an imperative subject of at most 72 characters in the form `scope: Summary`; scopes are `lib`, `internal`, `types`, `modules`, `daemon`, `tests`, `docs`, `ci`, `deps`, and `flake`. Explain why in the body when the diff does not show it.
 
-Signing stays on; `--no-gpg-sign` needs explicit authorization for that commit and an explanation. Before handoff, inspect the final diff, list exactly which checks ran, distinguish focused checks from the full flake and VM matrix, and report every failure or skipped gate.
+Before handoff, inspect the final diff, list exactly which checks ran, distinguish focused checks from the full flake and VM matrix, and report every failure or skipped gate.
