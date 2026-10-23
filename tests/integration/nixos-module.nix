@@ -5,7 +5,15 @@ let
   inherit (helpers) evalNixos renderConfig;
 
   baseConfig = evalNixos [ fixtures.nixos.primaryAndBackup ];
+  debugConfig = evalNixos [
+    fixtures.nixos.primaryAndBackup
+    { services.wanwatch.global.logLevel = "debug"; }
+  ];
   rendered = renderConfig baseConfig;
+
+  # The unit file that `switch-to-configuration` compares to decide
+  # whether to restart the service.
+  unitText = config: config.systemd.units."wanwatch.service".text;
 in
 {
   testSchema = {
@@ -25,11 +33,7 @@ in
   };
 
   testRendersGlobalSettings = {
-    expr =
-      (renderConfig (evalNixos [
-        fixtures.nixos.primaryAndBackup
-        { services.wanwatch.global.logLevel = "debug"; }
-      ])).global.logLevel;
+    expr = (renderConfig debugConfig).global.logLevel;
     expected = "debug";
   };
 
@@ -100,21 +104,15 @@ in
     };
   };
 
-  # `switch-to-configuration` restarts the service only when its unit
-  # changes, and a config-only change leaves ExecStart as it was.
-  testConfigChangeChangesRestartTriggers = {
-    expr =
-      baseConfig.systemd.services.wanwatch.restartTriggers == (evalNixos [
-        fixtures.nixos.primaryAndBackup
-        { services.wanwatch.global.logLevel = "debug"; }
-      ]).systemd.services.wanwatch.restartTriggers;
+  # A config-only change leaves ExecStart as it was, so the unit
+  # changes only through its restart trigger.
+  testConfigChangeRestartsService = {
+    expr = unitText baseConfig == unitText debugConfig;
     expected = false;
   };
 
-  testSameConfigKeepsRestartTriggers = {
-    expr =
-      baseConfig.systemd.services.wanwatch.restartTriggers
-      == (evalNixos [ fixtures.nixos.primaryAndBackup ]).systemd.services.wanwatch.restartTriggers;
+  testSameConfigKeepsService = {
+    expr = unitText baseConfig == unitText (evalNixos [ fixtures.nixos.primaryAndBackup ]);
     expected = true;
   };
 

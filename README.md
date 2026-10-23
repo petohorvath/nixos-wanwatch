@@ -212,7 +212,7 @@ The daemon runs as the `wanwatch` user and group, which the module creates. Its 
 
 - Failover is single-active: each Group routes through one Member at a time, and `primary-backup` is the only Strategy. Load balancing is not supported.
 - Probes use ICMP and ICMPv6 echo only; TCP, HTTP, and DNS probes are not available.
-- The daemon reads its configuration only at startup and does not reload it, so `nixos-rebuild switch` restarts the service whenever the rendered configuration changes ([ADR-0006](./docs/adr/0006-restart-only-reconfiguration.md)).
+- The daemon does not reload its configuration; `nixos-rebuild switch` restarts the service whenever the rendered configuration changes ([ADR-0006](./docs/adr/0006-restart-only-reconfiguration.md)). During the restart, `/run/wanwatch`, with `state.json` and the metrics socket, is briefly absent.
 - When no Member of a Group is healthy, the daemon leaves the Group's last default route in place.
 - When the Selection moves to a WAN that serves fewer Families, the dropped Family keeps its previous route.
 - On a switch, the daemon flushes conntrack entries by the vacated WAN's addresses. When several Groups share that WAN, the flush also resets the flows of the Groups that still route through it; those flows reconnect through the same WAN.
