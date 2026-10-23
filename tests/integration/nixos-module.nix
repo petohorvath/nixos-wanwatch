@@ -100,6 +100,24 @@ in
     };
   };
 
+  # `switch-to-configuration` restarts the service only when its unit
+  # changes, and a config-only change leaves ExecStart as it was.
+  testConfigChangeChangesRestartTriggers = {
+    expr =
+      baseConfig.systemd.services.wanwatch.restartTriggers == (evalNixos [
+        fixtures.nixos.primaryAndBackup
+        { services.wanwatch.global.logLevel = "debug"; }
+      ]).systemd.services.wanwatch.restartTriggers;
+    expected = false;
+  };
+
+  testSameConfigKeepsRestartTriggers = {
+    expr =
+      baseConfig.systemd.services.wanwatch.restartTriggers
+      == (evalNixos [ fixtures.nixos.primaryAndBackup ]).systemd.services.wanwatch.restartTriggers;
+    expected = true;
+  };
+
   testServiceCapabilities = {
     expr = baseConfig.systemd.services.wanwatch.serviceConfig.AmbientCapabilities;
     expected = [
