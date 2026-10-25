@@ -155,6 +155,10 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network-pre.target" ];
 
+      # The daemon reads its config only at startup, and ExecStart names
+      # a fixed path, so a config-only change needs this to restart it.
+      restartTriggers = [ renderedConfig ];
+
       /*
         A failed daemon subsystem makes the process exit non-zero, and
         Restart=on-failure restarts it. The start limit turns a
