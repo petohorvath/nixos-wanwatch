@@ -215,6 +215,7 @@ The daemon runs as the `wanwatch` user and group, which the module creates. Its 
 - The daemon does not reload its configuration; `nixos-rebuild switch` restarts the service whenever the rendered configuration changes ([ADR-0006](./docs/adr/0006-restart-only-reconfiguration.md)). During the restart, `/run/wanwatch`, with `state.json` and the metrics socket, is briefly absent.
 - When no Member of a Group is healthy, the daemon leaves the Group's last default route in place.
 - When the Selection moves to a WAN that serves fewer Families, the dropped Family keeps its previous route.
+- The conntrack flush on a switch blocks the daemon's other work while it runs. On Linux 6.12 and later the kernel deletes the vacated WAN's IPv4 entries in one request, which took under 0.2 s for a full table on a fast x86 server. On older kernels, and for IPv6 on every kernel, the daemon reads the table and deletes each matching entry, which can take seconds on a large table.
 - On a switch, the daemon flushes conntrack entries by the vacated WAN's addresses. When several Groups share that WAN, the flush also resets the flows of the Groups that still route through it; those flows reconnect through the same WAN.
 - On hosts that run systemd-networkd, the module defaults `ManageForeignRoutingPolicyRules` and `ManageForeignRoutes` to `false`, so networkd stops removing routes and rules it did not create.
 

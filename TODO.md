@@ -87,6 +87,20 @@ only once a deployment runs several Groups on one WAN.
 `daemon/internal/apply/conntrack.go`,
 [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
 
+### Kernel-side conntrack flush for IPv6
+
+`apply.FlushBySource` asks the kernel to delete the matching IPv4
+entries in one request, but always dumps the table for IPv6: every
+released kernel up to at least 7.3 inverts the IPv6 address match in
+`ctnetlink_filter_match_tuple`, so a filtered delete would remove every
+other IPv6 entry. Upstream fixed it in `cd37ab22a74e`, marked for
+stable. Once the kernels nixpkgs ships carry the fix, send the filtered
+delete for IPv6 too. A kernel version cannot tell a fixed stable kernel
+from an unfixed one, so this needs a safe runtime probe or a minimum
+kernel. Without NAT66 an IPv6 flush matches only the router's own
+flows, so the dump costs little more than reading the table.
+`daemon/internal/apply/conntrack.go`.
+
 ### Low-latency state subscription
 
 State readers polling `state.json` at >1 Hz miss short-lived

@@ -216,15 +216,22 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, o
 		if ip.To4() == nil {
 			family = probe.FamilyV6
 		}
-		n, err := d.kernel.FlushConntrack(ctx, family, ip)
+		res, err := d.kernel.FlushConntrack(ctx, family, ip)
 		if err != nil {
 			d.logger.Warn("conntrack flush",
 				"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "err", err)
 			d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "conntrack_flush").Inc()
 			continue
 		}
+		if res.Dumped {
+			// IPv6, or IPv4 on a kernel before 6.12: the flush dumped
+			// the table and stalled the event loop meanwhile.
+			d.logger.Info("conntrack flushed by table dump",
+				"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "entries", res.Entries)
+			continue
+		}
 		d.logger.Info("conntrack flushed",
-			"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "entries", n)
+			"group", g.Name, "wan", old.Wan, "family", family, "ip", ip)
 	}
 }
 
