@@ -9,17 +9,22 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-// FlushBySource removes conntrack entries whose original-source or
-// reply-source IP matches `ip` (the vacated WAN's address). Covers
-// both:
+// FlushBySource removes the conntrack entries whose reply direction is
+// addressed to `ip`, the vacated WAN's address. Those are the flows
+// that leave with `ip` as their source:
 //
-//   - locally-originated traffic (original src == WAN IP)
-//   - forwarded + SNATted traffic (reply src == WAN IP)
+//   - locally-originated traffic (original src == reply dst == WAN IP)
+//   - forwarded traffic masqueraded to the WAN (reply dst == WAN IP)
 //
-// docs/specs/daemon-state.md marks conntrack flush as best-effort — the caller
-// (orchestrator) logs failures but does not fail the apply step.
-// Returns the number of entries deleted. ctx is checked at entry —
-// see WriteDefault for the cancellation contract.
+// Matching the reply destination covers both with one filter. Inbound
+// connections to the WAN address (reply src == WAN IP) are left alone:
+// a flush cannot move them to another WAN, and it would reset them
+// while the vacated WAN still works.
+//
+// The flush is best-effort (docs/wan-monitoring.md) — the caller logs
+// failures but does not fail the Decision. Returns the number of
+// entries deleted. ctx is checked at entry — see WriteDefault for the
+// cancellation contract.
 func FlushBySource(ctx context.Context, family probe.Family, ip net.IP) (uint, error) {
 	return flushBySourceVia(ctx, netlink.ConntrackDeleteFilters, family, ip)
 }
@@ -46,11 +51,7 @@ func flushBySourceVia(ctx context.Context, del conntrackDeleter, family probe.Fa
 	if err := validateFlush(family, ip); err != nil {
 		return 0, err
 	}
-	origFilter, err := buildSourceFilter(netlink.ConntrackOrigSrcIP, ip)
-	if err != nil {
-		return 0, err
-	}
-	replyFilter, err := buildSourceFilter(netlink.ConntrackReplySrcIP, ip)
+	filter, err := buildReplyDstFilter(ip)
 	if err != nil {
 		return 0, err
 	}
@@ -58,8 +59,7 @@ func flushBySourceVia(ctx context.Context, del conntrackDeleter, family probe.Fa
 		netlink.ConntrackTable,
 		//nolint:gosec // family is probe.FamilyV4 (=AF_INET=2) or FamilyV6 (=AF_INET6=10); both fit uint8
 		netlink.InetFamily(family),
-		origFilter,
-		replyFilter,
+		filter,
 	)
 	if err != nil {
 		return n, fmt.Errorf("apply: conntrack flush family=%s ip=%s: %w", family, ip, err)
@@ -67,15 +67,11 @@ func flushBySourceVia(ctx context.Context, del conntrackDeleter, family probe.Fa
 	return n, nil
 }
 
-// buildSourceFilter constructs a ConntrackFilter matching a single
-// IP at the given tuple position. ConntrackDeleteFilters takes a
-// variadic and OR-combines them in userspace iteration (the kernel
-// has no filter attribute), so passing orig + reply as separate
-// filters is the correct shape — a single filter with both fields
-// set would AND them.
-func buildSourceFilter(tp netlink.ConntrackFilterType, ip net.IP) (*netlink.ConntrackFilter, error) {
+// buildReplyDstFilter constructs a ConntrackFilter matching the
+// entries whose reply destination is `ip`.
+func buildReplyDstFilter(ip net.IP) (*netlink.ConntrackFilter, error) {
 	f := &netlink.ConntrackFilter{}
-	if err := f.AddIP(tp, ip); err != nil {
+	if err := f.AddIP(netlink.ConntrackReplyDstIP, ip); err != nil {
 		return nil, fmt.Errorf("apply: conntrack filter add ip %s: %w", ip, err)
 	}
 	return f, nil

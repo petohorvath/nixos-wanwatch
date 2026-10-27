@@ -4,28 +4,97 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
-func TestBuildSourceFilterAccepts(t *testing.T) {
+func TestBuildReplyDstFilterAccepts(t *testing.T) {
 	t.Parallel()
-	f, err := buildSourceFilter(netlink.ConntrackOrigSrcIP, net.ParseIP("192.0.2.1"))
+	f, err := buildReplyDstFilter(net.ParseIP("192.0.2.1"))
 	if err != nil {
-		t.Fatalf("buildSourceFilter = %v, want nil", err)
+		t.Fatalf("buildReplyDstFilter = %v, want nil", err)
 	}
 	if f == nil {
-		t.Fatal("buildSourceFilter returned nil filter without error")
+		t.Fatal("buildReplyDstFilter returned nil filter without error")
 	}
 }
 
-func TestBuildSourceFilterRejectsNilIP(t *testing.T) {
+func TestBuildReplyDstFilterRejectsNilIP(t *testing.T) {
 	t.Parallel()
-	if _, err := buildSourceFilter(netlink.ConntrackOrigSrcIP, nil); err == nil {
-		t.Error("buildSourceFilter(nil) = nil error, want error")
+	if _, err := buildReplyDstFilter(nil); err == nil {
+		t.Error("buildReplyDstFilter(nil) = nil error, want error")
+	}
+}
+
+// TestFlushBySourceViaMatchesFlowsLeavingFromIP runs the filters the
+// flush hands to the deleter against representative flows of the
+// vacated WAN's address and of another WAN's.
+func TestFlushBySourceViaMatchesFlowsLeavingFromIP(t *testing.T) {
+	t.Parallel()
+	tcp := func(src, dst string) netlink.IPTuple {
+		return netlink.IPTuple{Protocol: unix.IPPROTO_TCP, SrcIP: net.ParseIP(src), DstIP: net.ParseIP(dst)}
+	}
+	cases := []struct {
+		name    string
+		family  probe.Family
+		wan     string
+		forward netlink.IPTuple
+		reverse netlink.IPTuple
+		want    bool
+	}{
+		{
+			"v4 masqueraded LAN flow", probe.FamilyV4, "198.51.100.1",
+			tcp("10.0.0.5", "203.0.113.9"), tcp("203.0.113.9", "198.51.100.1"), true,
+		},
+		{
+			"v4 locally-originated flow", probe.FamilyV4, "198.51.100.1",
+			tcp("198.51.100.1", "203.0.113.9"), tcp("203.0.113.9", "198.51.100.1"), true,
+		},
+		{
+			"v4 inbound connection to the WAN", probe.FamilyV4, "198.51.100.1",
+			tcp("203.0.113.9", "198.51.100.1"), tcp("198.51.100.1", "203.0.113.9"), false,
+		},
+		{
+			"v4 flow masqueraded to another WAN", probe.FamilyV4, "198.51.100.1",
+			tcp("10.0.0.5", "203.0.113.9"), tcp("203.0.113.9", "192.0.2.1"), false,
+		},
+		{
+			"v6 locally-originated flow", probe.FamilyV6, "2001:db8::1",
+			tcp("2001:db8::1", "2001:db8:ffff::9"), tcp("2001:db8:ffff::9", "2001:db8::1"), true,
+		},
+		{
+			"v6 inbound connection to the WAN", probe.FamilyV6, "2001:db8::1",
+			tcp("2001:db8:ffff::9", "2001:db8::1"), tcp("2001:db8::1", "2001:db8:ffff::9"), false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var filters []netlink.CustomConntrackFilter
+			del := func(
+				_ netlink.ConntrackTableType,
+				_ netlink.InetFamily,
+				fs ...netlink.CustomConntrackFilter,
+			) (uint, error) {
+				filters = fs
+				return 0, nil
+			}
+			if _, err := flushBySourceVia(t.Context(), del, tc.family, net.ParseIP(tc.wan)); err != nil {
+				t.Fatalf("flushBySourceVia = %v, want nil", err)
+			}
+			flow := &netlink.ConntrackFlow{Forward: tc.forward, Reverse: tc.reverse}
+			got := slices.ContainsFunc(filters, func(f netlink.CustomConntrackFilter) bool {
+				return f.MatchConntrackFlow(flow)
+			})
+			if got != tc.want {
+				t.Errorf("flush matches flow = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -111,8 +180,8 @@ func TestFlushBySourceViaHappyPath(t *testing.T) {
 	if gotFamily != netlink.InetFamily(probe.FamilyV4) {
 		t.Errorf("family = %v, want %v", gotFamily, netlink.InetFamily(probe.FamilyV4))
 	}
-	if gotFilters != 2 {
-		t.Errorf("len(filters) = %d, want 2 (orig + reply)", gotFilters)
+	if gotFilters != 1 {
+		t.Errorf("len(filters) = %d, want 1 (reply destination)", gotFilters)
 	}
 }
 
@@ -136,8 +205,8 @@ func TestFlushBySourceViaWrapsDeleteError(t *testing.T) {
 	if !strings.Contains(err.Error(), "apply: conntrack flush") {
 		t.Errorf("err = %q, want apply context prefix", err.Error())
 	}
-	// docs/specs/daemon-state.md: conntrack flush returns the partial count even on
-	// error so the caller can log "deleted N before failing".
+	// The partial count survives an error so the caller can log
+	// "deleted N before failing".
 	if n != 3 {
 		t.Errorf("count on error = %d, want 3 (partial deletion preserved)", n)
 	}

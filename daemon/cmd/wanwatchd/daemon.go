@@ -196,8 +196,9 @@ func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committe
 // `down` there is no healthy successor and the old default route is
 // left in place, and a commit that keeps its WAN vacates nothing, so a
 // flush would only churn or reset live flows. Best-effort per
-// docs/nftzones-integration.md — a resolve or flush failure is logged and metered but
-// never fails the Decision; the routes have already converged.
+// docs/wan-monitoring.md — a resolve or flush failure is logged and
+// metered but never fails the Decision; the routes have already
+// converged.
 func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, old selector.Active) {
 	wan, ok := d.cfg.Wans[old.Wan]
 	if !ok {
