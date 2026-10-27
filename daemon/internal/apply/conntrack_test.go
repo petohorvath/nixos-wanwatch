@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
-	"os"
 	"strings"
 	"testing"
 
@@ -123,6 +123,7 @@ func TestFlushBySourceVia(t *testing.T) {
 		dumps       []dumpOutcome
 		want        FlushResult
 		wantErr     error
+		wantErrSub  string
 	}{
 		{name: "kernel deletes by filter"},
 		{
@@ -160,6 +161,7 @@ func TestFlushBySourceVia(t *testing.T) {
 			dumps:       []dumpOutcome{{n: 3, err: interrupted}, {n: 2, err: interrupted}},
 			want:        FlushResult{Dumped: true, Entries: 5},
 			wantErr:     interrupted,
+			wantErrSub:  "dump interrupted on all 2 attempts",
 		},
 		{
 			name:        "other dump error is not retried",
@@ -181,8 +183,8 @@ func TestFlushBySourceVia(t *testing.T) {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("flushBySourceVia = %v, want %v", err, tc.wantErr)
 				}
-				if !strings.Contains(err.Error(), "apply: conntrack flush family=v4 ip=192.0.2.1") {
-					t.Errorf("err = %q, want apply context prefix", err)
+				if !strings.Contains(err.Error(), "apply: conntrack flush family=v4 ip=192.0.2.1: "+tc.wantErrSub) {
+					t.Errorf("err = %q, want apply context prefix and %q", err, tc.wantErrSub)
 				}
 			}
 			if got != tc.want {
@@ -272,15 +274,27 @@ func TestFlushBySourceViaSkipsKernelOnValidationFailure(t *testing.T) {
 	}
 }
 
+// holdsCapNetAdmin reports whether the test process has CAP_NET_ADMIN
+// in its effective set, as root or through file or ambient capabilities.
+func holdsCapNetAdmin(tb testing.TB) bool {
+	tb.Helper()
+	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	var data [2]unix.CapUserData
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		tb.Fatalf("capget: %v", err)
+	}
+	return data[unix.CAP_NET_ADMIN/32].Effective&(1<<(unix.CAP_NET_ADMIN%32)) != 0
+}
+
 // TestFlushBySourceReportsKernelRefusal sends both kernel paths to the
 // real kernel. Without CAP_NET_ADMIN, nfnetlink refuses the IPv4
 // filtered delete and the IPv6 dump, and the refusal must reach the
-// caller as a flush error. As root the requests would really flush, so
+// caller as a flush error. With it the requests would really flush, so
 // the test skips.
 func TestFlushBySourceReportsKernelRefusal(t *testing.T) {
 	t.Parallel()
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: the flush would mutate the conntrack table")
+	if holdsCapNetAdmin(t) {
+		t.Skip("CAP_NET_ADMIN held: the flush would mutate the conntrack table")
 	}
 	cases := []struct {
 		family probe.Family
@@ -454,5 +468,33 @@ func TestFlushBySourceViaDumpsIPv6(t *testing.T) {
 	}
 	if f.filteredReqs != 0 {
 		t.Errorf("filtered deletes = %d, want 0 for IPv6", f.filteredReqs)
+	}
+}
+
+func TestFlushResultLogValue(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		res  FlushResult
+		want string
+	}{
+		{"kernel delete", FlushResult{}, "flush.method=kernel"},
+		{"dump", FlushResult{Dumped: true, Entries: 7}, "flush.method=dump flush.entries=7"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			dropBuiltins := func(_ []string, a slog.Attr) slog.Attr {
+				if a.Key == slog.TimeKey || a.Key == slog.LevelKey || a.Key == slog.MessageKey {
+					return slog.Attr{}
+				}
+				return a
+			}
+			slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{ReplaceAttr: dropBuiltins})).Info("", "flush", tc.res)
+			if got := strings.TrimSpace(buf.String()); got != tc.want {
+				t.Errorf("logged %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

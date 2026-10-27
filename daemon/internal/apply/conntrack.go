@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
@@ -36,6 +37,16 @@ type FlushResult struct {
 	Entries uint
 }
 
+// LogValue names the path the flush took, with the entry count only
+// where one exists. A dump stalls the caller for as long as it runs,
+// so a log that shows one explains a slow switch.
+func (r FlushResult) LogValue() slog.Value {
+	if !r.Dumped {
+		return slog.GroupValue(slog.String("method", "kernel"))
+	}
+	return slog.GroupValue(slog.String("method", "dump"), slog.Uint64("entries", uint64(r.Entries)))
+}
+
 // FlushBySource removes the conntrack entries whose reply direction is
 // addressed to `ip`, the vacated WAN's address. Those are the flows
 // that leave with `ip` as their source:
@@ -60,7 +71,8 @@ type FlushResult struct {
 //
 // The flush is best-effort (docs/wan-monitoring.md) — the caller logs
 // failures but does not fail the Decision. ctx is checked at entry and
-// before each kernel request; a request in flight runs to completion.
+// before each dump; a request in flight, or a dump's per-entry
+// deletes, run to completion.
 func FlushBySource(ctx context.Context, family probe.Family, ip net.IP) (FlushResult, error) {
 	return flushBySourceVia(ctx, conntrackOps{
 		filteredDelete: executeFilteredDelete,
@@ -128,8 +140,12 @@ func dumpFlush(
 		if err == nil {
 			return res, nil
 		}
-		if !errors.Is(err, netlink.ErrDumpInterrupted) || attempt == dumpAttempts {
+		if !errors.Is(err, netlink.ErrDumpInterrupted) {
 			return res, fmt.Errorf("apply: conntrack flush family=%s ip=%s: %w", family, ip, err)
+		}
+		if attempt == dumpAttempts {
+			return res, fmt.Errorf("apply: conntrack flush family=%s ip=%s: dump interrupted on all %d attempts: %w",
+				family, ip, dumpAttempts, err)
 		}
 	}
 }
