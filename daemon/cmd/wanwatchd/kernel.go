@@ -18,7 +18,7 @@ type kernel interface {
 	IfIndex(name string) (int, error)
 	WriteRoute(ctx context.Context, r apply.DefaultRoute) error
 	InterfaceAddrs(name string) ([]net.IP, error)
-	FlushConntrack(ctx context.Context, family probe.Family, ip net.IP) (uint, error)
+	FlushConntrack(ctx context.Context, family probe.Family, ip net.IP) (apply.FlushResult, error)
 }
 
 // netlinkKernel delegates to internal/apply and the net helpers.
@@ -40,6 +40,6 @@ func (netlinkKernel) InterfaceAddrs(name string) ([]net.IP, error) {
 	return interfaceAddrs(name)
 }
 
-func (netlinkKernel) FlushConntrack(ctx context.Context, family probe.Family, ip net.IP) (uint, error) {
+func (netlinkKernel) FlushConntrack(ctx context.Context, family probe.Family, ip net.IP) (apply.FlushResult, error) {
 	return apply.FlushBySource(ctx, family, ip)
 }

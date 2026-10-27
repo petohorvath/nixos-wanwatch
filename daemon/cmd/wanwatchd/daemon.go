@@ -196,8 +196,9 @@ func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committe
 // `down` there is no healthy successor and the old default route is
 // left in place, and a commit that keeps its WAN vacates nothing, so a
 // flush would only churn or reset live flows. Best-effort per
-// docs/nftzones-integration.md — a resolve or flush failure is logged and metered but
-// never fails the Decision; the routes have already converged.
+// docs/wan-monitoring.md — a resolve or flush failure is logged and
+// metered but never fails the Decision; the routes have already
+// converged.
 func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, old selector.Active) {
 	wan, ok := d.cfg.Wans[old.Wan]
 	if !ok {
@@ -215,15 +216,14 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, o
 		if ip.To4() == nil {
 			family = probe.FamilyV6
 		}
-		n, err := d.kernel.FlushConntrack(ctx, family, ip)
+		log := d.logger.With("group", g.Name, "wan", old.Wan, "family", family, "ip", ip)
+		res, err := d.kernel.FlushConntrack(ctx, family, ip)
 		if err != nil {
-			d.logger.Warn("conntrack flush",
-				"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "err", err)
+			log.Warn("conntrack flush", "flush", res, "err", err)
 			d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "conntrack_flush").Inc()
 			continue
 		}
-		d.logger.Info("conntrack flushed",
-			"group", g.Name, "wan", old.Wan, "family", family, "ip", ip, "entries", n)
+		log.Info("conntrack flushed", "flush", res)
 	}
 }
 

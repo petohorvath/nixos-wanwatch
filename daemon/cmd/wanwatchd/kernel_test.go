@@ -259,7 +259,7 @@ func (k *fakeKernel) InterfaceAddrs(name string) ([]net.IP, error) {
 	return slices.Clone(k.addrs[name]), nil
 }
 
-func (k *fakeKernel) FlushConntrack(ctx context.Context, fam probe.Family, ip net.IP) (uint, error) {
+func (k *fakeKernel) FlushConntrack(ctx context.Context, fam probe.Family, ip net.IP) (apply.FlushResult, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	var iface string
@@ -269,9 +269,9 @@ func (k *fakeKernel) FlushConntrack(ctx context.Context, fam probe.Family, ip ne
 		}
 	}
 	if err := k.mutate(ctx, opFlush, iface, fam, fmt.Sprintf("flush %s %s", fam, ip)); err != nil {
-		return 0, err
+		return apply.FlushResult{}, err
 	}
-	return 1, nil
+	return apply.FlushResult{}, nil
 }
 
 // assertTrace compares the trace of what, such as one step, and
