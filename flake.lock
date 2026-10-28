@@ -20,30 +20,6 @@
         "type": "github"
       }
     },
-    "libnet": {
-      "inputs": {
-        "flake-parts": [
-          "flake-parts"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1791888534,
-        "narHash": "sha256-+7Rb5n4rA45WlQtrrVLBwAZfwA8ibIu/057sfCMRtmI=",
-        "owner": "petohorvath",
-        "repo": "nix-libnet",
-        "rev": "287c94b03feccaed6c8d99837730833893f57ae0",
-        "type": "github"
-      },
-      "original": {
-        "owner": "petohorvath",
-        "ref": "v0.1.0",
-        "repo": "nix-libnet",
-        "type": "github"
-      }
-    },
     "nftypes": {
       "inputs": {
         "flake-parts": [
@@ -68,28 +44,27 @@
         "type": "github"
       }
     },
-    "nftzones": {
+    "nix-libnet": {
       "inputs": {
-        "libnet": [
-          "libnet"
+        "flake-parts": [
+          "flake-parts"
         ],
-        "nftypes": "nftypes",
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1778586525,
-        "narHash": "sha256-Ggp+O3LPoY6/qf2gI3AKcxAC6ja5z+gDNU+S54YldVA=",
+        "lastModified": 1791888534,
+        "narHash": "sha256-+7Rb5n4rA45WlQtrrVLBwAZfwA8ibIu/057sfCMRtmI=",
         "owner": "petohorvath",
-        "repo": "nixos-nftzones",
-        "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
+        "repo": "nix-libnet",
+        "rev": "287c94b03feccaed6c8d99837730833893f57ae0",
         "type": "github"
       },
       "original": {
         "owner": "petohorvath",
-        "repo": "nixos-nftzones",
-        "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
+        "ref": "v0.1.0",
+        "repo": "nix-libnet",
         "type": "github"
       }
     },
@@ -115,6 +90,31 @@
         "type": "github"
       }
     },
+    "nixos-nftzones": {
+      "inputs": {
+        "libnet": [
+          "nix-libnet"
+        ],
+        "nftypes": "nftypes",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1778586525,
+        "narHash": "sha256-Ggp+O3LPoY6/qf2gI3AKcxAC6ja5z+gDNU+S54YldVA=",
+        "owner": "petohorvath",
+        "repo": "nixos-nftzones",
+        "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "petohorvath",
+        "repo": "nixos-nftzones",
+        "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1791143449,
@@ -134,9 +134,9 @@
     "root": {
       "inputs": {
         "flake-parts": "flake-parts",
-        "libnet": "libnet",
-        "nftzones": "nftzones",
+        "nix-libnet": "nix-libnet",
         "nix-unit": "nix-unit",
+        "nixos-nftzones": "nixos-nftzones",
         "nixpkgs": "nixpkgs",
         "treefmt-nix": "treefmt-nix"
       }

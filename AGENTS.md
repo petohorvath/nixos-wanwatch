@@ -42,7 +42,7 @@ The flake is the only entry point. `flake.nix` assembles the public outputs with
 Override sibling flakes with absolute paths:
 
 ```sh
-nix build --override-input libnet path:/absolute/path/to/nix-libnet \
+nix build --override-input nix-libnet path:/absolute/path/to/nix-libnet \
   .#checks.x86_64-linux.nix-unit
 ```
 

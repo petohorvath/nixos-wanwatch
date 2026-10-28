@@ -1,9 +1,9 @@
 # The unit entry point: nix-unit suites that evaluate the wanwatch
 # library and its option types. `dev/default.nix` passes the flake's
 # inputs.
-{ libnet, nixpkgs }:
+{ nix-libnet, nixpkgs }:
 let
-  testContext = import ../test-context.nix { inherit libnet nixpkgs; };
+  testContext = import ../test-context.nix { inherit nix-libnet nixpkgs; };
 in
 {
   lib = import ./lib.nix testContext;

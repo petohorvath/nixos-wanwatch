@@ -5,7 +5,7 @@
   suites evaluate no flake-parts.
 
   `nixpkgs`: the nixpkgs flake.
-  `libnet`: the nix-libnet flake.
+  `nix-libnet`: the nix-libnet flake.
   `self`: the flake itself, which only the integration entry point
   passes, for the suite that compares its outputs with the source;
   null otherwise.
@@ -16,14 +16,14 @@
 */
 {
   nixpkgs,
-  libnet,
+  nix-libnet,
   self ? null,
   system ? null,
 }:
 let
   inherit (nixpkgs) lib;
 
-  libnetWithLib = libnet.lib.withLib lib;
+  libnetWithLib = nix-libnet.lib.withLib lib;
   wanwatch = import ../lib {
     inherit lib;
     libnet = libnetWithLib;
