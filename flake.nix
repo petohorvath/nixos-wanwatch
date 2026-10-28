@@ -18,10 +18,10 @@
     /*
       IP, CIDR, and interface-name validation used throughout `lib/`.
       To develop against a local checkout, pass
-      `--override-input libnet path:/absolute/path/to/nix-libnet`;
+      `--override-input nix-libnet path:/absolute/path/to/nix-libnet`;
       relative paths resolve inside the store copy of this flake.
     */
-    libnet = {
+    nix-libnet = {
       url = "github:petohorvath/nix-libnet/v0.1.0";
       inputs = {
         nixpkgs.follows = "nixpkgs";
@@ -30,12 +30,13 @@
     };
 
     # Used only by the nftzones-integration VM scenario. Pinned by
-    # commit until nixos-nftzones publishes a release tag.
-    nftzones = {
+    # commit until nixos-nftzones publishes a release tag. The pinned
+    # commit still names its inputs `libnet` and `nftypes`.
+    nixos-nftzones = {
       url = "github:petohorvath/nixos-nftzones?rev=dc5d2eff8877865de79c7577c2255191636090b6";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        libnet.follows = "libnet";
+        libnet.follows = "nix-libnet";
         nftypes.url = "github:petohorvath/nix-nftypes/v0.1.0";
         nftypes.inputs = {
           nixpkgs.follows = "nixpkgs";
@@ -68,7 +69,7 @@
   outputs =
     inputs@{
       flake-parts,
-      libnet,
+      nix-libnet,
       nixpkgs,
       self,
       ...
@@ -106,7 +107,7 @@
       flake = {
         lib = import ./lib {
           inherit (nixpkgs) lib;
-          libnet = libnet.lib.withLib nixpkgs.lib;
+          libnet = nix-libnet.lib.withLib nixpkgs.lib;
         };
 
         nixosModules = {

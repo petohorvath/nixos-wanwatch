@@ -36,14 +36,14 @@
       nix-unit = {
         package = pkgs.nix-unit;
         inputs = removeAttrs inputs [ "self" ] // {
-          # nftzones' own input that follows no root input.
-          "nftzones/nftypes" = inputs.nftzones.inputs.nftypes;
+          # nixos-nftzones' own input that follows no root input.
+          "nixos-nftzones/nftypes" = inputs.nixos-nftzones.inputs.nftypes;
         };
         enableSystemAgnostic = false;
         tests = {
-          unit = import ../tests/unit { inherit (inputs) libnet nixpkgs; };
+          unit = import ../tests/unit { inherit (inputs) nix-libnet nixpkgs; };
           integration = import ../tests/integration {
-            inherit (inputs) libnet nixpkgs self;
+            inherit (inputs) nix-libnet nixpkgs self;
             inherit system;
           };
         };

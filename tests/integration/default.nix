@@ -5,7 +5,7 @@
   the flake itself as `self`, and the system.
 */
 {
-  libnet,
+  nix-libnet,
   nixpkgs,
   self,
   system,
@@ -13,7 +13,7 @@
 let
   testContext = import ../test-context.nix {
     inherit
-      libnet
+      nix-libnet
       nixpkgs
       self
       system
