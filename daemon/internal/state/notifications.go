@@ -60,7 +60,8 @@ func (n *HookNotifier) Notify(hookCtx HookContext) bool {
 		n.done = make(chan struct{})
 		go n.deliver()
 	}
-	hookCtx.Families = slices.Clone(hookCtx.Families)
+	hookCtx.FamiliesOld = slices.Clone(hookCtx.FamiliesOld)
+	hookCtx.FamiliesNew = slices.Clone(hookCtx.FamiliesNew)
 	if hookCtx.Timestamp.IsZero() {
 		hookCtx.Timestamp = time.Now().UTC()
 	}

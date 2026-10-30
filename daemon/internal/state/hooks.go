@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,13 +35,14 @@ type HookContext struct {
 	Group        string
 	WanOld       string
 	WanNew       string
-	IfaceOld     string
-	IfaceNew     string
+	InterfaceOld string
+	InterfaceNew string
 	GatewayV4Old string
 	GatewayV4New string
 	GatewayV6Old string
 	GatewayV6New string
-	Families     []string // e.g. ["v4", "v6"]
+	FamiliesOld  []string // probed Families of WanOld, e.g. ["v4", "v6"]
+	FamiliesNew  []string // probed Families of WanNew
 	Table        int
 	Mark         int
 	Timestamp    time.Time
@@ -94,16 +96,17 @@ const (
 	EnvGroup        = "WANWATCH_GROUP"
 	EnvWanOld       = "WANWATCH_WAN_OLD"
 	EnvWanNew       = "WANWATCH_WAN_NEW"
-	EnvIfaceOld     = "WANWATCH_IFACE_OLD"
-	EnvIfaceNew     = "WANWATCH_IFACE_NEW"
+	EnvInterfaceOld = "WANWATCH_INTERFACE_OLD"
+	EnvInterfaceNew = "WANWATCH_INTERFACE_NEW"
 	EnvGatewayV4Old = "WANWATCH_GATEWAY_V4_OLD"
 	EnvGatewayV4New = "WANWATCH_GATEWAY_V4_NEW"
 	EnvGatewayV6Old = "WANWATCH_GATEWAY_V6_OLD"
 	EnvGatewayV6New = "WANWATCH_GATEWAY_V6_NEW"
-	EnvFamilies     = "WANWATCH_FAMILIES"
+	EnvFamiliesOld  = "WANWATCH_FAMILIES_OLD"
+	EnvFamiliesNew  = "WANWATCH_FAMILIES_NEW"
 	EnvTable        = "WANWATCH_TABLE"
 	EnvMark         = "WANWATCH_MARK"
-	EnvTimestamp    = "WANWATCH_TS"
+	EnvTimestamp    = "WANWATCH_TIMESTAMP"
 )
 
 // run executes the hooks under `<Dir>/<ctx.Event>.d/` with the env
@@ -271,12 +274,30 @@ func (b *cappedBuffer) String() string {
 	return string(b.buf)
 }
 
-// buildEnv constructs the env-var slice for a hook invocation.
-// Pulls from the parent process env (so PATH etc. are inherited)
-// and appends the docs/specs/daemon-state.md `WANWATCH_*` variables.
+// inheritedEnv lists the daemon's environment variables a Hook
+// inherits, besides every `LC_*` (see inheritsEnv). Everything else,
+// notably systemd's NOTIFY_SOCKET, WATCHDOG_*, LISTEN_*, and
+// CREDENTIALS_DIRECTORY, is withheld. Fixed by docs/specs/daemon-state.md.
+var inheritedEnv = []string{
+	"PATH", "LANG", "TZ", "HOME", "USER", "LOGNAME",
+	"JOURNAL_STREAM", "INVOCATION_ID",
+}
+
+// inheritsEnv reports whether a Hook inherits the daemon's variable name.
+func inheritsEnv(name string) bool {
+	return strings.HasPrefix(name, "LC_") || slices.Contains(inheritedEnv, name)
+}
+
+// buildEnv constructs the env-var slice for a hook invocation: the
+// allowlisted part of the daemon's environment (inheritsEnv), then the
+// docs/specs/daemon-state.md `WANWATCH_*` variables.
 func buildEnv(ctx HookContext) []string {
-	base := os.Environ()
-	families := strings.Join(ctx.Families, ",")
+	var base []string
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); inheritsEnv(name) {
+			base = append(base, kv)
+		}
+	}
 	ts := ctx.Timestamp
 	if ts.IsZero() {
 		ts = time.Now().UTC()
@@ -286,13 +307,14 @@ func buildEnv(ctx HookContext) []string {
 		EnvGroup + "=" + ctx.Group,
 		EnvWanOld + "=" + ctx.WanOld,
 		EnvWanNew + "=" + ctx.WanNew,
-		EnvIfaceOld + "=" + ctx.IfaceOld,
-		EnvIfaceNew + "=" + ctx.IfaceNew,
+		EnvInterfaceOld + "=" + ctx.InterfaceOld,
+		EnvInterfaceNew + "=" + ctx.InterfaceNew,
 		EnvGatewayV4Old + "=" + ctx.GatewayV4Old,
 		EnvGatewayV4New + "=" + ctx.GatewayV4New,
 		EnvGatewayV6Old + "=" + ctx.GatewayV6Old,
 		EnvGatewayV6New + "=" + ctx.GatewayV6New,
-		EnvFamilies + "=" + families,
+		EnvFamiliesOld + "=" + strings.Join(ctx.FamiliesOld, ","),
+		EnvFamiliesNew + "=" + strings.Join(ctx.FamiliesNew, ","),
 		EnvTable + "=" + strconv.Itoa(ctx.Table),
 		EnvMark + "=" + strconv.Itoa(ctx.Mark),
 		EnvTimestamp + "=" + ts.Format(time.RFC3339Nano),

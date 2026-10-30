@@ -99,7 +99,7 @@ func TestFilterGlobalUnicast(t *testing.T) {
 	}
 }
 
-func TestIfaceFor(t *testing.T) {
+func TestInterfaceFor(t *testing.T) {
 	t.Parallel()
 	wans := map[string]config.Wan{
 		"primary": {Interface: "eth0"},
@@ -111,14 +111,14 @@ func TestIfaceFor(t *testing.T) {
 		want   string
 	}{
 		{"absent → empty", selector.NoActive, ""},
-		{"known WAN → its iface", selector.Active{Wan: "primary", Has: true}, "eth0"},
+		{"known WAN → its interface", selector.Active{Wan: "primary", Has: true}, "eth0"},
 		{"unknown WAN → empty", selector.Active{Wan: "ghost", Has: true}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := ifaceFor(wans, tc.active); got != tc.want {
-				t.Errorf("ifaceFor(_, %+v) = %q, want %q", tc.active, got, tc.want)
+			if got := interfaceFor(wans, tc.active); got != tc.want {
+				t.Errorf("interfaceFor(_, %+v) = %q, want %q", tc.active, got, tc.want)
 			}
 		})
 	}

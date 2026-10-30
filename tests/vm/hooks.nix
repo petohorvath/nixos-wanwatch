@@ -151,8 +151,10 @@ pkgs.testers.runNixOSTest {
         "WANWATCH_GROUP": "home-uplink",
         "WANWATCH_WAN_OLD": "primary",
         "WANWATCH_WAN_NEW": "backup",
-        "WANWATCH_IFACE_OLD": "wan0",
-        "WANWATCH_IFACE_NEW": "wan1",
+        "WANWATCH_INTERFACE_OLD": "wan0",
+        "WANWATCH_INTERFACE_NEW": "wan1",
+        "WANWATCH_FAMILIES_OLD": "v4,v6",
+        "WANWATCH_FAMILIES_NEW": "v4,v6",
     }
     for key, want in expectations.items():
         assert hook_env.get(key) == want, (
@@ -173,18 +175,12 @@ pkgs.testers.runNixOSTest {
             f"{key} = {hook_env[key]!r}, want empty (pointToPoint)"
         )
 
-    # WANWATCH_FAMILIES is comma-joined in no particular order.
-    families = set(hook_env.get("WANWATCH_FAMILIES", "").split(","))
-    assert families == {"v4", "v6"}, (
-        f"WANWATCH_FAMILIES = {families}, want {{'v4','v6'}}"
-    )
-
-    # _TABLE and _MARK are integers; _TS is Go's RFC3339Nano.
+    # _TABLE and _MARK are integers; _TIMESTAMP is Go's RFC3339Nano.
     for key in ("WANWATCH_TABLE", "WANWATCH_MARK"):
         assert hook_env[key].isdigit(), f"{key} = {hook_env[key]!r}"
-    timestamp = hook_env["WANWATCH_TS"]
+    timestamp = hook_env["WANWATCH_TIMESTAMP"]
     assert "T" in timestamp and "Z" in timestamp, (
-        f"WANWATCH_TS = {timestamp!r} doesn't look like RFC3339"
+        f"WANWATCH_TIMESTAMP = {timestamp!r} doesn't look like RFC3339"
     )
   '';
 }

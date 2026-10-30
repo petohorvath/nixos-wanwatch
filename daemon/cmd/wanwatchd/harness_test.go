@@ -309,7 +309,8 @@ func (r *hookRecorder) Notify(c state.HookContext) bool {
 		r.trace.add(line + failedMark)
 		return false
 	}
-	c.Families = slices.Clone(c.Families)
+	c.FamiliesOld = slices.Clone(c.FamiliesOld)
+	c.FamiliesNew = slices.Clone(c.FamiliesNew)
 	r.hooks = append(r.hooks, c)
 	r.trace.add(line)
 	return true

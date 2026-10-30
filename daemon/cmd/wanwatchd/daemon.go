@@ -394,24 +394,25 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 // submitting it to the notifier. The worker never reads daemon-owned state.
 func (d *daemon) notifyHooks(g selector.Group, event state.Event, committed *decision.Commit) {
 	old, next := committed.Old, committed.New
-	oldIface := ifaceFor(d.cfg.Wans, old)
-	nextIface := ifaceFor(d.cfg.Wans, next)
+	interfaceOld := interfaceFor(d.cfg.Wans, old)
+	interfaceNew := interfaceFor(d.cfg.Wans, next)
 	hookCtx := state.HookContext{
-		Event:    event,
-		Group:    g.Name,
-		WanOld:   old.Wan,
-		WanNew:   next.Wan,
-		IfaceOld: oldIface,
-		IfaceNew: nextIface,
+		Event:        event,
+		Group:        g.Name,
+		WanOld:       old.Wan,
+		WanNew:       next.Wan,
+		InterfaceOld: interfaceOld,
+		InterfaceNew: interfaceNew,
 		// Gateway env vars come from the discovery cache. They're
-		// blank when (a) the iface has no cached default route yet,
+		// blank when (a) the interface has no cached default route yet,
 		// or (b) the route is scope-link (point-to-point) so there
 		// is no gateway to surface.
-		GatewayV4Old: d.gateways.string(oldIface, rtnl.RouteFamilyV4),
-		GatewayV4New: d.gateways.string(nextIface, rtnl.RouteFamilyV4),
-		GatewayV6Old: d.gateways.string(oldIface, rtnl.RouteFamilyV6),
-		GatewayV6New: d.gateways.string(nextIface, rtnl.RouteFamilyV6),
-		Families:     probedFamiliesFor(d.cfg.Wans, next),
+		GatewayV4Old: d.gateways.string(interfaceOld, rtnl.RouteFamilyV4),
+		GatewayV4New: d.gateways.string(interfaceNew, rtnl.RouteFamilyV4),
+		GatewayV6Old: d.gateways.string(interfaceOld, rtnl.RouteFamilyV6),
+		GatewayV6New: d.gateways.string(interfaceNew, rtnl.RouteFamilyV6),
+		FamiliesOld:  probedFamiliesFor(d.cfg.Wans, old),
+		FamiliesNew:  probedFamiliesFor(d.cfg.Wans, next),
 		Table:        g.Table,
 		Mark:         g.Mark,
 		Timestamp:    committed.At,

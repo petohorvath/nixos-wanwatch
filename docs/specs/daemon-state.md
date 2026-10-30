@@ -28,12 +28,12 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 }
 ```
 
-| Field       | Type                        | Meaning                                                                                                                                                           |
-| ----------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`    | int                         | The daemon's `SchemaVersion`.                                                                                                                                     |
-| `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon fills it with the current time unless the caller supplies one; a Decision supplies the same timestamp it passes to Hooks as `WANWATCH_TS`. |
-| `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                               |
-| `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                           |
+| Field       | Type                        | Meaning                                                                                                                                                                  |
+| ----------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `schema`    | int                         | The daemon's `SchemaVersion`.                                                                                                                                            |
+| `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon fills it with the current time unless the caller supplies one; a Decision supplies the same timestamp it passes to Hooks as `WANWATCH_TIMESTAMP`. |
+| `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                                      |
+| `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                                  |
 
 An absent value is always `null`, never `""`: a Gateway not yet known, no active Member, or no `activeSince`. Hook env vars are strings, so they encode the same absences as `""`.
 
@@ -109,15 +109,15 @@ Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `WANWATCH_EVENT`                   | `up`, `down`, or `switch`.                                                                                                |
 | `WANWATCH_GROUP`                   | Group name.                                                                                                               |
-| `WANWATCH_WAN_OLD`                 | Previously active WAN; empty if none.                                                                                     |
-| `WANWATCH_WAN_NEW`                 | Newly active WAN; empty if none.                                                                                          |
-| `WANWATCH_IFACE_OLD` / `_NEW`      | Linux interface names; empty when the corresponding WAN is unset.                                                         |
+| `WANWATCH_WAN_OLD`                 | Previous Selection; empty if none.                                                                                        |
+| `WANWATCH_WAN_NEW`                 | New Selection; empty if none.                                                                                             |
+| `WANWATCH_INTERFACE_OLD` / `_NEW`  | Linux interface names; empty when the corresponding WAN is unset.                                                         |
 | `WANWATCH_GATEWAY_V4_OLD` / `_NEW` | Discovered v4 Gateway on the WAN's interface; empty when the kernel has no v4 default there or the WAN is `pointToPoint`. |
 | `WANWATCH_GATEWAY_V6_OLD` / `_NEW` | Same for v6.                                                                                                              |
-| `WANWATCH_FAMILIES`                | Comma-joined probed Families of the new WAN; `""` when the new WAN is null.                                               |
+| `WANWATCH_FAMILIES_OLD` / `_NEW`   | Comma-joined probed Families of the WAN, `v4` before `v6`; empty when the corresponding WAN is unset.                     |
 | `WANWATCH_TABLE`                   | Routing-table ID (int as string).                                                                                         |
 | `WANWATCH_MARK`                    | fwmark (int as string).                                                                                                   |
-| `WANWATCH_TS`                      | Emit time, RFC 3339 nanos UTC.                                                                                            |
+| `WANWATCH_TIMESTAMP`               | Emit time, RFC 3339 nanos UTC.                                                                                            |
 
 ### Event matrix
 
@@ -127,6 +127,13 @@ Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these
 | `"primary"` | `""`        | `down`       |
 | `"primary"` | `"backup"`  | `switch`     |
 | identical   | identical   | _(no event)_ |
+
+### Security boundary
+
+A Hook runs with the daemon's identity and privileges. Installing a Hook grants it what the daemon holds:
+
+- **Capabilities.** Hooks keep the daemon's ambient `CAP_NET_ADMIN` and `CAP_NET_RAW`, so a Hook can update nft sets, routes, or rules on a Decision. Treat write access to the Hook directory as network-administration access.
+- **Environment.** A Hook receives the `WANWATCH_*` variables above plus only these variables from the daemon's environment, when set: `PATH`, `LANG`, every `LC_*`, `TZ`, `HOME`, `USER`, `LOGNAME`, `JOURNAL_STREAM`, and `INVOCATION_ID`. The daemon captures a Hook's output and logs it when the Hook fails; `JOURNAL_STREAM` and `INVOCATION_ID` tell a Hook that logs on its own which journal stream and service invocation it runs under. Nothing else is inherited, so systemd's `NOTIFY_SOCKET`, `WATCHDOG_*`, `LISTEN_*`, and `CREDENTIALS_DIRECTORY` never reach a Hook.
 
 ### Hook execution
 
@@ -143,7 +150,7 @@ Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these
 #!/bin/sh
 # /etc/wanwatch/hooks/switch.d/notify.sh
 logger -t wanwatch \
-    "$WANWATCH_GROUP: $WANWATCH_WAN_OLD → $WANWATCH_WAN_NEW (families=$WANWATCH_FAMILIES)"
+    "$WANWATCH_GROUP: $WANWATCH_WAN_OLD → $WANWATCH_WAN_NEW on $WANWATCH_INTERFACE_NEW (families=$WANWATCH_FAMILIES_NEW)"
 ```
 
 ## Compatibility policy

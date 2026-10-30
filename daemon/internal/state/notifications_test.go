@@ -74,18 +74,21 @@ func TestHookNotifierPreservesDecisionOrderAndData(t *testing.T) {
 	awaitHook(t, started)
 	switchCtx := HookContext{
 		Event: EventSwitch, Group: "home", WanOld: "primary", WanNew: "backup",
-		IfaceOld: "eth0", IfaceNew: "wwan0", GatewayV4Old: "192.0.2.1", GatewayV4New: "198.51.100.1",
-		GatewayV6Old: "2001:db8::1", GatewayV6New: "2001:db8:1::1", Families: []string{"v4", "v6"},
+		InterfaceOld: "eth0", InterfaceNew: "wwan0", GatewayV4Old: "192.0.2.1", GatewayV4New: "198.51.100.1",
+		GatewayV6Old: "2001:db8::1", GatewayV6New: "2001:db8:1::1",
+		FamiliesOld: []string{"v4", "v6"}, FamiliesNew: []string{"v4"},
 		Table: 100, Mark: 200, Timestamp: up.Timestamp.Add(time.Second),
 	}
 	wantSwitch := switchCtx
-	wantSwitch.Families = slices.Clone(switchCtx.Families)
+	wantSwitch.FamiliesOld = slices.Clone(switchCtx.FamiliesOld)
+	wantSwitch.FamiliesNew = slices.Clone(switchCtx.FamiliesNew)
 	if !notifyHook(t, n, switchCtx) {
 		t.Fatal("queued notification rejected")
 	}
 	// Caller-owned data can change while the first script is still running.
 	switchCtx.Group = "mutated"
-	switchCtx.Families[0] = "mutated"
+	switchCtx.FamiliesOld[0] = "mutated"
+	switchCtx.FamiliesNew[0] = "mutated"
 	switchCtx.Timestamp = time.Time{}
 	before := time.Now().UTC()
 	if !notifyHook(t, n, HookContext{Event: EventDown, Group: "home"}) {

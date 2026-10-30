@@ -120,7 +120,7 @@ func TestRunPassesEnvVars(t *testing.T) {
 	dir := t.TempDir()
 	outFile := filepath.Join(dir, "captured.txt")
 	writeHook(t, filepath.Join(dir, "up.d"), "env.sh",
-		`echo "$WANWATCH_EVENT|$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_GATEWAY_V4_NEW|$WANWATCH_FAMILIES|$WANWATCH_TABLE" > `+outFile)
+		`echo "$WANWATCH_EVENT|$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_GATEWAY_V4_NEW|$WANWATCH_FAMILIES_OLD|$WANWATCH_FAMILIES_NEW|$WANWATCH_TABLE" > `+outFile)
 
 	r := hookRunner{Dir: dir}
 	r.run(context.Background(), HookContext{
@@ -128,7 +128,7 @@ func TestRunPassesEnvVars(t *testing.T) {
 		Group:        "home",
 		WanNew:       "primary",
 		GatewayV4New: "192.0.2.1",
-		Families:     []string{"v4", "v6"},
+		FamiliesNew:  []string{"v4", "v6"},
 		Table:        100,
 	})
 
@@ -137,7 +137,7 @@ func TestRunPassesEnvVars(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	got := strings.TrimSpace(string(data))
-	want := "up|home|primary|192.0.2.1|v4,v6|100"
+	want := "up|home|primary|192.0.2.1||v4,v6|100"
 	if got != want {
 		t.Errorf("env captured = %q, want %q", got, want)
 	}
@@ -229,7 +229,7 @@ func TestRunTimestampFallback(t *testing.T) {
 	// HookContext.Timestamp zero → buildEnv should use time.Now().
 	dir := t.TempDir()
 	out := filepath.Join(dir, "ts.txt")
-	writeHook(t, filepath.Join(dir, "up.d"), "ts.sh", `echo "$WANWATCH_TS" > `+out)
+	writeHook(t, filepath.Join(dir, "up.d"), "ts.sh", `echo "$WANWATCH_TIMESTAMP" > `+out)
 
 	r := hookRunner{Dir: dir}
 	r.run(context.Background(), HookContext{Event: EventUp})
@@ -237,7 +237,7 @@ func TestRunTimestampFallback(t *testing.T) {
 	data, _ := os.ReadFile(out)
 	got := strings.TrimSpace(string(data))
 	if got == "" {
-		t.Errorf("WANWATCH_TS empty when Timestamp zero — want auto-stamp")
+		t.Errorf("WANWATCH_TIMESTAMP empty when Timestamp zero — want auto-stamp")
 	}
 }
 

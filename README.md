@@ -154,7 +154,7 @@ Most routers also apply source NAT on the Group's WAN interfaces; because it mat
 
 ## Hooks
 
-After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up,down,switch}.d/` in lexicographic order, passing the Group, the old and new WAN, their interfaces and Gateways, and a timestamp in `WANWATCH_*` environment variables:
+After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up,down,switch}.d/` in lexicographic order, passing the Group, the old and new WAN, their interfaces, Gateways, and Families, and a timestamp in `WANWATCH_*` environment variables:
 
 ```nix
 { pkgs, ... }:
@@ -162,14 +162,14 @@ After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up
   environment.etc."wanwatch/hooks/switch.d/log".source =
     pkgs.writeShellScript "wanwatch-log" ''
       ${pkgs.util-linux}/bin/logger -t wanwatch \
-        "$WANWATCH_GROUP: $WANWATCH_WAN_OLD -> $WANWATCH_WAN_NEW"
+        "$WANWATCH_GROUP: $WANWATCH_WAN_OLD -> $WANWATCH_WAN_NEW on $WANWATCH_INTERFACE_NEW"
     '';
 }
 ```
 
 Hooks are notifications: a failing or timed-out Hook is logged and counted but never undoes a Decision. `services.wanwatch.global.hookTimeoutMs` sets the deadline. [`docs/specs/daemon-state.md`](./docs/specs/daemon-state.md) lists every variable and the execution rules.
 
-Hooks run as the `wanwatch` user inside the daemon's systemd sandbox, which allows writes only under `/run/wanwatch` and a private `/tmp`. To let Hooks reach another service, such as a socket owned by its group, add that group to `users.users.wanwatch.extraGroups`.
+Hooks run as the `wanwatch` user inside the daemon's systemd sandbox, which allows writes only under `/run/wanwatch` and a private `/tmp`. They keep the daemon's `CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities, so a Hook can change routes, rules, and nft sets; treat every installed Hook as privileged. Hooks inherit only an allowlisted part of the daemon's environment, which the spec lists. To let Hooks reach another service, such as a socket owned by its group, add that group to `users.users.wanwatch.extraGroups`.
 
 ## Metrics
 

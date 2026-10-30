@@ -413,18 +413,19 @@ func TestDecisionPublication(t *testing.T) {
 				want := []state.HookContext{
 					{
 						Event: state.EventUp, Group: "home",
-						WanNew: "backup", IfaceNew: "wwan0",
+						WanNew: "backup", InterfaceNew: "wwan0",
 						GatewayV4New: "198.51.100.1",
-						Families:     []string{"v4"},
+						FamiliesNew:  []string{"v4"},
 						Table:        100, Mark: 0x100,
 					},
 					{
 						Event: state.EventSwitch, Group: "home",
 						WanOld: "backup", WanNew: "primary",
-						IfaceOld: "wwan0", IfaceNew: "eth0",
+						InterfaceOld: "wwan0", InterfaceNew: "eth0",
 						GatewayV4Old: "198.51.100.1", GatewayV4New: "192.0.2.1",
 						GatewayV6New: "2001:db8::1",
-						Families:     []string{"v4", "v6"},
+						FamiliesOld:  []string{"v4"},
+						FamiliesNew:  []string{"v4", "v6"},
 						Table:        100, Mark: 0x100,
 					},
 				}

@@ -92,7 +92,7 @@ func TestWriteSetsSchemaAndUpdatedAt(t *testing.T) {
 // TestWritePreservesCallerUpdatedAt pins the synchronization
 // contract used by the daemon's publishDecision: a non-zero
 // UpdatedAt supplied by the caller must survive Write so the
-// hook env-var WANWATCH_TS and state.json's `updatedAt` can be
+// hook env-var WANWATCH_TIMESTAMP and state.json's `updatedAt` can be
 // stamped with the same wall-clock moment.
 func TestWritePreservesCallerUpdatedAt(t *testing.T) {
 	t.Parallel()
