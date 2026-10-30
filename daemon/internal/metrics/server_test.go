@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -13,11 +14,10 @@ import (
 	"time"
 )
 
-// dialUnix opens a single HTTP scrape against `socket` and returns
+// scrapeSocket opens a single HTTP scrape against `socket` and returns
 // the body. Mirrors what Telegraf does — keeps the test honest
 // about the Unix-socket wire path, not just the in-memory handler.
-func dialUnix(t *testing.T, socket string) string {
-	t.Helper()
+func scrapeSocket(socket string) (string, error) {
 	client := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -29,37 +29,51 @@ func dialUnix(t *testing.T, socket string) string {
 	// The "host" portion is irrelevant for unix-socket dials.
 	resp, err := client.Get("http://wanwatch/metrics")
 	if err != nil {
-		t.Fatalf("GET /metrics: %v", err)
+		return "", fmt.Errorf("GET /metrics: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+		return "", fmt.Errorf("status = %d, want 200", resp.StatusCode)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
+		return "", fmt.Errorf("ReadAll: %w", err)
 	}
-	return string(body)
+	return string(body), nil
 }
 
-// runServer starts Serve in a goroutine, waits for the socket to
-// appear, and returns the cancel func + the goroutine's error
+// dialUnix is scrapeSocket for a server that runServer reports as serving.
+func dialUnix(t *testing.T, socket string) string {
+	t.Helper()
+	body, err := scrapeSocket(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+// runServer starts Serve in a goroutine, waits until it answers a
+// scrape, and returns the cancel func + the goroutine's error
 // channel. Callers cancel to stop and read errCh for the result.
+//
+// The socket file appears at Listen, before Serve applies Mode and
+// before a stale file is replaced; only an answered scrape shows
+// that Serve has finished both.
 func runServer(t *testing.T, s *Server) (context.CancelFunc, <-chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.Serve(ctx) }()
 
-	// Poll for the socket so the test doesn't race the listener.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, err := os.Stat(s.Socket); err == nil {
+		_, err := scrapeSocket(s.Socket)
+		if err == nil {
 			return cancel, errCh
 		}
 		if time.Now().After(deadline) {
 			cancel()
-			t.Fatalf("socket %s never appeared", s.Socket)
+			t.Fatalf("server on %s never served: %v", s.Socket, err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
