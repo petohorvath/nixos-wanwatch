@@ -48,7 +48,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.ApplyOpErrors.WithLabelValues("home", "ifindex_lookup").Inc()
 	r.StatePublications.Inc()
 	r.HookInvocations.WithLabelValues("up", "ok").Inc()
-	r.BuildInfo.WithLabelValues("0.1.0", runtime.Version(), "deadbeef").Set(1)
+	r.SetBuildInfo("0.1.0", "deadbeef", runtime.Version())
 
 	body := scrape(t, r)
 	for _, want := range []string{
@@ -102,5 +102,17 @@ func TestStatePublicationsIncrement(t *testing.T) {
 	body := scrape(t, r)
 	if !strings.Contains(body, "wanwatch_state_publications_total 3") {
 		t.Errorf("expected state_publications_total = 3; body:\n%s", body)
+	}
+}
+
+// The label names follow Prometheus's own *_build_info series.
+func TestBuildInfoLabels(t *testing.T) {
+	t.Parallel()
+	r := New()
+	r.SetBuildInfo("0.1.0", "abc1234", "go1.26.0")
+
+	want := `wanwatch_build_info{goversion="go1.26.0",revision="abc1234",version="0.1.0"} 1`
+	if body := scrape(t, r); !strings.Contains(body, want) {
+		t.Errorf("scrape missing %q; body:\n%s", want, body)
 	}
 }

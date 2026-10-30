@@ -10,7 +10,7 @@
   ...
 }:
 let
-  inherit (helpers) evalNixosWith renderConfig;
+  inherit (helpers) evalNixosWith renderConfig revisionFlags;
 
   # The config rendered from the shared declaration, with the
   # `evalNixosWith` arguments given.
@@ -85,4 +85,15 @@ in
     expr = scrapeInputWith flakeModulesArgs;
     expected = scrapeInputWith { };
   };
+
+  # The flake passes one revision to its `packages` output and to the
+  # module's default package.
+  testModulePackageRevisionMatchesPackages =
+    let
+      config = evalNixosWith flakeModulesArgs [ fixtures.nixos.primaryAndBackup ];
+    in
+    {
+      expr = revisionFlags config.services.wanwatch.package;
+      expected = revisionFlags self.packages.${config.nixpkgs.hostPlatform.system}.wanwatchd;
+    };
 }

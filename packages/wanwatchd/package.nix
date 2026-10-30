@@ -9,7 +9,9 @@
 
   `version` and `revision` are linked into the binary for
   `wanwatch_build_info`. The flake passes the version from
-  `lib/default.nix`; keep the fallback default in sync with it.
+  `lib/default.nix`; keep the fallback default in sync with it. The
+  flake passes its short revision as `revision`, else its dirty
+  short revision, else `unknown`.
   Dependencies are vendored in `daemon/vendor/`, so `vendorHash` is
   null and the build fetches nothing.
 */
@@ -48,7 +50,7 @@ buildGoModule {
     "-s"
     "-w"
     "-X main.version=${version}"
-    "-X main.commit=${revision}"
+    "-X main.revision=${revision}"
   ];
 
   # The tests run in the `build-daemon` and `vm-*` flake checks

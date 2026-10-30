@@ -66,4 +66,19 @@ in
     Returns the parsed `/etc/wanwatch/config.json`.
   */
   renderConfig = config: builtins.fromJSON config.environment.etc."wanwatch/config.json".text;
+
+  /*
+    The flags that link a wanwatchd package's revision into the binary
+    for `wanwatch_build_info`.
+
+    `package`: a wanwatchd package, such as a system's
+    `services.wanwatch.package`.
+
+    Returns the package's `-X main.revision=` ldflags.
+
+      revisionFlags config.services.wanwatch.package
+      # => [ "-X main.revision=unknown" ]
+  */
+  revisionFlags =
+    package: builtins.filter (nixpkgs.lib.hasPrefix "-X main.revision=") package.ldflags;
 }

@@ -146,4 +146,15 @@ in
     expr = options.tables.type.description;
     expected = "attribute set of integer between 1000 and 32767 (both inclusive)";
   };
+
+  # The flake passes its revision to the module, which links it into
+  # the default package for `wanwatch_build_info`.
+  testDefaultPackageRevision = {
+    expr =
+      helpers.revisionFlags
+        (helpers.evalNixosWith {
+          wanwatchModules = helpers.importNixosModules "abc1234";
+        } [ fixtures.nixos.primaryAndBackup ]).services.wanwatch.package;
+    expected = [ "-X main.revision=abc1234" ];
+  };
 }

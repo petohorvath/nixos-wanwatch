@@ -23,8 +23,11 @@
   The read-only `marks.<group>` and `tables.<group>` options echo each
   Group's fwmark and routing table, so other modules such as nftzones
   can reference them by name (docs/nftzones-integration.md).
+
+  The flake applies `wanwatch`, its library, and `revision`, the
+  revision linked into the default package for `wanwatch_build_info`.
 */
-{ wanwatch }:
+{ wanwatch, revision }:
 
 {
   config,
@@ -38,6 +41,7 @@ let
 
   defaultPackage = pkgs.callPackage ../packages/wanwatchd/package.nix {
     inherit (wanwatch) version;
+    inherit revision;
   };
 
   # The renderer takes value-type values, and `make` also applies the

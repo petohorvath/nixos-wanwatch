@@ -174,8 +174,8 @@ func New() *Registry {
 		BuildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Name:      "build_info",
-			Help:      "Build identification — set to 1 with version/go_version/commit labels at startup.",
-		}, []string{"version", "go_version", "commit"}),
+			Help:      "Build identification — set to 1 with version/revision/goversion labels at startup.",
+		}, []string{"version", "revision", "goversion"}),
 	}
 
 	reg.MustRegister(
@@ -186,6 +186,16 @@ func New() *Registry {
 		r.StatePublications, r.HookInvocations, r.BuildInfo,
 	)
 	return r
+}
+
+// SetBuildInfo sets wanwatch_build_info to 1 for the binary's
+// version, revision, and Go toolchain version.
+func (r *Registry) SetBuildInfo(version, revision, goversion string) {
+	r.BuildInfo.With(prometheus.Labels{
+		"version":   version,
+		"revision":  revision,
+		"goversion": goversion,
+	}).Set(1)
 }
 
 // Handler returns the http.Handler that serves the Prometheus
