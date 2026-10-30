@@ -26,8 +26,8 @@
   },
   "groups": {
     "home": {
-      "active": "primary",
-      "activeSince": null,
+      "selection": "primary",
+      "selectionSince": "2026-10-13T09:12:04.118204511Z",
       "decisionsTotal": 3,
       "strategy": "primary-backup"
     }

@@ -10,8 +10,8 @@ fault injection, Hook assertions, and Telegraf output checks stay in scenarios.
 
 Choose the observation that proves the behavior (docs/specs/daemon-state.md):
 
-- `wait_active(group, active)` reads Selection from State. `active=None`
-  requires an explicit JSON null. Cold-start Selection can use carrier alone.
+- `wait_selection(group, selection)` reads Selection from State.
+  `selection=None` requires an explicit JSON null. Cold-start Selection can use carrier alone.
 - `wait_healthy(wan)` reads aggregate Probe Health from State. Use it to gate
   fault injection until both primary and backup have cooked Probe Windows.
 - `wait_gateway(wan, family, gateway)` reads the discovered Gateway from State.

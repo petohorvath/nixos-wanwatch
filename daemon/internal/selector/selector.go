@@ -77,7 +77,7 @@ type Active struct {
 // at call sites.
 var NoActive = Active{}
 
-// Strategy chooses an active Member from a Group's MemberHealth list.
+// Strategy chooses the Selection from a Group's MemberHealth list.
 // Implementations are deterministic — given the same inputs, they
 // must produce the same Selection.
 type Strategy func(g Group, members []MemberHealth) Selection

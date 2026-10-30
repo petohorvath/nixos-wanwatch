@@ -108,18 +108,18 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set wan1 up")
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
     observe.wait_default_route("v6", "wan0", group="home-uplink")
 
     # Failover arm: carrier loss on primary.
     carrier(router, "wan0", "off")
-    observe.wait_active("home-uplink", "backup")
+    observe.wait_selection("home-uplink", "backup")
     observe.wait_default_route("v6", "wan1", group="home-uplink")
 
     # Recovery arm: carrier-only health switches back to the primary
     # without a probe Sample, and the v6 route must follow.
     carrier(router, "wan0", "on")
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
     observe.wait_default_route("v6", "wan0", group="home-uplink")
 
     # State and the live counter publish separately; wait for both

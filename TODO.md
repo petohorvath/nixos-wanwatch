@@ -164,7 +164,7 @@ See [ADR-0002](./docs/adr/0002-one-selection-per-group.md).
 
 Multi-active routing across healthy members. Requires
 `apply.WriteDefault` to emit MultiPath nexthops and the metrics
-catalog to allow multiple `1`s for `wanwatch_group_active{group,wan}`.
+catalog to allow multiple `1`s for `wanwatch_group_selected{group,wan}`.
 Member gains the `weight` it needs then; v1 has none.
 `docs/selector.md`, `docs/specs/failover.md` (single-active invariant),
 `daemon/internal/selector/primarybackup.go:10`.

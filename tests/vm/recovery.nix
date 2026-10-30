@@ -107,15 +107,15 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set wan1 up")
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
 
     carrier(router, "wan0", "off")
-    observe.wait_active("home-uplink", "backup")
+    observe.wait_selection("home-uplink", "backup")
 
     # Carrier-only cold-start health switches back to the primary
     # without waiting for a probe Sample.
     carrier(router, "wan0", "on")
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
 
     # State and the live counter publish separately; wait for both
     # carrier-driven Decisions (down to backup, up to primary).

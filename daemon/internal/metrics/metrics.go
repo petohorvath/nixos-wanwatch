@@ -43,7 +43,7 @@ type Registry struct {
 	WanCarrierChanges *prometheus.CounterVec
 
 	// Group layer.
-	GroupActive    *prometheus.GaugeVec
+	GroupSelected  *prometheus.GaugeVec
 	GroupDecisions *prometheus.CounterVec
 
 	// Apply layer — split per-family vs family-agnostic so labels
@@ -121,11 +121,11 @@ func New() *Registry {
 			Help:      "Carrier transitions observed per WAN.",
 		}, []string{"wan"}),
 
-		GroupActive: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		GroupSelected: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: "group",
-			Name:      "active",
-			Help:      "1 for the active member of `group`, 0 for the others.",
+			Name:      "selected",
+			Help:      "1 for the Selection of `group`, 0 for its other Members; every Member is 0 from startup.",
 		}, []string{"group", "wan"}),
 
 		GroupDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -181,7 +181,7 @@ func New() *Registry {
 	reg.MustRegister(
 		r.ProbeRTT, r.ProbeJitter, r.ProbeLoss,
 		r.WanCarrier, r.WanOperstate, r.WanFamilyHealthy, r.WanHealthy, r.WanCarrierChanges,
-		r.GroupActive, r.GroupDecisions,
+		r.GroupSelected, r.GroupDecisions,
 		r.ApplyRouteDuration, r.ApplyRouteErrors, r.ApplyOpErrors,
 		r.StatePublications, r.HookInvocations, r.BuildInfo,
 	)

@@ -148,13 +148,13 @@ pkgs.testers.runNixOSTest {
 
     # ==== Phase A — cold-start cook + 100% loss ⇒ failover ====
 
-    observe.wait_active("home-uplink", "primary", timeout=10)
+    observe.wait_selection("home-uplink", "primary", timeout=10)
     observe.wait_healthy("primary")
     observe.wait_healthy("backup")
 
     before_a = observe.decisions("home-uplink", "health")
     router.succeed("tc qdisc add dev eth1 root netem loss 100%")
-    observe.wait_active("home-uplink", "backup", timeout=10)
+    observe.wait_selection("home-uplink", "backup", timeout=10)
     observe.wait_decisions("home-uplink", "health", minimum=before_a + 1)
     # state.json changes only on transitions, so the Decision snapshot
     # can freeze below 50% loss when hysteresis flips before the
@@ -174,7 +174,7 @@ pkgs.testers.runNixOSTest {
     # ==== Phase B — clear netem ⇒ recovery ====
 
     router.succeed("tc qdisc del dev eth1 root")
-    observe.wait_active("home-uplink", "primary", timeout=10)
+    observe.wait_selection("home-uplink", "primary", timeout=10)
     # Poll live probe stats; state.json changes only on transitions.
     observe.wait_probe_loss("primary", "v6", 0.0, 0.10)
 
@@ -203,7 +203,7 @@ pkgs.testers.runNixOSTest {
 
     # D1 — fail
     router.succeed("tc qdisc add dev eth1 root netem loss 50%")
-    observe.wait_active("home-uplink", "backup", timeout=15)
+    observe.wait_selection("home-uplink", "backup", timeout=15)
     # 50% netem loss varies widely over 10 Samples, so assert only
     # that live loss exceeds the 25% threshold.
     observe.wait_probe_loss("primary", "v6", 0.25)
@@ -211,7 +211,7 @@ pkgs.testers.runNixOSTest {
     # ==== Phase D2 — band-pass hold (removed) ====
     #
     # Tested that 15% netem loss, between lossPctUp=5 and
-    # lossPctDown=25, holds the unhealthy verdict: active stays
+    # lossPctDown=25, holds the unhealthy verdict: the Selection stays
     # "backup" with no Decision for 3 seconds. Sample variance made it
     # flaky against unstable nixpkgs:
     #
@@ -230,7 +230,7 @@ pkgs.testers.runNixOSTest {
 
     # D3 — clear ⇒ recovery
     router.succeed("tc qdisc del dev eth1 root")
-    observe.wait_active("home-uplink", "primary", timeout=15)
+    observe.wait_selection("home-uplink", "primary", timeout=15)
     observe.wait_probe_loss("primary", "v6", 0.0, 0.10)
 
     # ==== Phase E — per-target aggregation ====
@@ -239,13 +239,13 @@ pkgs.testers.runNixOSTest {
     # unweighted per-family mean (~50%) must exceed lossPctDown.
 
     isp1.succeed("ip -6 addr del fd00:1::2/64 dev eth1")
-    observe.wait_active("home-uplink", "backup", timeout=15)
+    observe.wait_selection("home-uplink", "backup", timeout=15)
     # One target at ~0% and one at ~100% average into [0.3, 0.7].
     observe.wait_probe_loss("primary", "v6", 0.3, 0.7)
 
     isp1.succeed("ip -6 addr add fd00:1::2/64 dev eth1")
     router.wait_until_succeeds("ping -6 -c 1 -W 1 fd00:1::2", timeout=10)
-    observe.wait_active("home-uplink", "primary", timeout=15)
+    observe.wait_selection("home-uplink", "primary", timeout=15)
 
     # ==== Phase F — daemon restart ====
     #
@@ -256,7 +256,7 @@ pkgs.testers.runNixOSTest {
     router.wait_for_unit("wanwatch.service")
     # READY follows priming, so State already holds the startup
     # Selection.
-    observe.wait_active("home-uplink", "primary", timeout=15)
+    observe.wait_selection("home-uplink", "primary", timeout=15)
 
     # Probe Health returns within the Window cook time (~2 s) plus
     # consecutiveUp cycles.

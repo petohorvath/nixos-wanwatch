@@ -24,10 +24,10 @@ This catalog matches the series registered in `daemon/internal/metrics/metrics.g
 
 ## Group
 
-| Metric                           | Type    | Labels            | Meaning                                        |
-| -------------------------------- | ------- | ----------------- | ---------------------------------------------- |
-| `wanwatch_group_active`          | gauge   | `group`, `wan`    | `1` for the active Member, `0` for the others. |
-| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. `reason` is `health` or `carrier`.  |
+| Metric                           | Type    | Labels            | Meaning                                                                                                |
+| -------------------------------- | ------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
+| `wanwatch_group_selected`        | gauge   | `group`, `wan`    | `1` for the Group's Selection, `0` for its other Members. Every Member is exposed at `0` from startup. |
+| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. `reason` is `health` or `carrier`.                                                          |
 
 ## Apply
 
@@ -61,12 +61,12 @@ Decisions per Group over the last hour:
 sum by (group) (increase(wanwatch_group_decisions_total[1h]))
 ```
 
-No metric records when a Decision happened. `state.json` records when each Group's Selection last changed, as `groups.<name>.activeSince`: when the active Member took over, or when the Group lost its last healthy Member.
+No metric records when a Decision happened. `state.json` records when each Group's Selection last changed, as `groups.<name>.selectionSince`: when the current Selection took over, or when the Group lost its last healthy Member.
 
-Group without a healthy active Member:
+Group without a Selection, including a Group that never had a healthy Member:
 
 ```promql
-max by (group) (wanwatch_group_active) == 0
+max by (group) (wanwatch_group_selected) == 0
 ```
 
 Loss above 30% on any (WAN, Family):

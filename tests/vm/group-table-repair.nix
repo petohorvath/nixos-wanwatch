@@ -80,7 +80,7 @@ pkgs.testers.runNixOSTest {
     observe.wait_default_route(
         "v4", "eth1", group="home", gateway="192.168.1.1", timeout=15
     )
-    before = observe.wait_active("home", "uplink")["groups"]["home"]
+    before = observe.wait_selection("home", "uplink")["groups"]["home"]
 
     # The kernel flushes IPv4 routes through a device that goes down
     # without an RTM_DELROUTE. The daemon ignores Group-table
@@ -103,8 +103,8 @@ pkgs.testers.runNixOSTest {
     assert after["decisionsTotal"] == before["decisionsTotal"], (
         f"decisionsTotal {before['decisionsTotal']} -> {after['decisionsTotal']}"
     )
-    assert after["activeSince"] == before["activeSince"], (
-        f"activeSince {before['activeSince']} -> {after['activeSince']}"
+    assert after["selectionSince"] == before["selectionSince"], (
+        f"selectionSince {before['selectionSince']} -> {after['selectionSince']}"
     )
   '';
 }

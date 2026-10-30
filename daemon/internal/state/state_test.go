@@ -183,7 +183,7 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
 
-	active := "primary"
+	selection := "primary"
 	s := State{
 		Wans: map[string]Wan{
 			"primary": {
@@ -198,7 +198,7 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 		},
 		Groups: map[string]Group{
 			"home": {
-				Active:         &active,
+				Selection:      &selection,
 				DecisionsTotal: 1,
 				Strategy:       "primary-backup",
 			},
@@ -217,8 +217,8 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	if out.Wans["primary"].Families["v4"].RTTSeconds != 0.0124 {
 		t.Errorf("nested RTT did not round-trip: %v", out.Wans["primary"].Families["v4"].RTTSeconds)
 	}
-	if out.Groups["home"].Active == nil || *out.Groups["home"].Active != "primary" {
-		t.Errorf("Active did not round-trip: %v", out.Groups["home"].Active)
+	if out.Groups["home"].Selection == nil || *out.Groups["home"].Selection != "primary" {
+		t.Errorf("Selection did not round-trip: %v", out.Groups["home"].Selection)
 	}
 }
 
@@ -331,7 +331,8 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
-	active, gatewayV4 := "primary", "192.0.2.1"
+	selection, gatewayV4 := "primary", "192.0.2.1"
+	selectionSince := time.Date(2026, 10, 13, 9, 12, 4, 118204511, time.UTC)
 	s := State{
 		Wans: map[string]Wan{
 			"primary": {
@@ -354,7 +355,8 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 		},
 		Groups: map[string]Group{
 			"home": {
-				Active:         &active,
+				Selection:      &selection,
+				SelectionSince: &selectionSince,
 				DecisionsTotal: 3,
 				Strategy:       "primary-backup",
 			},

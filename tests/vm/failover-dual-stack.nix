@@ -117,7 +117,7 @@ pkgs.testers.runNixOSTest {
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set wan1 up")
 
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
 
     # Verify the direct default route in the kernel, allowing
     # networkd reconfiguration to settle after the link comes up.
@@ -127,7 +127,7 @@ pkgs.testers.runNixOSTest {
     if router.execute("ip link set wan0 carrier off")[0] != 0:
         router.succeed("ip link set wan0 down")
 
-    observe.wait_active("home-uplink", "backup")
+    observe.wait_selection("home-uplink", "backup")
 
     observe.wait_default_route("v4", "wan1", group="home-uplink")
     observe.wait_default_route("v6", "wan1", group="home-uplink")

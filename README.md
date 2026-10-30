@@ -114,8 +114,8 @@ jq '.groups' /run/wanwatch/state.json
 ```json
 {
   "home-uplink": {
-    "active": "primary",
-    "activeSince": "2026-10-13T09:12:04.118204511Z",
+    "selection": "primary",
+    "selectionSince": "2026-10-13T09:12:04.118204511Z",
     "decisionsTotal": 1,
     "strategy": "primary-backup"
   }

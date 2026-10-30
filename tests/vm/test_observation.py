@@ -67,19 +67,21 @@ class ObservationTests(unittest.TestCase):
         machine = ScriptedMachine(sources)
         return Observation(machine), machine
 
-    def test_selection_waits_through_bootstrap_and_missing_active(self):
-        selected = snapshot(groups={"home": {"active": "primary"}})
+    def test_selection_waits_through_bootstrap_and_missing_selection(self):
+        selected = snapshot(groups={"home": {"selection": "primary"}})
         observe, machine = self.make_observation(
             {
                 STATE: [
                     (1, "state.json does not exist"),
-                    snapshot(schema=2, groups={"home": {"active": "primary"}}),
+                    snapshot(schema=2, groups={"home": {"selection": "primary"}}),
                     snapshot(groups={"home": {}}),
                     selected,
                 ]
             }
         )
-        self.assertEqual(observe.wait_active("home", "primary"), json.loads(selected))
+        self.assertEqual(
+            observe.wait_selection("home", "primary"), json.loads(selected)
+        )
         self.assertEqual(machine.count(STATE), 4)
 
     def test_null_selection_requires_a_present_field(self):
@@ -87,11 +89,11 @@ class ObservationTests(unittest.TestCase):
             {
                 STATE: [
                     snapshot(groups={"home": {}}),
-                    snapshot(groups={"home": {"active": None}}),
+                    snapshot(groups={"home": {"selection": None}}),
                 ]
             }
         )
-        observe.wait_active("home", None)
+        observe.wait_selection("home", None)
         self.assertEqual(machine.count(STATE), 2)
 
     def test_probe_health_is_distinct_from_cold_start_selection(self):
@@ -99,7 +101,7 @@ class ObservationTests(unittest.TestCase):
             {
                 STATE: [
                     snapshot(
-                        groups={"home": {"active": "primary"}},
+                        groups={"home": {"selection": "primary"}},
                         wans={"backup": {"healthy": False}},
                     ),
                     snapshot(wans={"backup": {"healthy": True}}),
@@ -120,7 +122,7 @@ class ObservationTests(unittest.TestCase):
                     },
                 }
             },
-            "groups": {"home": {"active": None}},
+            "groups": {"home": {"selection": None}},
         }
         observe, machine = self.make_observation(
             {
@@ -151,7 +153,7 @@ class ObservationTests(unittest.TestCase):
     def test_malformed_state_is_not_hidden_by_retry(self):
         observe, machine = self.make_observation({STATE: ["{broken"]})
         with self.assertRaises(json.JSONDecodeError):
-            observe.wait_active("home", "primary")
+            observe.wait_selection("home", "primary")
         self.assertEqual(machine.count(STATE), 1)
 
     def test_zero_loss_requires_the_requested_live_series(self):
@@ -258,7 +260,7 @@ class ObservationTests(unittest.TestCase):
                 expected = {"dst": "default", "dev": "wan0"}
                 observe, machine = self.make_observation(
                     {
-                        STATE: [snapshot(groups={"home": {"active": "primary"}})],
+                        STATE: [snapshot(groups={"home": {"selection": "primary"}})],
                         command: [
                             (2, "FIB table does not exist"),
                             json.dumps([{**expected, "dst": "192.0.2.0/24"}]),
@@ -319,7 +321,7 @@ class ObservationTests(unittest.TestCase):
         observe, machine = self.make_observation(
             {
                 STATE: [
-                    snapshot(groups={"home": {"active": "primary"}}),
+                    snapshot(groups={"home": {"selection": "primary"}}),
                 ]
             }
         )
@@ -332,7 +334,7 @@ class ObservationTests(unittest.TestCase):
 
         machine.execute = slow_execute
         with self.assertRaisesRegex(AssertionError, "Timed out after 1s"):
-            observe.wait_active("home", "primary", timeout=1)
+            observe.wait_selection("home", "primary", timeout=1)
         self.assertEqual(machine.calls[0][1], 1)
 
     def test_failed_diagnostic_does_not_hide_original_failure_or_other_sources(self):
@@ -343,7 +345,7 @@ class ObservationTests(unittest.TestCase):
             }
         )
         with self.assertRaises(AssertionError) as caught:
-            observe.wait_active("home", "primary", timeout=0.1)
+            observe.wait_selection("home", "primary", timeout=0.1)
         message = str(caught.exception)
         for expected in (
             "state missing",

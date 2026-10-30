@@ -115,7 +115,7 @@ pkgs.testers.runNixOSTest {
 
     # 1. Initial Selection: primary (lowest priority among
     #    carrier-up members). Cold-start health is carrier-only.
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
 
     # 2. Verify the direct default route in the kernel, allowing
     #    networkd reconfiguration to settle after the link comes up.
@@ -130,7 +130,7 @@ pkgs.testers.runNixOSTest {
     # 4. Daemon switches to backup. Decision is rtnl-driven so
     #    the switch should happen within rtnl propagation +
     #    apply latency — single-digit seconds.
-    observe.wait_active("home-uplink", "backup")
+    observe.wait_selection("home-uplink", "backup")
 
     # 5. The default route must now use the backup interface.
     observe.wait_default_route("v4", "wan1", group="home-uplink")

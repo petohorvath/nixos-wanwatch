@@ -124,17 +124,17 @@ services.wanwatch.groups.home-uplink = {
 
 The only Strategy is `primary-backup`: the healthy Member with the lowest `priority` wins, and ties go to the lexicographically first WAN name.
 
-When no Member is healthy, the Group has no Selection and `state.json` shows `active: null`. The daemon writes no routes, so the previous default route and the fwmark rule stay in place until a Member recovers.
+When no Member is healthy, the Group has no Selection and `state.json` shows `selection: null`. The daemon writes no routes, so the previous default route and the fwmark rule stay in place until a Member recovers.
 
 ## What happens on a Decision
 
-A Decision is a Selection change. When `selector.Select` returns a different active Member, the daemon runs these steps in order:
+A Decision is a Selection change. When `selector.Select` returns a different Selection, the daemon runs these steps in order:
 
 1. `apply.WriteDefault` writes the default route for each Family the new Member serves. Point-to-point WANs get a `scope link` route; others use the cached Gateway. `RouteReplace` overwrites a stale default atomically. If no Gateway is known yet, the write is skipped and the next route event reapplies it.
 2. `apply.FlushBySource` flushes the conntrack entries whose replies are addressed to the vacated WAN's addresses: the router's own flows from those addresses and the LAN flows masqueraded to them. Those flows re-establish through the new WAN instead of being black-holed. Inbound connections to the vacated addresses are kept. For IPv4 on Linux 6.12 and later the kernel deletes the matching entries in one request; otherwise the daemon dumps the table and deletes each match, retrying once if the kernel interrupts the dump. The flush runs only on a switch, not when the Group goes down. A failure increments `wanwatch_apply_op_errors_total{op="conntrack_flush"}` but never fails the Decision.
 3. `state.Writer.Write` publishes `state.json` atomically with a temporary file and rename, so readers never see a partial file.
 4. `state.HookNotifier.Notify` queues best-effort delivery to `/etc/wanwatch/hooks/{up,down,switch}.d/*` with the `WANWATCH_*` environment variables in [`specs/daemon-state.md`](./specs/daemon-state.md).
-5. `wanwatch_group_decisions_total{group,reason}` increments and `wanwatch_group_active{group,wan}` updates.
+5. `wanwatch_group_decisions_total{group,reason}` increments and `wanwatch_group_selected{group,wan}` updates.
 
 ## Further reading
 

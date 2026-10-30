@@ -133,7 +133,7 @@ Link monitoring opens the live link subscription before listing existing links, 
 
 The health package owns WAN Health: threshold verdicts, Hysteresis, the cold-start gate, the Family policy, carrier and operstate, and the `wan_*` and `probe_*` gauges. It folds a LinkEvent into every WAN on the interface before reporting any of them, and returns a `Change` naming the WANs whose Health flipped and whether State must be republished. The daemon recomputes the Groups of each flipped WAN and republishes State on request.
 
-The decision package owns pending and committed Selections, Decision counts, active-Member gauges, and commit timestamps. The daemon forwards events and publishes returned commits; `Snapshot` supplies each Group's State. Strategies stay pure in `internal/selector`.
+The decision package owns pending and committed Selections, Decision counts, `wanwatch_group_selected` gauges, and commit timestamps. The daemon forwards events and publishes returned commits; `Snapshot` supplies each Group's State. Strategies stay pure in `internal/selector`.
 
 A hard Apply failure leaves the target Selection pending, and State and Hooks stay on the committed Selection. Probe cycles and route observations retry every Family for the pending target, and a newer Selection supersedes it.
 
@@ -175,7 +175,7 @@ Before the event loop handles any event, and before it reports `READY=1` to syst
    A hard failure defers commit until a retry succeeds
        │
        ▼
-7. The Group commits backup and updates active gauges.
+7. The Group commits backup and updates its `wanwatch_group_selected` gauges.
    The daemon flushes the vacated WAN and writes State
        │
        ▼

@@ -137,11 +137,11 @@ pkgs.testers.runNixOSTest {
     assert "default dev wan0" in routes, (
         f"table {table} at READY lacks the startup route:\n{routes}"
     )
-    active = router.succeed(
-        "jq -r '.groups.\"home-uplink\".active' /run/wanwatch/state.json"
+    selection = router.succeed(
+        "jq -r '.groups.\"home-uplink\".selection' /run/wanwatch/state.json"
     ).strip()
-    assert active == "primary", (
-        f"Selection at READY = {active!r}, want 'primary'"
+    assert selection == "primary", (
+        f"Selection at READY = {selection!r}, want 'primary'"
     )
   '';
 }

@@ -10,7 +10,7 @@ The daemon republishes on every observable state transition, not only on Selecti
 
 - **Bootstrap**: once at startup, before any event is processed, so early consumers see the configured WANs and Groups before the first Sample.
 - **Priming**: once more after the daemon folds in the startup route and link dumps, when they report a Gateway, carrier, or operstate, and still before any event is processed. A startup Decision publishes on its own as well. Both writes, when they happen, land before the daemon reports `READY=1` to systemd.
-- **Decision commit**: when a Group's `active` Member changes and every route write has succeeded, except for Families skipped because no Gateway is known yet. Hooks fire immediately after.
+- **Decision commit**: when a Group's Selection changes and every route write has succeeded, except for Families skipped because no Gateway is known yet. Hooks fire immediately after.
 - **Per-Family Health transition**: when a (WAN, Family) flips its `healthy` verdict. Without this trigger, a flip that leaves the WAN aggregate unchanged (for example, v4 drops while v6 holds under `familyHealthPolicy = "any"`) would never reach `state.json`.
 - **Carrier or operstate change**: any rtnetlink LinkEvent that changes `wans.<name>.carrier` or `wans.<name>.operstate`.
 - **Gateway change**: a current default-route observation on a watched interface that changes `wans.<name>.gateways.{v4,v6}`. Route notifications trigger fresh kernel reads, so a superseded notification never overwrites a newer Gateway or clears a replacement.
@@ -35,7 +35,7 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 | `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                                      |
 | `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                                  |
 
-An absent value is always `null`, never `""`: a Gateway not yet known, no active Member, or no `activeSince`. Hook env vars are strings, so they encode the same absences as `""`.
+An absent value is always `null`, never `""`: a Gateway not yet known, no Selection, or no `selectionSince`. Hook env vars are strings, so they encode the same absences as `""`.
 
 ## `wans.<name>`
 
@@ -87,19 +87,19 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
 
 ```json
 {
-  "active": "primary",
-  "activeSince": "2026-05-12T14:30:01.234567890Z",
+  "selection": "primary",
+  "selectionSince": "2026-05-12T14:30:01.234567890Z",
   "decisionsTotal": 3,
   "strategy": "primary-backup"
 }
 ```
 
-| Field            | Type                                | Meaning                                                                                        |
-| ---------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `active`         | string \| null                      | Current Selection. `null` when no Member is healthy.                                           |
-| `activeSince`    | string (RFC 3339 nanos UTC) \| null | When `active` took its current value, including `null` after a `down`. `null` if never active. |
-| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start.                                           |
-| `strategy`       | string                              | Echo of `groups.<name>.strategy`.                                                              |
+| Field            | Type                                | Meaning                                                                                                                                                           |
+| ---------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `selection`      | string \| null                      | The Group's Selection. `null` when no Member is healthy.                                                                                                          |
+| `selectionSince` | string (RFC 3339 nanos UTC) \| null | When the Selection last changed, including to `null` on a `down`. Reapplying the current Selection leaves it unchanged. `null` before the Group's first Decision. |
+| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start.                                                                                                              |
+| `strategy`       | string                              | Echo of `groups.<name>.strategy`.                                                                                                                                 |
 
 ## Hook env-var contract
 

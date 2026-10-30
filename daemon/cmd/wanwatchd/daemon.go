@@ -236,10 +236,11 @@ func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 	}
 }
 
-// applyRoutes writes the default route per family of the active
-// WAN. With no `families` argument it writes every family the WAN
-// probes. The Decision module limits a route refresh to the observed
-// family. Families the WAN doesn't probe are skipped either way.
+// applyRoutes writes the default route per family of selection, the
+// WAN of the Selection being applied. With no `families` argument it
+// writes every family the WAN probes. The Decision module limits a
+// route refresh to the observed family. Families the WAN doesn't
+// probe are skipped either way.
 //
 // PointToPoint WANs get scope-link routes (no gateway needed);
 // non-PtP WANs use the gateway the gatewayCache learned from the
@@ -251,10 +252,10 @@ func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 // is *not* a failure: that write is intentionally deferred (docs/adr/0004-runtime-gateway-discovery.md),
 // and handleRouteEvent reapplies it once the gateway is
 // discovered.
-func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan string, families ...probe.Family) error {
-	wan, ok := d.cfg.Wans[activeWan]
+func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, selection string, families ...probe.Family) error {
+	wan, ok := d.cfg.Wans[selection]
 	if !ok {
-		return fmt.Errorf("apply routes: unknown wan %q", activeWan)
+		return fmt.Errorf("apply routes: unknown wan %q", selection)
 	}
 	ifindex, err := d.kernel.IfIndex(wan.Interface)
 	if err != nil {
@@ -282,7 +283,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 			gw, ok := d.gateways.get(wan.Interface, rtnl.RouteFamily(fam))
 			if !ok || gw == nil {
 				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
-					"group", g.Name, "wan", activeWan, "family", famLabel,
+					"group", g.Name, "wan", selection, "family", famLabel,
 					"iface", wan.Interface)
 				return false
 			}
@@ -316,7 +317,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 		}
 	}
 	if failed > 0 {
-		return fmt.Errorf("apply routes: %d route write(s) failed for wan %q", failed, activeWan)
+		return fmt.Errorf("apply routes: %d route write(s) failed for wan %q", failed, selection)
 	}
 	return nil
 }
@@ -350,7 +351,7 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	// Republish state.json on any gateway-cache mutation. A change
 	// that completes a pending Decision was captured by
 	// publishDecision above; everything else (a new gateway on the
-	// already-active WAN, a gateway disappearing on the standby)
+	// WAN of a Selection, a gateway disappearing on the standby)
 	// wouldn't otherwise update state.json, leaving the
 	// wans[<name>].gateways[v4|v6] fields stale.
 	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !prev.Equal(e.Gateway)

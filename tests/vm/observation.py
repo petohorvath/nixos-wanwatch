@@ -104,9 +104,9 @@ class Observation:
             timeout,
         )
 
-    def wait_active(self, group, active, timeout=15):
+    def wait_selection(self, group, selection, timeout=15):
         """Selection can succeed on cold-start carrier Health alone."""
-        return self.state({"groups": {group: {"active": active}}}, timeout)
+        return self.state({"groups": {group: {"selection": selection}}}, timeout)
 
     def wait_healthy(self, wan, timeout=15):
         """Wait for aggregate Probe Health, including an unselected backup.

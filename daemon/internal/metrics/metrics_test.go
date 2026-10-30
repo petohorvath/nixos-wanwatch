@@ -41,7 +41,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.WanFamilyHealthy.WithLabelValues("primary", "v4").Set(1)
 	r.WanHealthy.WithLabelValues("primary").Set(1)
 	r.WanCarrierChanges.WithLabelValues("primary").Inc()
-	r.GroupActive.WithLabelValues("home", "primary").Set(1)
+	r.GroupSelected.WithLabelValues("home", "primary").Set(1)
 	r.GroupDecisions.WithLabelValues("home", "carrier").Inc()
 	r.ApplyRouteDuration.WithLabelValues("home", "v4").Observe(0.001)
 	r.ApplyRouteErrors.WithLabelValues("home", "v4").Inc()
@@ -60,7 +60,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 		"wanwatch_wan_family_healthy",
 		"wanwatch_wan_healthy",
 		"wanwatch_wan_carrier_changes_total",
-		"wanwatch_group_active",
+		"wanwatch_group_selected",
 		"wanwatch_group_decisions_total",
 		"wanwatch_apply_route_duration_seconds",
 		"wanwatch_apply_route_errors_total",

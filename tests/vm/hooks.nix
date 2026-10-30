@@ -126,7 +126,7 @@ pkgs.testers.runNixOSTest {
 
     router.succeed("ip link set wan0 up")
     router.succeed("ip link set wan1 up")
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
 
     # Discard the capture from the initial up Decision so the next
     # read sees only the switch.
@@ -134,7 +134,7 @@ pkgs.testers.runNixOSTest {
 
     if router.execute("ip link set wan0 carrier off")[0] != 0:
         router.succeed("ip link set wan0 down")
-    observe.wait_active("home-uplink", "backup")
+    observe.wait_selection("home-uplink", "backup")
     router.wait_for_file("/run/wanwatch/last-hook.env")
 
     captured = router.succeed("cat /run/wanwatch/last-hook.env")

@@ -185,7 +185,7 @@ func (h *harness) hooks() []state.HookContext {
 
 // selectionOf returns the Selection of group in s, or "" for none.
 func selectionOf(s state.State, group string) string {
-	if a := s.Groups[group].Active; a != nil {
+	if a := s.Groups[group].Selection; a != nil {
 		return *a
 	}
 	return ""

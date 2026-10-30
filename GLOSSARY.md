@@ -47,12 +47,12 @@ A WAN's membership in one Group, carrying per-Group attributes such as priority.
 _Avoid_: WAN (when the per-Group attributes matter)
 
 **Strategy**:
-The rule that chooses the active Member from a Group's healthy Members.
+The rule that chooses the Selection from a Group's healthy Members.
 _Avoid_: policy, algorithm, mode
 
 **Selection**:
 The Member a Group currently routes through, or none.
-_Avoid_: active WAN, choice, Decision
+_Avoid_: active WAN, active Member, choice, Decision
 
 **Decision**:
 A change of a Group's Selection from one value to another.
