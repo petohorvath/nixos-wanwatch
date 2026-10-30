@@ -90,15 +90,15 @@ func New() *Registry {
 			Namespace: Namespace,
 			Subsystem: "wan",
 			Name:      "carrier",
-			Help:      "Per-WAN carrier state: 1 = up, 0 = down.",
+			Help:      "Per-WAN carrier state: 1 = up, 0 = down, -1 = unknown.",
 		}, []string{"wan"}),
 
 		WanOperstate: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: "wan",
 			Name:      "operstate",
-			Help:      "Per-WAN IFLA_OPERSTATE value (mirrors /usr/include/linux/if.h).",
-		}, []string{"wan"}),
+			Help:      "Per-WAN operstate as a state-set: 1 for the current state, 0 for the others; an operstate outside the set reports as unknown.",
+		}, []string{"wan", "state"}),
 
 		WanFamilyHealthy: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,

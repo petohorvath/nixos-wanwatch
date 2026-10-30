@@ -57,7 +57,8 @@ type family struct {
 }
 
 // New builds cold Health for every WAN in cfgs: carrier and operstate
-// unknown, no Family cooked. It performs no I/O.
+// unknown, no Family cooked. It sets the link-state gauges to unknown
+// and performs no I/O.
 func New(cfgs map[string]config.Wan, mreg *metrics.Registry) *Wans {
 	w := &Wans{byName: make(map[string]*wan, len(cfgs)), metrics: mreg}
 	for name, cfg := range cfgs {
@@ -70,6 +71,7 @@ func New(cfgs map[string]config.Wan, mreg *metrics.Registry) *Wans {
 			}
 		}
 		w.byName[name] = ws
+		w.recordLink(ws)
 	}
 	return w
 }
@@ -153,8 +155,7 @@ func (w *Wans) Link(e rtnl.LinkEvent) Change {
 		}
 		ws.carrier = e.Carrier
 		ws.operstate = e.Operstate
-		w.metrics.WanCarrier.WithLabelValues(ws.name).Set(boolToFloat(ws.carrier == rtnl.CarrierUp))
-		w.metrics.WanOperstate.WithLabelValues(ws.name).Set(float64(ws.operstate))
+		w.recordLink(ws)
 		now := ws.healthy()
 		w.metrics.WanHealthy.WithLabelValues(ws.name).Set(boolToFloat(now))
 		if now != prev {
@@ -163,6 +164,51 @@ func (w *Wans) Link(e rtnl.LinkEvent) Change {
 	}
 	slices.Sort(c.Flipped)
 	return c
+}
+
+// operstates is the wanwatch_wan_operstate state-set: every operstate
+// the catalog names, each one series.
+var operstates = []rtnl.Operstate{
+	rtnl.OperstateUp,
+	rtnl.OperstateDown,
+	rtnl.OperstateDormant,
+	rtnl.OperstateLowerLayerDown,
+	rtnl.OperstateNotPresent,
+	rtnl.OperstateTesting,
+	rtnl.OperstateUnknown,
+}
+
+// knownOperstate returns o, or unknown for a kernel operstate outside
+// the state-set, so the metrics and State report the same value.
+func knownOperstate(o rtnl.Operstate) rtnl.Operstate {
+	if !slices.Contains(operstates, o) {
+		return rtnl.OperstateUnknown
+	}
+	return o
+}
+
+// recordLink sets the link-state gauges of ws: carrier as 1, 0, or -1
+// for up, down, or unknown, and the operstate state-set with 1 on the
+// current state and 0 on the others. A kernel operstate outside the
+// state-set counts as unknown.
+func (w *Wans) recordLink(ws *wan) {
+	w.metrics.WanCarrier.WithLabelValues(ws.name).Set(carrierValue(ws.carrier))
+	current := knownOperstate(ws.operstate)
+	for _, o := range operstates {
+		w.metrics.WanOperstate.WithLabelValues(ws.name, o.String()).Set(boolToFloat(o == current))
+	}
+}
+
+// carrierValue encodes c for wanwatch_wan_carrier.
+func carrierValue(c rtnl.Carrier) float64 {
+	switch c {
+	case rtnl.CarrierUp:
+		return 1
+	case rtnl.CarrierDown:
+		return 0
+	default:
+		return -1
+	}
 }
 
 // Healthy reports wan's Health; an unknown WAN is unhealthy.
@@ -206,7 +252,7 @@ func (w *Wans) Snapshot() map[string]state.Wan {
 		out[name] = state.Wan{
 			Interface: ws.cfg.Interface,
 			Carrier:   ws.carrier.String(),
-			Operstate: ws.operstate.String(),
+			Operstate: knownOperstate(ws.operstate).String(),
 			Healthy:   ws.healthy(),
 			Families:  fams,
 		}

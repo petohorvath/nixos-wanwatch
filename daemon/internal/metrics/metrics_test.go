@@ -37,7 +37,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.ProbeJitter.WithLabelValues("primary", "v4").Set(1.2)
 	r.ProbeLoss.WithLabelValues("primary", "v4").Set(0)
 	r.WanCarrier.WithLabelValues("primary").Set(1)
-	r.WanOperstate.WithLabelValues("primary").Set(6)
+	r.WanOperstate.WithLabelValues("primary", "up").Set(1)
 	r.WanFamilyHealthy.WithLabelValues("primary", "v4").Set(1)
 	r.WanHealthy.WithLabelValues("primary").Set(1)
 	r.WanCarrierChanges.WithLabelValues("primary").Inc()

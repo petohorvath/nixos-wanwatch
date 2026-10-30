@@ -172,20 +172,34 @@ func TestLinkStateMatrix(t *testing.T) {
 				change:  want,
 				healthy: map[string]bool{"primary": tc.want},
 			}})
-			wantCarrier := 0.0
-			if tc.carrier == rtnl.CarrierUp {
-				wantCarrier = 1
-			}
+			wantCarrier := map[rtnl.Carrier]float64{rtnl.CarrierUp: 1, rtnl.CarrierDown: 0, rtnl.CarrierUnknown: -1}[tc.carrier]
 			if v := readGauge(t, mreg.WanCarrier.WithLabelValues("primary")); v != wantCarrier {
 				t.Errorf("wanwatch_wan_carrier = %v, want %v", v, wantCarrier)
 			}
-			if v := readGauge(t, mreg.WanOperstate.WithLabelValues("primary")); v != float64(tc.operstate) {
-				t.Errorf("wanwatch_wan_operstate = %v, want %v", v, float64(tc.operstate))
+			if v := readGauge(t, mreg.WanOperstate.WithLabelValues("primary", tc.operstate.String())); v != 1 {
+				t.Errorf("wanwatch_wan_operstate{state=%s} = %v, want 1", tc.operstate, v)
 			}
 			if v := readGauge(t, mreg.WanHealthy.WithLabelValues("primary")); v != boolToFloat(tc.want) {
 				t.Errorf("wanwatch_wan_healthy = %v, want %v", v, tc.want)
 			}
 		})
+	}
+}
+
+// TestLinkOperstateOutOfRange pins that a kernel operstate outside the
+// wanwatch_wan_operstate state-set reports as unknown.
+func TestLinkOperstateOutOfRange(t *testing.T) {
+	t.Parallel()
+	mreg := metrics.New()
+	w := New(wans(wanCfg("primary", "eth0", 1, 1, probe.FamilyV4)), mreg)
+	replay(t, w, []step{
+		{event: up("eth0"), change: flipped("primary"), healthy: map[string]bool{"primary": true}},
+		{event: link("eth0", rtnl.CarrierUp, rtnl.Operstate(42)), change: republish, healthy: map[string]bool{"primary": true}},
+	})
+	for st, want := range map[string]float64{"up": 0, "unknown": 1} {
+		if v := readGauge(t, mreg.WanOperstate.WithLabelValues("primary", st)); v != want {
+			t.Errorf("wanwatch_wan_operstate{state=%s} = %v, want %v", st, v, want)
+		}
 	}
 }
 

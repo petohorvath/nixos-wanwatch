@@ -63,6 +63,8 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no Select
 | `gateways.v6` | string \| null | Same for v6.                                                                                                                      |
 | `families`    | object         | One entry per Family present in `probe.targets`.                                                                                  |
 
+A kernel operstate outside the `operstate` set reports as `unknown`, as in `wanwatch_wan_operstate`.
+
 ## `wans.<name>.families.<v4|v6>`
 
 ```json

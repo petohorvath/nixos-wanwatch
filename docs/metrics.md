@@ -14,13 +14,17 @@ This catalog matches the series registered in `daemon/internal/metrics/metrics.g
 
 ## WAN
 
-| Metric                               | Type    | Labels          | Meaning                                             |
-| ------------------------------------ | ------- | --------------- | --------------------------------------------------- |
-| `wanwatch_wan_carrier`               | gauge   | `wan`           | `1` = carrier up (`IFF_LOWER_UP`), `0` = down.      |
-| `wanwatch_wan_operstate`             | gauge   | `wan`           | `IFLA_OPERSTATE` integer (`0` = unknown, `6` = up). |
-| `wanwatch_wan_family_healthy`        | gauge   | `wan`, `family` | `1` = healthy after thresholds and Hysteresis.      |
-| `wanwatch_wan_healthy`               | gauge   | `wan`           | WAN Health under `probe.familyHealthPolicy`.        |
-| `wanwatch_wan_carrier_changes_total` | counter | `wan`           | Carrier transitions.                                |
+| Metric                               | Type    | Labels          | Meaning                                                        |
+| ------------------------------------ | ------- | --------------- | -------------------------------------------------------------- |
+| `wanwatch_wan_carrier`               | gauge   | `wan`           | `1` = carrier up (`IFF_LOWER_UP`), `0` = down, `-1` = unknown. |
+| `wanwatch_wan_operstate`             | gauge   | `wan`, `state`  | Operstate as a state-set; see below.                           |
+| `wanwatch_wan_family_healthy`        | gauge   | `wan`, `family` | `1` = healthy after thresholds and Hysteresis.                 |
+| `wanwatch_wan_healthy`               | gauge   | `wan`           | WAN Health under `probe.familyHealthPolicy`.                   |
+| `wanwatch_wan_carrier_changes_total` | counter | `wan`           | Carrier transitions.                                           |
+
+Both gauges are set for every WAN at daemon start and report unknown until the kernel reports the interface's link state, for example while the interface does not exist. `wanwatch_wan_carrier` encodes unknown as `-1`, so an alert on `== 0` fires only on a carrier the kernel reports down.
+
+`wanwatch_wan_operstate` has one series per WAN for each RFC 2863 operstate: `up`, `down`, `dormant`, `lowerlayerdown`, `notpresent`, `testing`, and `unknown`. The series of the current state is `1` and the others are `0`. A kernel value outside this set reports as `unknown`.
 
 ## Group
 
@@ -53,6 +57,12 @@ WAN flapping:
 
 ```promql
 rate(wanwatch_wan_carrier_changes_total[5m]) > 0.05
+```
+
+WAN link down, without firing on an unknown carrier or operstate:
+
+```promql
+wanwatch_wan_carrier == 0 or wanwatch_wan_operstate{state="down"} == 1
 ```
 
 Decisions per Group over the last hour:
