@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -35,6 +35,7 @@ type harness struct {
 	metrics   *metrics.Registry
 	recorder  *hookRecorder
 	trace     *trace
+	logs      *logBuffer
 	statePath string
 
 	ctx    context.Context
@@ -79,6 +80,7 @@ func buildHarness(tb testing.TB, cfg *config.Config, hooks func(*harness, *slog.
 		metrics:    metrics.New(),
 		recorder:   &hookRecorder{trace: tr},
 		trace:      tr,
+		logs:       &logBuffer{},
 		statePath:  cfg.Global.StatePath,
 		probes:     make(chan probe.ProbeResult),
 		links:      make(chan rtnl.LinkEvent),
@@ -87,7 +89,7 @@ func buildHarness(tb testing.TB, cfg *config.Config, hooks func(*harness, *slog.
 	}
 	h.ctx, h.cancel = context.WithCancel(tb.Context())
 	tb.Cleanup(h.cancel)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(h.logs, nil))
 	h.d = newDaemon(cfg, h.kernel, hooks(h, logger), h.metrics, logger)
 	return h
 }
@@ -163,6 +165,12 @@ func (h *harness) Trace() []string {
 	return h.trace.take()
 }
 
+// Logs returns everything the daemon has logged so far, in slog's
+// text format.
+func (h *harness) Logs() string {
+	return h.logs.String()
+}
+
 // State reads the published state.json.
 func (h *harness) State() state.State {
 	h.tb.Helper()
@@ -185,7 +193,7 @@ func (h *harness) hooks() []state.HookContext {
 
 // selectionOf returns the Selection of group in s, or "" for none.
 func selectionOf(s state.State, group string) string {
-	if a := s.Groups[group].Active; a != nil {
+	if a := s.Groups[group].Selection; a != nil {
 		return *a
 	}
 	return ""
@@ -256,17 +264,20 @@ func baseConfig() *config.Config {
 	}
 }
 
+func ptr[T any](v T) *T { return &v }
+
 // healthy is a full Window that passes baseConfig's thresholds.
 func healthy(wan string, fam probe.Family) probe.ProbeResult {
 	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
-		RTTMicros: 10_000, WindowFilled: true,
+		RTTMicros: ptr[uint64](10_000), JitterMicros: ptr[uint64](0), LossRatio: ptr(0.0), WindowFilled: true,
 	}}
 }
 
-// lossy is a full Window in which every Sample was lost.
+// lossy is a full Window in which every Sample was lost, so it has no
+// RTT or jitter.
 func lossy(wan string, fam probe.Family) probe.ProbeResult {
 	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
-		LossRatio: 1, WindowFilled: true,
+		LossRatio: ptr(1.0), WindowFilled: true,
 	}}
 }
 
@@ -309,7 +320,8 @@ func (r *hookRecorder) Notify(c state.HookContext) bool {
 		r.trace.add(line + failedMark)
 		return false
 	}
-	c.Families = slices.Clone(c.Families)
+	c.FamiliesOld = slices.Clone(c.FamiliesOld)
+	c.FamiliesNew = slices.Clone(c.FamiliesNew)
 	r.hooks = append(r.hooks, c)
 	r.trace.add(line)
 	return true
@@ -328,4 +340,23 @@ func (r *hookRecorder) accepted() []state.HookContext {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.hooks)
+}
+
+// logBuffer collects the daemon's log output. The event loop and the
+// Hook worker log concurrently, so writes are serialized.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

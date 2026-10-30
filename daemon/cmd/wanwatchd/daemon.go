@@ -40,6 +40,8 @@ type daemon struct {
 	health   *health.Wans
 	groups   map[string]*decision.Group
 	gateways *gatewayCache
+	// startedAt is State's startedAt, fixed when the daemon is built.
+	startedAt time.Time
 }
 
 // newDaemon constructs the runtime state from `cfg` — cold WAN
@@ -47,15 +49,16 @@ type daemon struct {
 // kernel and Hook sink. It performs no I/O and starts no goroutines.
 func newDaemon(cfg *config.Config, k kernel, hooks hookSink, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
-		cfg:      cfg,
-		kernel:   k,
-		hooks:    hooks,
-		metrics:  mreg,
-		stateW:   &state.Writer{Path: cfg.Global.StatePath},
-		logger:   logger,
-		health:   health.New(cfg.Wans, mreg),
-		groups:   make(map[string]*decision.Group, len(cfg.Groups)),
-		gateways: newGatewayCache(),
+		cfg:       cfg,
+		kernel:    k,
+		hooks:     hooks,
+		metrics:   mreg,
+		stateW:    &state.Writer{Path: cfg.Global.StatePath},
+		logger:    logger,
+		health:    health.New(cfg.Wans, mreg),
+		groups:    make(map[string]*decision.Group, len(cfg.Groups)),
+		gateways:  newGatewayCache(),
+		startedAt: time.Now().UTC(),
 	}
 	for name, g := range cfg.Groups {
 		d.groups[name] = decision.New(g, func(ctx context.Context, wan string, families ...probe.Family) error {
@@ -236,10 +239,11 @@ func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 	}
 }
 
-// applyRoutes writes the default route per family of the active
-// WAN. With no `families` argument it writes every family the WAN
-// probes. The Decision module limits a route refresh to the observed
-// family. Families the WAN doesn't probe are skipped either way.
+// applyRoutes writes the default route per family of selection, the
+// WAN of the Selection being applied. With no `families` argument it
+// writes every family the WAN probes. The Decision module limits a
+// route refresh to the observed family. Families the WAN doesn't
+// probe are skipped either way.
 //
 // PointToPoint WANs get scope-link routes (no gateway needed);
 // non-PtP WANs use the gateway the gatewayCache learned from the
@@ -251,10 +255,10 @@ func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 // is *not* a failure: that write is intentionally deferred (docs/adr/0004-runtime-gateway-discovery.md),
 // and handleRouteEvent reapplies it once the gateway is
 // discovered.
-func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan string, families ...probe.Family) error {
-	wan, ok := d.cfg.Wans[activeWan]
+func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, selection string, families ...probe.Family) error {
+	wan, ok := d.cfg.Wans[selection]
 	if !ok {
-		return fmt.Errorf("apply routes: unknown wan %q", activeWan)
+		return fmt.Errorf("apply routes: unknown wan %q", selection)
 	}
 	ifindex, err := d.kernel.IfIndex(wan.Interface)
 	if err != nil {
@@ -282,7 +286,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 			gw, ok := d.gateways.get(wan.Interface, rtnl.RouteFamily(fam))
 			if !ok || gw == nil {
 				d.logger.Info("no gateway in cache; skipping route write (will reapply on discovery)",
-					"group", g.Name, "wan", activeWan, "family", famLabel,
+					"group", g.Name, "wan", selection, "family", famLabel,
 					"iface", wan.Interface)
 				return false
 			}
@@ -316,7 +320,7 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, activeWan st
 		}
 	}
 	if failed > 0 {
-		return fmt.Errorf("apply routes: %d route write(s) failed for wan %q", failed, activeWan)
+		return fmt.Errorf("apply routes: %d route write(s) failed for wan %q", failed, selection)
 	}
 	return nil
 }
@@ -350,7 +354,7 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	// Republish state.json on any gateway-cache mutation. A change
 	// that completes a pending Decision was captured by
 	// publishDecision above; everything else (a new gateway on the
-	// already-active WAN, a gateway disappearing on the standby)
+	// WAN of a Selection, a gateway disappearing on the standby)
 	// wouldn't otherwise update state.json, leaving the
 	// wans[<name>].gateways[v4|v6] fields stale.
 	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !prev.Equal(e.Gateway)
@@ -369,6 +373,8 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 // concurrent hook invocation (publishDecision).
 func (d *daemon) writeStateSnapshot(now time.Time) {
 	snap := state.State{
+		Version:   version,
+		StartedAt: d.startedAt,
 		UpdatedAt: now,
 		Wans:      make(map[string]state.Wan, len(d.cfg.Wans)),
 		Groups:    make(map[string]state.Group, len(d.groups)),
@@ -394,24 +400,25 @@ func (d *daemon) writeStateSnapshot(now time.Time) {
 // submitting it to the notifier. The worker never reads daemon-owned state.
 func (d *daemon) notifyHooks(g selector.Group, event state.Event, committed *decision.Commit) {
 	old, next := committed.Old, committed.New
-	oldIface := ifaceFor(d.cfg.Wans, old)
-	nextIface := ifaceFor(d.cfg.Wans, next)
+	interfaceOld := interfaceFor(d.cfg.Wans, old)
+	interfaceNew := interfaceFor(d.cfg.Wans, next)
 	hookCtx := state.HookContext{
-		Event:    event,
-		Group:    g.Name,
-		WanOld:   old.Wan,
-		WanNew:   next.Wan,
-		IfaceOld: oldIface,
-		IfaceNew: nextIface,
+		Event:        event,
+		Group:        g.Name,
+		WanOld:       old.Wan,
+		WanNew:       next.Wan,
+		InterfaceOld: interfaceOld,
+		InterfaceNew: interfaceNew,
 		// Gateway env vars come from the discovery cache. They're
-		// blank when (a) the iface has no cached default route yet,
+		// blank when (a) the interface has no cached default route yet,
 		// or (b) the route is scope-link (point-to-point) so there
 		// is no gateway to surface.
-		GatewayV4Old: d.gateways.string(oldIface, rtnl.RouteFamilyV4),
-		GatewayV4New: d.gateways.string(nextIface, rtnl.RouteFamilyV4),
-		GatewayV6Old: d.gateways.string(oldIface, rtnl.RouteFamilyV6),
-		GatewayV6New: d.gateways.string(nextIface, rtnl.RouteFamilyV6),
-		Families:     probedFamiliesFor(d.cfg.Wans, next),
+		GatewayV4Old: d.gateways.string(interfaceOld, rtnl.RouteFamilyV4),
+		GatewayV4New: d.gateways.string(interfaceNew, rtnl.RouteFamilyV4),
+		GatewayV6Old: d.gateways.string(interfaceOld, rtnl.RouteFamilyV6),
+		GatewayV6New: d.gateways.string(interfaceNew, rtnl.RouteFamilyV6),
+		FamiliesOld:  probedFamiliesFor(d.cfg.Wans, old),
+		FamiliesNew:  probedFamiliesFor(d.cfg.Wans, next),
 		Table:        g.Table,
 		Mark:         g.Mark,
 		Timestamp:    committed.At,

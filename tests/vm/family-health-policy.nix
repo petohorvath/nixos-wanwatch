@@ -71,7 +71,7 @@ pkgs.testers.runNixOSTest {
             "healthy": False,
             "families": {"v4": {"healthy": True}, "v6": {"healthy": False}},
         }},
-        "groups": {"home": {"active": None}},
+        "groups": {"home": {"selection": None}},
     }, timeout=20)
 
     # Wait for both live gauges; absence must not count as false.

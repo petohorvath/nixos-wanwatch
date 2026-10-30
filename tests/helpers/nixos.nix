@@ -23,15 +23,15 @@ let
     `modules`: further modules, such as a `services.wanwatch`
     declaration.
 
-    Returns the system's `config`.
+    Returns the evaluated system, with its `config` and `options`.
   */
-  evalNixosWith =
+  evalSystemWith =
     {
       wanwatchModules ? nixosModules,
       telegraf ? false,
     }:
     modules:
-    (nixpkgs.lib.nixosSystem {
+    nixpkgs.lib.nixosSystem {
       modules = [
         wanwatchModules.default
         {
@@ -42,13 +42,20 @@ let
       ]
       ++ nixpkgs.lib.optional telegraf wanwatchModules.telegraf
       ++ modules;
-    }).config;
+    };
+
+  # `evalSystemWith`, returning the system's `config`.
+  evalNixosWith = evalArgs: modules: (evalSystemWith evalArgs modules).config;
 in
 {
   inherit evalNixosWith;
 
   # `evalNixosWith` with the source modules and no Telegraf module.
   evalNixos = evalNixosWith { };
+
+  # The option declarations of a system with the source modules, for
+  # suites that test option documentation and types.
+  evalNixosOptions = modules: (evalSystemWith { } modules).options;
 
   /*
     Parse the daemon config that a system renders. Rendering forces
@@ -59,4 +66,19 @@ in
     Returns the parsed `/etc/wanwatch/config.json`.
   */
   renderConfig = config: builtins.fromJSON config.environment.etc."wanwatch/config.json".text;
+
+  /*
+    The flags that link a wanwatchd package's revision into the binary
+    for `wanwatch_build_info`.
+
+    `package`: a wanwatchd package, such as a system's
+    `services.wanwatch.package`.
+
+    Returns the package's `-X main.revision=` ldflags.
+
+      revisionFlags config.services.wanwatch.package
+      # => [ "-X main.revision=unknown" ]
+  */
+  revisionFlags =
+    package: builtins.filter (nixpkgs.lib.hasPrefix "-X main.revision=") package.ldflags;
 }

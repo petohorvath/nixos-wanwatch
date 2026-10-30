@@ -92,7 +92,7 @@ func TestWriteSetsSchemaAndUpdatedAt(t *testing.T) {
 // TestWritePreservesCallerUpdatedAt pins the synchronization
 // contract used by the daemon's publishDecision: a non-zero
 // UpdatedAt supplied by the caller must survive Write so the
-// hook env-var WANWATCH_TS and state.json's `updatedAt` can be
+// hook env-var WANWATCH_TIMESTAMP and state.json's `updatedAt` can be
 // stamped with the same wall-clock moment.
 func TestWritePreservesCallerUpdatedAt(t *testing.T) {
 	t.Parallel()
@@ -183,7 +183,8 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
 
-	active := "primary"
+	selection := "primary"
+	rtt, jitter, loss := 0.0124, 0.0012, 0.0
 	s := State{
 		Wans: map[string]Wan{
 			"primary": {
@@ -192,13 +193,13 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 				Operstate: "up",
 				Healthy:   true,
 				Families: map[string]FamilyHealth{
-					"v4": {Healthy: true, RTTSeconds: 0.0124, JitterSeconds: 0.0012, LossRatio: 0.0, Targets: []string{"1.1.1.1"}},
+					"v4": {Healthy: true, RTTSeconds: &rtt, JitterSeconds: &jitter, LossRatio: &loss, Targets: []string{"1.1.1.1"}},
 				},
 			},
 		},
 		Groups: map[string]Group{
 			"home": {
-				Active:         &active,
+				Selection:      &selection,
 				DecisionsTotal: 1,
 				Strategy:       "primary-backup",
 			},
@@ -214,21 +215,21 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if out.Wans["primary"].Families["v4"].RTTSeconds != 0.0124 {
-		t.Errorf("nested RTT did not round-trip: %v", out.Wans["primary"].Families["v4"].RTTSeconds)
+	if got := out.Wans["primary"].Families["v4"].RTTSeconds; got == nil || *got != 0.0124 {
+		t.Errorf("nested RTT did not round-trip: %v", got)
 	}
-	if out.Groups["home"].Active == nil || *out.Groups["home"].Active != "primary" {
-		t.Errorf("Active did not round-trip: %v", out.Groups["home"].Active)
+	if out.Groups["home"].Selection == nil || *out.Groups["home"].Selection != "primary" {
+		t.Errorf("Selection did not round-trip: %v", out.Groups["home"].Selection)
 	}
 }
 
 func TestSchemaVersionConstantStable(t *testing.T) {
 	t.Parallel()
-	// Pre-release we pin SchemaVersion at 1. Changing this is a
-	// load-bearing decision — see the TODO.md schema-evolution item and the constant's
-	// doc-comment for the bump policy.
+	// Changing SchemaVersion breaks every reader that checks
+	// `schema == 1`; the Compatibility policy in
+	// docs/specs/daemon-state.md says when a change bumps it.
 	if SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1 (pre-release pin)", SchemaVersion)
+		t.Errorf("SchemaVersion = %d, want 1 (a bump follows the state.json compatibility policy)", SchemaVersion)
 	}
 }
 
@@ -302,11 +303,12 @@ func TestWriteReturnsRecognizableErrors(t *testing.T) {
 func TestWriteFailsOnUnmarshalableState(t *testing.T) {
 	t.Parallel()
 	w := Writer{Path: filepath.Join(t.TempDir(), "state.json")}
+	nan := math.NaN()
 	err := w.Write(State{
 		Wans: map[string]Wan{
 			"primary": {
 				Families: map[string]FamilyHealth{
-					"v4": {LossRatio: math.NaN()},
+					"v4": {LossRatio: &nan},
 				},
 			},
 		},
@@ -320,10 +322,10 @@ func TestWriteFailsOnUnmarshalableState(t *testing.T) {
 }
 
 // TestWireShapeMatchesGolden pins the on-disk state.json byte-
-// for-byte against testdata/state.golden.json. It guards against
-// accidental field renames before the first tagged release locks
-// schema-1 down: an unintended rename (RTTSeconds → RTTMs, say)
-// turns this test red instead of slipping past code review.
+// for-byte against testdata/state.golden.json. It guards the frozen
+// schema-1 shape against accidental field renames: an unintended
+// rename (RTTSeconds → RTTMs, say) turns this test red instead of
+// slipping past code review.
 //
 // `updatedAt` is normalized because Writer.Write stamps it with
 // time.Now() — comparing the stamp would be flaky.
@@ -331,8 +333,12 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
-	active, gatewayV4 := "primary", "192.0.2.1"
+	selection, gatewayV4, backupGatewayV4 := "primary", "192.0.2.1", "198.51.100.1"
+	rtt, jitter, loss, lost := 0.0124, 0.0012, 0.05, 1.0
+	selectionSince := time.Date(2026, 10, 13, 9, 12, 4, 118204511, time.UTC)
 	s := State{
+		Version:   "0.1.0",
+		StartedAt: time.Date(2026, 10, 13, 9, 11, 58, 402117358, time.UTC),
 		Wans: map[string]Wan{
 			"primary": {
 				Interface: "eth0",
@@ -344,17 +350,39 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 				Families: map[string]FamilyHealth{
 					"v4": {
 						Healthy:       true,
-						RTTSeconds:    0.0124,
-						JitterSeconds: 0.0012,
-						LossRatio:     0.05,
+						RTTSeconds:    &rtt,
+						JitterSeconds: &jitter,
+						LossRatio:     &loss,
 						Targets:       []string{"1.1.1.1"},
+					},
+				},
+			},
+			// Every Sample in backup's v4 Window was lost: no RTT or
+			// jitter to report. Its v6 Window holds no Sample yet, so
+			// it has no loss to report either.
+			"backup": {
+				Interface: "wwan0",
+				Carrier:   "up",
+				Operstate: "up",
+				Healthy:   false,
+				Gateways:  Gateways{V4: &backupGatewayV4},
+				Families: map[string]FamilyHealth{
+					"v4": {
+						Healthy:   false,
+						LossRatio: &lost,
+						Targets:   []string{"9.9.9.9"},
+					},
+					"v6": {
+						Healthy: false,
+						Targets: []string{"2620:fe::fe"},
 					},
 				},
 			},
 		},
 		Groups: map[string]Group{
 			"home": {
-				Active:         &active,
+				Selection:      &selection,
+				SelectionSince: &selectionSince,
 				DecisionsTotal: 3,
 				Strategy:       "primary-backup",
 			},

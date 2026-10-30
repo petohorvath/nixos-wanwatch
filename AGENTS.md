@@ -4,7 +4,7 @@ Contributor instructions for people and automated agents working in this reposit
 
 ## Project
 
-`nixos-wanwatch` provides multi-WAN monitoring and single-active failover for NixOS. It has no release yet; `main` implements the v1 design. [`CHANGELOG.md`](./CHANGELOG.md) records unreleased changes, including public-API breaks, and [`TODO.md`](./TODO.md) is the deferred-work backlog.
+`nixos-wanwatch` provides multi-WAN monitoring and single-active failover for NixOS; `main` implements the v1 design. [`CHANGELOG.md`](./CHANGELOG.md) records each release and, under Unreleased, the changes on `main` since the last one, with a migration note for every public-API break. [ADR-0018](./docs/adr/0018-0x-stability-promise.md) defines what a 0.x release may break, and [`TODO.md`](./TODO.md) is the deferred-work backlog.
 
 It has three layers, with dependencies pointing bottom-up only:
 
@@ -167,3 +167,23 @@ Single-context: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`
 Keep each commit to one logical change, with its tests and documentation. Use an imperative subject of at most 72 characters in the form `scope: Summary`; scopes are `lib`, `internal`, `types`, `modules`, `daemon`, `tests`, `docs`, `ci`, `deps`, and `flake`. Explain why in the body when the diff does not show it.
 
 Before handoff, inspect the final diff, list exactly which checks ran, distinguish focused checks from the full flake and VM matrix, and report every failure or skipped gate.
+
+## Releasing
+
+A release is a pull request that prepares the version, then a tag and a GitHub release on its merge commit. Under [ADR-0018](./docs/adr/0018-0x-stability-promise.md), a 0.x release that breaks the `services.wanwatch` options or `lib` bumps the minor version.
+
+1. Bump the version in both places: `version` in `lib/default.nix`, which the flake passes to the package, and the fallback `version` default in `packages/wanwatchd/package.nix`. Update the expected version in `tests/unit/lib.nix`.
+2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a new empty `## [Unreleased]` above it, and update the link definitions at the end of the file. The date is the day of the tag; correct it before the merge if the release slips.
+3. Pin the README install snippet's `url` to `github:petohorvath/nixos-wanwatch/vX.Y.Z`.
+4. After the pull request merges, tag its merge commit and push the tag:
+
+   ```sh
+   git tag -a vX.Y.Z -m vX.Y.Z <merge-commit>
+   git push origin vX.Y.Z
+   ```
+
+5. Publish the GitHub release, with the version's `CHANGELOG.md` section as its notes:
+
+   ```sh
+   gh release create vX.Y.Z --title vX.Y.Z --notes-file <notes-file>
+   ```

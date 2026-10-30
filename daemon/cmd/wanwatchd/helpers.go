@@ -59,10 +59,10 @@ func filterGlobalUnicast(addrs []net.Addr) []net.IP {
 	return out
 }
 
-// ifaceFor resolves an Active to its WAN's interface name via the
+// interfaceFor resolves an Active to its WAN's interface name via the
 // configured WANs. Returns "" when Active is absent or the WAN isn't
 // known — hook env vars treat empty string as "no value".
-func ifaceFor(wans map[string]config.Wan, a selector.Active) string {
+func interfaceFor(wans map[string]config.Wan, a selector.Active) string {
 	if !a.Has {
 		return ""
 	}

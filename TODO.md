@@ -108,13 +108,6 @@ states. Add a Unix-socket event stream consumers can subscribe to
 for push notifications. Keep `state.json` as the snapshot of
 record.
 
-### state.json schema-evolution discipline
-
-Write `docs/specs/state-evolution.md` codifying the version-bump
-rules (now applied informally — see `daemon-state.md`'s revised
-"Compatibility policy" section). Will need refining once schema 3
-lands. the TODO.md schema-evolution item.
-
 ### Gauge for a due Group-table repair
 
 A failed route refresh leaves a Group due for a Repair
@@ -164,7 +157,7 @@ See [ADR-0002](./docs/adr/0002-one-selection-per-group.md).
 
 Multi-active routing across healthy members. Requires
 `apply.WriteDefault` to emit MultiPath nexthops and the metrics
-catalog to allow multiple `1`s for `wanwatch_group_active{group,wan}`.
+catalog to allow multiple `1`s for `wanwatch_group_selected{group,wan}`.
 Member gains the `weight` it needs then; v1 has none.
 `docs/selector.md`, `docs/specs/failover.md` (single-active invariant),
 `daemon/internal/selector/primarybackup.go:10`.
@@ -183,9 +176,11 @@ the churn:
   unknown. Today this collapses into the cold-start "healthy".
 
 Would change `state.FamilyHealth.Healthy bool` → an enum, the
-state.json schema (bump on release), `wanwatch_wan_*_healthy`
-metric gauges (label-encode the enum instead), and selector
-inputs.
+`wanwatch_wan_*_healthy` metric gauges (label-encode the enum
+instead), and selector inputs. The State and metric changes are
+incompatible, so they need an ADR superseding
+[ADR-0018](./docs/adr/0018-0x-stability-promise.md) and a state.json
+schema bump.
 
 ### MTU / link-speed-aware selection
 

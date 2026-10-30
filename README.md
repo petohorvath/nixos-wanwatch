@@ -1,7 +1,5 @@
 # nixos-wanwatch
 
-`nixos-wanwatch` has no release yet: its options and contracts may still change, and [`CHANGELOG.md`](./CHANGELOG.md) records each change under Unreleased.
-
 `nixos-wanwatch` monitors a host's WANs and fails traffic over to a healthy one. It provides a NixOS module, `services.wanwatch`, and a daemon, `wanwatchd`, that probes each WAN with ICMP, derives its Health, and rewrites policy-routing tables when the preferred WAN fails or recovers. It serves NixOS routers and gateways with a backup connection, such as an LTE modem behind a fixed-line link.
 
 ## Overview
@@ -42,8 +40,13 @@ Add the flake as an input and import its module into the host's configuration:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     wanwatch = {
-      url = "github:petohorvath/nixos-wanwatch";
-      inputs.nixpkgs.follows = "nixpkgs";
+      url = "github:petohorvath/nixos-wanwatch/v0.1.0";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        treefmt-nix.follows = "";
+        nix-unit.follows = "";
+        nixos-nftzones.follows = "";
+      };
     };
   };
 
@@ -60,6 +63,10 @@ Add the flake as an input and import its module into the host's configuration:
     };
 }
 ```
+
+The `url` pins the `v0.1.0` release. To upgrade, change the tag after reading the release's entry in [`CHANGELOG.md`](./CHANGELOG.md).
+
+The `treefmt-nix`, `nix-unit`, and `nixos-nftzones` inputs serve only the flake's own checks. Setting their `follows` to `""` drops them, so they stay out of the host's `flake.lock`.
 
 ## Usage
 
@@ -107,8 +114,8 @@ jq '.groups' /run/wanwatch/state.json
 ```json
 {
   "home-uplink": {
-    "active": "primary",
-    "activeSince": "2026-10-13T09:12:04.118204511Z",
+    "selection": "primary",
+    "selectionSince": "2026-10-13T09:12:04.118204511Z",
     "decisionsTotal": 1,
     "strategy": "primary-backup"
   }
@@ -147,7 +154,7 @@ Most routers also apply source NAT on the Group's WAN interfaces; because it mat
 
 ## Hooks
 
-After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up,down,switch}.d/` in lexicographic order, passing the Group, the old and new WAN, their interfaces and Gateways, and a timestamp in `WANWATCH_*` environment variables:
+After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up,down,switch}.d/` in lexicographic order, passing the Group, the old and new WAN, their interfaces, Gateways, and Families, and a timestamp in `WANWATCH_*` environment variables:
 
 ```nix
 { pkgs, ... }:
@@ -155,14 +162,14 @@ After each Decision, the daemon runs the executables in `/etc/wanwatch/hooks/{up
   environment.etc."wanwatch/hooks/switch.d/log".source =
     pkgs.writeShellScript "wanwatch-log" ''
       ${pkgs.util-linux}/bin/logger -t wanwatch \
-        "$WANWATCH_GROUP: $WANWATCH_WAN_OLD -> $WANWATCH_WAN_NEW"
+        "$WANWATCH_GROUP: $WANWATCH_WAN_OLD -> $WANWATCH_WAN_NEW on $WANWATCH_INTERFACE_NEW"
     '';
 }
 ```
 
 Hooks are notifications: a failing or timed-out Hook is logged and counted but never undoes a Decision. `services.wanwatch.global.hookTimeoutMs` sets the deadline. [`docs/specs/daemon-state.md`](./docs/specs/daemon-state.md) lists every variable and the execution rules.
 
-Hooks run as the `wanwatch` user inside the daemon's systemd sandbox, which allows writes only under `/run/wanwatch` and a private `/tmp`. To let Hooks reach another service, such as a socket owned by its group, add that group to `users.users.wanwatch.extraGroups`.
+Hooks run as the `wanwatch` user inside the daemon's systemd sandbox, which allows writes only under `/run/wanwatch` and a private `/tmp`. They keep the daemon's `CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities, so a Hook can change routes, rules, and nft sets; treat every installed Hook as privileged. Hooks inherit only an allowlisted part of the daemon's environment, which the spec lists. To let Hooks reach another service, such as a socket owned by its group, add that group to `users.users.wanwatch.extraGroups`.
 
 ## Metrics
 
@@ -218,6 +225,14 @@ The daemon runs as the `wanwatch` user and group, which the module creates. Its 
 - The conntrack flush on a switch blocks the daemon's other work while it runs. On Linux 6.12 and later the kernel deletes the vacated WAN's IPv4 entries in one request, which took about 0.2 s for a full table on a fast x86 server. On older kernels, and for IPv6 on every kernel, the daemon reads the table and deletes each matching entry, which can take seconds on a large table.
 - On a switch, the daemon flushes conntrack entries by the vacated WAN's addresses. When several Groups share that WAN, the flush also resets the flows of the Groups that still route through it; those flows reconnect through the same WAN.
 - On hosts that run systemd-networkd, the module defaults `ManageForeignRoutingPolicyRules` and `ManageForeignRoutes` to `false`, so networkd stops removing routes and rules it did not create.
+
+## Stability
+
+From v0.1.0, every 0.x release keeps these contracts compatible: `config.json` and `state.json` schema 1, the Hook variables, and the metric catalog. A release may add State fields, Hook variables, and metrics, so readers of `state.json` ignore the fields they do not know.
+
+The `services.wanwatch` options and `lib` may still break in a 0.x minor release, with a migration note in [`CHANGELOG.md`](./CHANGELOG.md). In `lib`, only `lib.types`, `lib.config.paths`, and `lib.version` are stable; every other name is an unstable internal of the module.
+
+[ADR-0018](./docs/adr/0018-0x-stability-promise.md) records the promise and its reasoning.
 
 ## Contributing
 

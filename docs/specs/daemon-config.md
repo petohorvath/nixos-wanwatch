@@ -2,7 +2,7 @@
 
 The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd` reads it at startup. `wanwatch.config.toJSON` in `lib/internal/config.nix` produces it; `daemon/internal/config/config.go` parses it and re-validates its structure.
 
-**Schema version**: `1`. The daemon refuses to start when `schema` does not match its `SupportedSchema`. Pre-release, the version is pinned: the renderer and the daemon ship together, so in-tree shape changes do not bump it. The first tagged release freezes shape 1; after that, any backwards-incompatible field change bumps the number.
+**Schema version**: `1`, frozen from v0.1.0. The daemon refuses to start when `schema` does not match its `SupportedSchema`; see [Compatibility policy](#compatibility-policy).
 
 ## Top-level shape
 
@@ -15,12 +15,16 @@ The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd
 }
 ```
 
-| Field    | Type   | Required | Notes                                                                                                                                                                                                                                                                                                                                  |
-| -------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema` | int    | yes      | Always `1` in this spec.                                                                                                                                                                                                                                                                                                               |
-| `global` | object | yes      | Process-wide settings. `config.render` validates `logLevel` and `hookTimeoutMs` with `wanwatch.global.make`, which fills unset fields from `wanwatch.global.defaults`, and adds the paths from `wanwatch.config.paths`, so the rendered file always has every key; the daemon applies no defaults and rejects missing or empty values. |
-| `wans`   | object | yes      | Map from WAN name to WAN object. May be empty.                                                                                                                                                                                                                                                                                         |
-| `groups` | object | yes      | Map from Group name to Group object. May be empty.                                                                                                                                                                                                                                                                                     |
+| Field    | Type   | Required | Notes                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `schema` | int    | yes      | Always `1` in this spec.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `global` | object | yes      | Process-wide settings. `config.render` validates `logLevel` and `hookTimeoutMs` with `wanwatch.global.make`, which fills unset fields from `wanwatch.global.defaults`, and adds the paths from `wanwatch.config.paths`, so the rendered file always has every key; the daemon applies no defaults and rejects missing or empty paths and `hookTimeoutMs`, but reads a missing or empty `logLevel` as `info`. |
+| `wans`   | object | yes      | Map from WAN name to WAN object. May be empty.                                                                                                                                                                                                                                                                                                                                                               |
+| `groups` | object | yes      | Map from Group name to Group object. May be empty.                                                                                                                                                                                                                                                                                                                                                           |
+
+## Units
+
+Config gives durations in integer milliseconds (`intervalMs`, `timeoutMs`, `rttMsUp`, `rttMsDown`, `hookTimeoutMs`) and loss in integer percentages (`lossPctUp`, `lossPctDown`), the units an operator writes in the Nix options. [`state.json`](./daemon-state.md) and the [metrics](../metrics.md) report seconds and ratios in `[0, 1]` instead (`rttSeconds`, `lossRatio`, `wanwatch_probe_rtt_seconds`), the base units that Prometheus conventions call for. The split is deliberate: each side uses its readers' units, every field name carries its unit, and the daemon converts between them.
 
 ## `global`
 
@@ -34,13 +38,13 @@ The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd
 }
 ```
 
-| Field           | Type   | Default                      | Meaning                                                     |
-| --------------- | ------ | ---------------------------- | ----------------------------------------------------------- |
-| `statePath`     | string | `/run/wanwatch/state.json`   | Path of the atomically written State snapshot.              |
-| `hooksDir`      | string | `/etc/wanwatch/hooks`        | Root of the Hook tree (`<dir>/{up,down,switch}.d/`).        |
-| `metricsSocket` | string | `/run/wanwatch/metrics.sock` | Unix-socket path of the Prometheus endpoint.                |
-| `logLevel`      | string | `info`                       | One of `debug`, `info`, `warn`, `error`.                    |
-| `hookTimeoutMs` | int    | `5000`                       | Per-Hook execution deadline in milliseconds. Must be `> 0`. |
+| Field           | Type   | Default                      | Meaning                                                                             |
+| --------------- | ------ | ---------------------------- | ----------------------------------------------------------------------------------- |
+| `statePath`     | string | `/run/wanwatch/state.json`   | Path of the atomically written State snapshot.                                      |
+| `hooksDir`      | string | `/etc/wanwatch/hooks`        | Root of the Hook tree (`<dir>/{up,down,switch}.d/`).                                |
+| `metricsSocket` | string | `/run/wanwatch/metrics.sock` | Unix-socket path of the Prometheus endpoint.                                        |
+| `logLevel`      | string | `info`                       | One of `debug`, `info`, `warn`, `error`; the daemon reads an empty value as `info`. |
+| `hookTimeoutMs` | int    | `5000`                       | Per-Hook execution deadline in milliseconds. Must be `> 0`.                         |
 
 The paths are not settings: `config.render` always writes `wanwatch.config.paths`, because the service's systemd sandbox makes the file system read-only apart from `/run/wanwatch` and a private `/tmp` ([ADR 0014](../adr/0014-module-owns-identity-and-paths.md)). `wanwatch.global` and the `services.wanwatch.global` options hold only `logLevel` and `hookTimeoutMs`.
 
@@ -152,7 +156,7 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 
 ## Compatibility policy
 
-Pre-release, `schemaVersion` and `SupportedSchema` stay at 1; the renderer and the daemon ship together, so in-tree shape changes do not bump them. The rules below apply from the first tagged release.
+From v0.1.0, schema 1 is frozen ([ADR-0018](../adr/0018-0x-stability-promise.md)); the changes before that release kept schema 1, because no release had shipped it. No field is removed or renamed, none changes its type or meaning, and the daemon never starts to require a new field. A release may add a field that the daemon accepts as absent, because a `config.json` written for the previous release still starts the daemon with the same meaning.
 
 The committed golden `daemon/internal/config/testdata/config.golden.json` pins the shape on both sides. The nix-unit test `unit.internal.config.render.testMatchesGolden` checks that `config.render` produces it from the unit fixtures, and the daemon's config tests parse it and re-encode it to the same document. A change to the rendered shape, breaking or not, regenerates the golden in the same commit:
 
@@ -161,11 +165,10 @@ nix eval --json .#tests.systems.x86_64-linux.unit.internal.config.render.testMat
   | jq . > daemon/internal/config/testdata/config.golden.json
 ```
 
-The schema version is bumped only when an existing field changes meaning or a required field is added without a default. An optional field with a backwards-compatible default needs no bump.
+The renderer and the daemon ship together, and the daemon rejects unknown fields. Any change to the rendered shape, even an added optional field, therefore needs a daemon of the same release: an older daemon refuses the new file. A `services.wanwatch.package` override must come from the same release as the module.
 
-A breaking change requires:
+An incompatible change needs a new ADR that supersedes ADR-0018, and then:
 
 1. Increment `schemaVersion` in `lib/internal/config.nix` and `SupportedSchema` in `daemon/internal/config/config.go`.
 2. Update this spec.
 3. Add a `CHANGELOG.md` entry with the migration note under the next release.
-4. Ship in a major version bump (`0.2.0` → `0.3.0`, and so on).

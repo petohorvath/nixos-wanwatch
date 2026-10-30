@@ -2,7 +2,7 @@
 
 The daemon publishes this JSON snapshot to the config's `global.statePath`, which the NixOS module fixes at `/run/wanwatch/state.json`. Writes are atomic (tmpfile + `rename`), so readers always see a complete file. `daemon/internal/state/state.go` produces it, and the on-disk shape matches the `State` value types exactly.
 
-**Schema version**: `1`. Pre-release, the version is pinned: with no external consumers, in-tree refactors do not bump it. The first tagged release freezes shape 1; after that, any backwards-incompatible field change bumps the number.
+**Schema version**: `1`, frozen from v0.1.0. Readers ignore fields they do not know; see [Compatibility policy](#compatibility-policy).
 
 ## When `state.json` is rewritten
 
@@ -10,7 +10,7 @@ The daemon republishes on every observable state transition, not only on Selecti
 
 - **Bootstrap**: once at startup, before any event is processed, so early consumers see the configured WANs and Groups before the first Sample.
 - **Priming**: once more after the daemon folds in the startup route and link dumps, when they report a Gateway, carrier, or operstate, and still before any event is processed. A startup Decision publishes on its own as well. Both writes, when they happen, land before the daemon reports `READY=1` to systemd.
-- **Decision commit**: when a Group's `active` Member changes and every route write has succeeded, except for Families skipped because no Gateway is known yet. Hooks fire immediately after.
+- **Decision commit**: when a Group's Selection changes and every route write has succeeded, except for Families skipped because no Gateway is known yet. Hooks fire immediately after.
 - **Per-Family Health transition**: when a (WAN, Family) flips its `healthy` verdict. Without this trigger, a flip that leaves the WAN aggregate unchanged (for example, v4 drops while v6 holds under `familyHealthPolicy = "any"`) would never reach `state.json`.
 - **Carrier or operstate change**: any rtnetlink LinkEvent that changes `wans.<name>.carrier` or `wans.<name>.operstate`.
 - **Gateway change**: a current default-route observation on a watched interface that changes `wans.<name>.gateways.{v4,v6}`. Route notifications trigger fresh kernel reads, so a superseded notification never overwrites a newer Gateway or clears a replacement.
@@ -22,20 +22,24 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 ```json
 {
   "schema": 1,
+  "version": "0.1.0",
+  "startedAt": "2026-05-12T14:29:55.012345678Z",
   "updatedAt": "2026-05-12T14:30:01.234567890Z",
   "wans":   { "<name>": { ... }, ... },
   "groups": { "<name>": { ... }, ... }
 }
 ```
 
-| Field       | Type                        | Meaning                                                                                                                                                           |
-| ----------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`    | int                         | The daemon's `SchemaVersion`.                                                                                                                                     |
-| `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon fills it with the current time unless the caller supplies one; a Decision supplies the same timestamp it passes to Hooks as `WANWATCH_TS`. |
-| `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                               |
-| `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                           |
+| Field       | Type                        | Meaning                                                                                                                                                                  |
+| ----------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `schema`    | int                         | The daemon's `SchemaVersion`.                                                                                                                                            |
+| `version`   | string                      | Version of the daemon build that published this State, as linked into `wanwatchd`.                                                                                       |
+| `startedAt` | string (RFC 3339 nanos UTC) | When the daemon started. Set once at startup and unchanged by later writes; `groups.<name>.decisionsTotal` counts from this moment.                                      |
+| `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon fills it with the current time unless the caller supplies one; a Decision supplies the same timestamp it passes to Hooks as `WANWATCH_TIMESTAMP`. |
+| `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                                      |
+| `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                                  |
 
-An absent value is always `null`, never `""`: a Gateway not yet known, no active Member, or no `activeSince`. Hook env vars are strings, so they encode the same absences as `""`.
+An absent value is always `null`, never `""`: a Gateway not yet known, no Selection, no `selectionSince`, or a probe statistic without data. Hook env vars are strings, so they encode the same absences as `""`.
 
 ## `wans.<name>`
 
@@ -63,6 +67,8 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
 | `gateways.v6` | string \| null | Same for v6.                                                                                                                      |
 | `families`    | object         | One entry per Family present in `probe.targets`.                                                                                  |
 
+A kernel operstate outside the `operstate` set reports as `unknown`, as in `wanwatch_wan_operstate`.
+
 ## `wans.<name>.families.<v4|v6>`
 
 ```json
@@ -75,31 +81,33 @@ An absent value is always `null`, never `""`: a Gateway not yet known, no active
 }
 ```
 
-| Field           | Type          | Meaning                                                                                                                                                        |
-| --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `healthy`       | bool          | Verdict after thresholds and Hysteresis. `false` until the first ProbeResult cooks the Family; see [Cold-start invariant](./failover.md#cold-start-invariant). |
-| `rttSeconds`    | float         | Mean RTT across the Family's Targets, in seconds.                                                                                                              |
-| `jitterSeconds` | float         | Mean jitter (stddev) across the Family's Targets, in seconds.                                                                                                  |
-| `lossRatio`     | float         | Mean loss in `[0, 1]`.                                                                                                                                         |
-| `targets`       | array<string> | The Family's Targets, echoed from config.                                                                                                                      |
+| Field           | Type          | Meaning                                                                                                                                                                                            |
+| --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `healthy`       | bool          | Verdict after thresholds and Hysteresis. `false` until the first ProbeResult cooks the Family; see [Cold-start invariant](./failover.md#cold-start-invariant).                                     |
+| `rttSeconds`    | float \| null | Mean RTT over the Window, in seconds, averaged across the Family's Targets that have a successful Sample. `null` when no Sample in the Window succeeded.                                           |
+| `jitterSeconds` | float \| null | Jitter, the population standard deviation of RTT over the Window, in seconds, averaged across the same Targets. `0` for a single successful Sample; `null` when no Sample in the Window succeeded. |
+| `lossRatio`     | float \| null | Lost fraction of the Window in `[0, 1]`, averaged across the Family's Targets that have a Sample. `null` only when the Window holds no Sample, as before the first probe cycle.                    |
+| `targets`       | array<string> | The Family's Targets, echoed from config.                                                                                                                                                          |
+
+A WAN whose Samples are all lost reports `rttSeconds` and `jitterSeconds` as `null` and `lossRatio` as `1`, never a perfect RTT of `0`. The Prometheus probe gauges report the same values, with NaN for `null` ([metrics catalog](../metrics.md#probe)).
 
 ## `groups.<name>`
 
 ```json
 {
-  "active": "primary",
-  "activeSince": "2026-05-12T14:30:01.234567890Z",
+  "selection": "primary",
+  "selectionSince": "2026-05-12T14:30:01.234567890Z",
   "decisionsTotal": 3,
   "strategy": "primary-backup"
 }
 ```
 
-| Field            | Type                                | Meaning                                                                                        |
-| ---------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `active`         | string \| null                      | Current Selection. `null` when no Member is healthy.                                           |
-| `activeSince`    | string (RFC 3339 nanos UTC) \| null | When `active` took its current value, including `null` after a `down`. `null` if never active. |
-| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start.                                           |
-| `strategy`       | string                              | Echo of `groups.<name>.strategy`.                                                              |
+| Field            | Type                                | Meaning                                                                                                                                                           |
+| ---------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `selection`      | string \| null                      | The Group's Selection. `null` when no Member is healthy.                                                                                                          |
+| `selectionSince` | string (RFC 3339 nanos UTC) \| null | When the Selection last changed, including to `null` on a `down`. Reapplying the current Selection leaves it unchanged. `null` before the Group's first Decision. |
+| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start (`startedAt`).                                                                                                |
+| `strategy`       | string                              | Echo of `groups.<name>.strategy`.                                                                                                                                 |
 
 ## Hook env-var contract
 
@@ -109,15 +117,15 @@ Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `WANWATCH_EVENT`                   | `up`, `down`, or `switch`.                                                                                                |
 | `WANWATCH_GROUP`                   | Group name.                                                                                                               |
-| `WANWATCH_WAN_OLD`                 | Previously active WAN; empty if none.                                                                                     |
-| `WANWATCH_WAN_NEW`                 | Newly active WAN; empty if none.                                                                                          |
-| `WANWATCH_IFACE_OLD` / `_NEW`      | Linux interface names; empty when the corresponding WAN is unset.                                                         |
+| `WANWATCH_WAN_OLD`                 | Previous Selection; empty if none.                                                                                        |
+| `WANWATCH_WAN_NEW`                 | New Selection; empty if none.                                                                                             |
+| `WANWATCH_INTERFACE_OLD` / `_NEW`  | Linux interface names; empty when the corresponding WAN is unset.                                                         |
 | `WANWATCH_GATEWAY_V4_OLD` / `_NEW` | Discovered v4 Gateway on the WAN's interface; empty when the kernel has no v4 default there or the WAN is `pointToPoint`. |
 | `WANWATCH_GATEWAY_V6_OLD` / `_NEW` | Same for v6.                                                                                                              |
-| `WANWATCH_FAMILIES`                | Comma-joined probed Families of the new WAN; `""` when the new WAN is null.                                               |
+| `WANWATCH_FAMILIES_OLD` / `_NEW`   | Comma-joined probed Families of the WAN, `v4` before `v6`; empty when the corresponding WAN is unset.                     |
 | `WANWATCH_TABLE`                   | Routing-table ID (int as string).                                                                                         |
 | `WANWATCH_MARK`                    | fwmark (int as string).                                                                                                   |
-| `WANWATCH_TS`                      | Emit time, RFC 3339 nanos UTC.                                                                                            |
+| `WANWATCH_TIMESTAMP`               | Emit time, RFC 3339 nanos UTC.                                                                                            |
 
 ### Event matrix
 
@@ -128,14 +136,26 @@ Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these
 | `"primary"` | `"backup"`  | `switch`     |
 | identical   | identical   | _(no event)_ |
 
+### Security boundary
+
+A Hook runs with the daemon's identity and privileges. Installing a Hook grants it what the daemon holds:
+
+- **Capabilities.** Hooks keep the daemon's ambient `CAP_NET_ADMIN` and `CAP_NET_RAW`, so a Hook can update nft sets, routes, or rules on a Decision. Treat write access to the Hook directory as network-administration access.
+- **Environment.** A Hook receives the `WANWATCH_*` variables above plus only these variables from the daemon's environment, when set: `PATH`, `LANG`, every `LC_*`, `TZ`, `HOME`, `USER`, `LOGNAME`, `JOURNAL_STREAM`, and `INVOCATION_ID`. The daemon captures a Hook's output and logs it when the Hook fails; `JOURNAL_STREAM` and `INVOCATION_ID` tell a Hook that logs on its own which journal stream and service invocation it runs under. Nothing else is inherited, so systemd's `NOTIFY_SOCKET`, `WATCHDOG_*`, `LISTEN_*`, and `CREDENTIALS_DIRECTORY` never reach a Hook.
+
 ### Hook execution
 
 - The daemon submits captured Decision data after Apply. A worker runs accepted notifications in Decision order, keeping their captured timestamps. The queue holds 32 waiting events; when full, it drops the newest event and logs a warning.
 - Files run in lexicographic order (`a-first.sh`, `b-second.sh`, …), following the `run-parts` convention.
 - At most eight executable files run per event; the rest are skipped and logged.
 - Each invocation is a fresh process with the `global.hookTimeoutMs` deadline (5 seconds by default, `state.DefaultHookTimeout`).
-- Non-zero exits and timeouts are logged and counted in `wanwatch_hook_invocations_total{event,result}`, but never abort Apply. Hooks are notifications, not gates.
-- Daemon shutdown cancels in-flight scripts, kills their process groups, discards queued events, and waits for the worker to finish.
+- Each Hook run counts once in `wanwatch_hook_invocations_total{group,event,result}`, with `result`:
+  - `ok`: the Hook exited 0.
+  - `nonzero`: the Hook ran and exited non-zero, or a signal killed it.
+  - `timeout`: the Hook ran past its deadline and was killed.
+  - `error`: the Hook could not be run, because the event directory exists but could not be read, or exec failed. An unreadable event directory counts one `error` for the event.
+- Every result except `ok` is logged with the Group, event, and Hook path. No result aborts Apply. Hooks are notifications, not gates.
+- Daemon shutdown cancels in-flight scripts, kills their process groups, discards queued events, and waits for the worker to finish. A Hook killed or left unstarted by shutdown is neither counted nor logged as a failure.
 
 ### Example Hook
 
@@ -143,11 +163,15 @@ Every Decision runs the Hooks under `<hooksDir>/{up,down,switch}.d/*` with these
 #!/bin/sh
 # /etc/wanwatch/hooks/switch.d/notify.sh
 logger -t wanwatch \
-    "$WANWATCH_GROUP: $WANWATCH_WAN_OLD → $WANWATCH_WAN_NEW (families=$WANWATCH_FAMILIES)"
+    "$WANWATCH_GROUP: $WANWATCH_WAN_OLD → $WANWATCH_WAN_NEW on $WANWATCH_INTERFACE_NEW (families=$WANWATCH_FAMILIES_NEW)"
 ```
 
 ## Compatibility policy
 
-Pre-release, `state.SchemaVersion` stays at 1; with no external consumers, in-tree refactors do not bump it.
+From v0.1.0, schema 1 is frozen ([ADR-0018](../adr/0018-0x-stability-promise.md)); the changes before that release kept schema 1, because no release had shipped it.
 
-Post-release, bump `state.SchemaVersion` whenever a field is added, renamed, or changes meaning. This is stricter than `config.json`, whose only reader is the daemon. `state.json` readers are downstream (dashboards, scripts, monitoring agents) and need a schema number to branch on before opting into new fields, so additive bumps are deliberate.
+Readers ignore fields they do not know. A release may add a field to any object in `state.json` and keep `state.SchemaVersion`, so a reader that checks `schema == 1` keeps reading the fields it knows, with the same meaning.
+
+No field is removed or renamed, and none changes its type or meaning; making a field nullable changes its type. An incompatible change needs a new ADR that supersedes ADR-0018. It bumps `state.SchemaVersion`, updates this spec and the golden `daemon/internal/state/testdata/state.golden.json`, and adds a migration note to `CHANGELOG.md`.
+
+The Hook variables follow the same rule: a release may add a `WANWATCH_*` variable, but never removes, renames, or redefines one.

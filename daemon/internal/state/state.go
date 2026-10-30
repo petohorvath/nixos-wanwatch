@@ -19,16 +19,19 @@ import (
 	"time"
 )
 
-// SchemaVersion is the state-file schema version. Pre-release we
-// keep it pinned at 1 — there are no external consumers and bumping
-// for in-tree refactors is bookkeeping noise. The first tagged
-// release freezes shape 1; future incompatible changes bump it.
+// SchemaVersion is the state-file schema version. It is bumped only
+// on an incompatible change: a field removed or renamed, or a field
+// whose type or meaning changes. An added field keeps it, because
+// readers ignore fields they do not know (docs/specs/daemon-state.md,
+// "Compatibility policy").
 const SchemaVersion = 1
 
 // State is the daemon's externalized snapshot, written atomically
 // on every Decision.
 type State struct {
 	Schema    int              `json:"schema"`
+	Version   string           `json:"version"`   // the publishing daemon's linked version
+	StartedAt time.Time        `json:"startedAt"` // daemon start; decisionsTotal counts from here
 	UpdatedAt time.Time        `json:"updatedAt"`
 	Wans      map[string]Wan   `json:"wans"`
 	Groups    map[string]Group `json:"groups"`
@@ -61,19 +64,21 @@ type Gateways struct {
 // surfaced in state.json. The type was renamed from `Family` to
 // avoid colliding with `probe.Family` (the IP-family enum used
 // everywhere else). Numeric units are seconds and a [0, 1] ratio
-// for parity with the Prometheus gauges.
+// for parity with the Prometheus gauges. A nil statistic, JSON null,
+// has no data: RTTSeconds and JitterSeconds until a Sample in the
+// Family's Window succeeds, LossRatio while the Window holds no Sample.
 type FamilyHealth struct {
 	Healthy       bool     `json:"healthy"`
-	RTTSeconds    float64  `json:"rttSeconds"`
-	JitterSeconds float64  `json:"jitterSeconds"`
-	LossRatio     float64  `json:"lossRatio"`
+	RTTSeconds    *float64 `json:"rttSeconds"`
+	JitterSeconds *float64 `json:"jitterSeconds"`
+	LossRatio     *float64 `json:"lossRatio"`
 	Targets       []string `json:"targets"`
 }
 
 // Group is the per-Group state slice.
 type Group struct {
-	Active         *string    `json:"active"`      // nil = no member healthy
-	ActiveSince    *time.Time `json:"activeSince"` // last Selection change, a down included; nil if never active
+	Selection      *string    `json:"selection"`      // nil = no Selection
+	SelectionSince *time.Time `json:"selectionSince"` // last Selection change, a down included; nil before the first Decision
 	DecisionsTotal int        `json:"decisionsTotal"`
 	Strategy       string     `json:"strategy"`
 }

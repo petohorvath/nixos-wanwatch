@@ -133,7 +133,7 @@ Link monitoring opens the live link subscription before listing existing links, 
 
 The health package owns WAN Health: threshold verdicts, Hysteresis, the cold-start gate, the Family policy, carrier and operstate, and the `wan_*` and `probe_*` gauges. It folds a LinkEvent into every WAN on the interface before reporting any of them, and returns a `Change` naming the WANs whose Health flipped and whether State must be republished. The daemon recomputes the Groups of each flipped WAN and republishes State on request.
 
-The decision package owns pending and committed Selections, Decision counts, active-Member gauges, and commit timestamps. The daemon forwards events and publishes returned commits; `Snapshot` supplies each Group's State. Strategies stay pure in `internal/selector`.
+The decision package owns pending and committed Selections, Decision counts, `wanwatch_group_selected` gauges, and commit timestamps. The daemon forwards events and publishes returned commits; `Snapshot` supplies each Group's State. Strategies stay pure in `internal/selector`.
 
 A hard Apply failure leaves the target Selection pending, and State and Hooks stay on the committed Selection. Probe cycles and route observations retry every Family for the pending target, and a newer Selection supersedes it.
 
@@ -175,7 +175,7 @@ Before the event loop handles any event, and before it reports `READY=1` to syst
    A hard failure defers commit until a retry succeeds
        │
        ▼
-7. The Group commits backup and updates active gauges.
+7. The Group commits backup and updates its `wanwatch_group_selected` gauges.
    The daemon flushes the vacated WAN and writes State
        │
        ▼
@@ -189,10 +189,10 @@ A full queue drops the newest event, so slow Hooks cannot stall routing or watch
 
 ## Where to look
 
-| Goal                                 | Read                                                                                                                                                                                                             |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a Strategy                       | `lib/internal/group.nix` (`validStrategies`), `lib/internal/selector.nix`, `daemon/internal/selector/`. `tests/unit/internal/selector.nix:testStrategiesMatchGroupValidStrategies` catches cross-language drift. |
-| Change a metric                      | `daemon/internal/metrics/metrics.go`, `docs/metrics.md`                                                                                                                                                          |
-| Add a Hook env var                   | `daemon/internal/state/hooks.go` (`Env*` constants), `docs/specs/daemon-state.md`                                                                                                                                |
-| Tune Probe defaults                  | `lib/internal/probe.nix` (`defaults`)                                                                                                                                                                            |
-| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`, and `docs/specs/daemon-config.md`; after the first release, also bump `schemaVersion` in both                                                     |
+| Goal                                 | Read                                                                                                                                                                                                                                      |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a Strategy                       | `lib/internal/group.nix` (`validStrategies`), `lib/internal/selector.nix`, `daemon/internal/selector/`. `tests/unit/internal/selector.nix:testStrategiesMatchGroupValidStrategies` catches cross-language drift.                          |
+| Change a metric                      | `daemon/internal/metrics/metrics.go`, `docs/metrics.md`                                                                                                                                                                                   |
+| Add a Hook env var                   | `daemon/internal/state/hooks.go` (`Env*` constants), `docs/specs/daemon-state.md`                                                                                                                                                         |
+| Tune Probe defaults                  | `lib/internal/probe.nix` (`defaults`)                                                                                                                                                                                                     |
+| Change the daemon-config wire format | `lib/internal/config.nix`, `daemon/internal/config/config.go`, and `docs/specs/daemon-config.md`; on an incompatible change, also bump the schema version in both ([compatibility policy](./specs/daemon-config.md#compatibility-policy)) |

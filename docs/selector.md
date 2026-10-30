@@ -87,7 +87,7 @@ Two stages turn raw Samples into the boolean Health the selector consumes.
 | healthy        | `loss ≥ lossPctDown` or `rtt ≥ rttMsDown` | —                                      |
 | unhealthy      | —                                         | `loss ≤ lossPctUp` and `rtt ≤ rttMsUp` |
 
-Between the bands, Health holds. The Nix option type enforces `Up < Down` for both metrics.
+Between the bands, Health holds. The Nix option type enforces `Up < Down` for both metrics. A Window in which no Sample succeeded has no RTT, so the RTT bounds pass and its loss decides.
 
 ### Stage 2: consecutive-cycle filter
 

@@ -30,12 +30,15 @@ let
   };
 
   # Applies the static arguments as the flake's `importApply` does.
-  importModule =
-    modulePath: lib.setDefaultModuleLocation modulePath (import modulePath { inherit wanwatch; });
-  nixosModules = {
-    default = importModule ../nixos/module.nix;
-    telegraf = importModule ../nixos/telegraf.nix;
+  importModule = modulePath: args: lib.setDefaultModuleLocation modulePath (import modulePath args);
+
+  # The wanwatch NixOS modules from source, given the revision that the
+  # flake passes the default module for its default package.
+  importNixosModules = revision: {
+    default = importModule ../nixos/module.nix { inherit wanwatch revision; };
+    telegraf = importModule ../nixos/telegraf.nix { inherit wanwatch; };
   };
+  nixosModules = importNixosModules "unknown";
 in
 {
   inherit lib self wanwatch;
@@ -50,5 +53,8 @@ in
   };
   helpers =
     import ./helpers/value-types.nix { inherit lib; }
-    // import ./helpers/nixos.nix { inherit nixosModules nixpkgs system; };
+    // import ./helpers/nixos.nix { inherit nixosModules nixpkgs system; }
+    // {
+      inherit importNixosModules;
+    };
 }

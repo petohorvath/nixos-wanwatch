@@ -74,6 +74,13 @@
       self,
       ...
     }:
+    let
+      # The revision linked into wanwatchd for `wanwatch_build_info`,
+      # for both the `packages` output and the module's default
+      # package. A dirty tree has only a dirty short revision, and a
+      # source without Git metadata has none.
+      revision = self.shortRev or self.dirtyShortRev or "unknown";
+    in
     flake-parts.lib.mkFlake { inherit inputs; } {
       # The daemon and the NixOS module are Linux-only.
       systems = [
@@ -98,7 +105,7 @@
         { pkgs, ... }:
         {
           packages = import ./packages {
-            inherit pkgs;
+            inherit pkgs revision;
             # The version comes from `lib/default.nix`, its single source.
             inherit (self.lib) version;
           };
@@ -111,7 +118,10 @@
         };
 
         nixosModules = {
-          default = flake-parts.lib.importApply ./nixos/module.nix { wanwatch = self.lib; };
+          default = flake-parts.lib.importApply ./nixos/module.nix {
+            wanwatch = self.lib;
+            inherit revision;
+          };
           wanwatch = self.nixosModules.default;
           telegraf = flake-parts.lib.importApply ./nixos/telegraf.nix { wanwatch = self.lib; };
         };

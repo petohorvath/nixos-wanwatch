@@ -23,8 +23,11 @@
   The read-only `marks.<group>` and `tables.<group>` options echo each
   Group's fwmark and routing table, so other modules such as nftzones
   can reference them by name (docs/nftzones-integration.md).
+
+  The flake applies `wanwatch`, its library, and `revision`, the
+  revision linked into the default package for `wanwatch_build_info`.
 */
-{ wanwatch }:
+{ wanwatch, revision }:
 
 {
   config,
@@ -38,6 +41,7 @@ let
 
   defaultPackage = pkgs.callPackage ../packages/wanwatchd/package.nix {
     inherit (wanwatch) version;
+    inherit revision;
   };
 
   # The renderer takes value-type values, and `make` also applies the
@@ -60,7 +64,7 @@ in
     package = lib.mkOption {
       type = lib.types.package;
       default = defaultPackage;
-      defaultText = lib.literalExpression "pkgs.callPackage ../packages/wanwatchd/package.nix { }";
+      defaultText = lib.literalMD "`wanwatchd` from this flake's `packages`, built with the system's `pkgs`";
       description = "The wanwatchd derivation to run.";
     };
 
@@ -92,7 +96,7 @@ in
     };
 
     marks = lib.mkOption {
-      type = lib.types.attrsOf lib.types.int;
+      type = lib.types.attrsOf wanwatch.types.fwmark;
       readOnly = true;
       default = lib.mapAttrs (_: group: group.mark) validatedGroups;
       defaultText = lib.literalMD ''
@@ -108,7 +112,7 @@ in
     };
 
     tables = lib.mkOption {
-      type = lib.types.attrsOf lib.types.int;
+      type = lib.types.attrsOf wanwatch.types.routingTableId;
       readOnly = true;
       default = lib.mapAttrs (_: group: group.table) validatedGroups;
       defaultText = lib.literalMD ''

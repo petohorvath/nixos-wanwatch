@@ -11,6 +11,6 @@ Reading the Group table back on every Probe cycle would not depend on route noti
 
 ## Consequences
 
-A Repair is not a Decision. It changes no Selection, publishes no State, runs no Hook, flushes no conntrack, and keeps `activeSince`. A pending Decision holds a due Repair until it commits, and any commit clears it. Only `wanwatch_apply_route_errors_total` and the logs show a due Repair.
+A Repair is not a Decision. It changes no Selection, publishes no State, runs no Hook, flushes no conntrack, and keeps `selectionSince`. A pending Decision holds a due Repair until it commits, and any commit clears it. Only `wanwatch_apply_route_errors_total` and the logs show a due Repair.
 
 A Group-table route flushed with no main-table observation after it stays missing until the next Decision. Without a main-table default route, the WAN has no Gateway to write anyway.

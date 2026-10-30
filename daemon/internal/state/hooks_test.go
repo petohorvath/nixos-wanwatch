@@ -107,8 +107,8 @@ func TestRunHonorsTimeout(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Errorf("Run took %v — timeout did not fire", elapsed)
 	}
-	if !results[0].TimedOut {
-		t.Errorf("TimedOut = false, want true")
+	if results[0].Outcome != hookTimeout {
+		t.Errorf("Outcome = %q, want %q", results[0].Outcome, hookTimeout)
 	}
 	if results[0].ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1 for timeout", results[0].ExitCode)
@@ -120,7 +120,7 @@ func TestRunPassesEnvVars(t *testing.T) {
 	dir := t.TempDir()
 	outFile := filepath.Join(dir, "captured.txt")
 	writeHook(t, filepath.Join(dir, "up.d"), "env.sh",
-		`echo "$WANWATCH_EVENT|$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_GATEWAY_V4_NEW|$WANWATCH_FAMILIES|$WANWATCH_TABLE" > `+outFile)
+		`echo "$WANWATCH_EVENT|$WANWATCH_GROUP|$WANWATCH_WAN_NEW|$WANWATCH_GATEWAY_V4_NEW|$WANWATCH_FAMILIES_OLD|$WANWATCH_FAMILIES_NEW|$WANWATCH_TABLE" > `+outFile)
 
 	r := hookRunner{Dir: dir}
 	r.run(context.Background(), HookContext{
@@ -128,7 +128,7 @@ func TestRunPassesEnvVars(t *testing.T) {
 		Group:        "home",
 		WanNew:       "primary",
 		GatewayV4New: "192.0.2.1",
-		Families:     []string{"v4", "v6"},
+		FamiliesNew:  []string{"v4", "v6"},
 		Table:        100,
 	})
 
@@ -137,7 +137,7 @@ func TestRunPassesEnvVars(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	got := strings.TrimSpace(string(data))
-	want := "up|home|primary|192.0.2.1|v4,v6|100"
+	want := "up|home|primary|192.0.2.1||v4,v6|100"
 	if got != want {
 		t.Errorf("env captured = %q, want %q", got, want)
 	}
@@ -229,7 +229,7 @@ func TestRunTimestampFallback(t *testing.T) {
 	// HookContext.Timestamp zero → buildEnv should use time.Now().
 	dir := t.TempDir()
 	out := filepath.Join(dir, "ts.txt")
-	writeHook(t, filepath.Join(dir, "up.d"), "ts.sh", `echo "$WANWATCH_TS" > `+out)
+	writeHook(t, filepath.Join(dir, "up.d"), "ts.sh", `echo "$WANWATCH_TIMESTAMP" > `+out)
 
 	r := hookRunner{Dir: dir}
 	r.run(context.Background(), HookContext{Event: EventUp})
@@ -237,7 +237,7 @@ func TestRunTimestampFallback(t *testing.T) {
 	data, _ := os.ReadFile(out)
 	got := strings.TrimSpace(string(data))
 	if got == "" {
-		t.Errorf("WANWATCH_TS empty when Timestamp zero — want auto-stamp")
+		t.Errorf("WANWATCH_TIMESTAMP empty when Timestamp zero — want auto-stamp")
 	}
 }
 
@@ -275,7 +275,7 @@ func TestRunBoundsMultipleSlowHooks(t *testing.T) {
 		t.Errorf("len(results) = %d, want 3", len(results))
 	}
 	for _, r := range results {
-		if !r.TimedOut {
+		if r.Outcome != hookTimeout {
 			t.Errorf("hook %q did not time out", r.Path)
 		}
 	}
@@ -322,8 +322,8 @@ func TestRunCapturesNonExitError(t *testing.T) {
 	if results[0].ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1 for non-ExitError failure", results[0].ExitCode)
 	}
-	if results[0].TimedOut {
-		t.Error("TimedOut = true, want false for non-timeout failure")
+	if results[0].Outcome != hookError {
+		t.Errorf("Outcome = %q, want %q for an exec failure", results[0].Outcome, hookError)
 	}
 }
 
@@ -342,8 +342,8 @@ func TestRunTimeoutKillsBackgroundedDescendants(t *testing.T) {
 
 	r := hookRunner{Dir: dir, Timeout: 200 * time.Millisecond}
 	results := r.run(context.Background(), HookContext{Event: EventUp})
-	if !results[0].TimedOut {
-		t.Fatalf("setup: hook did not time out (TimedOut = false)")
+	if results[0].Outcome != hookTimeout {
+		t.Fatalf("setup: hook did not time out (Outcome = %q)", results[0].Outcome)
 	}
 
 	// Well past the backgrounded subshell's 1s sleep: with the process
@@ -534,7 +534,7 @@ func TestCancelHookDirectKillError(t *testing.T) {
 
 // TestRunCapsHookCount: with more executable hooks than MaxHooks,
 // only the first MaxHooks (lexicographic) run; the rest come back
-// marked Skipped so the daemon can log them rather than letting
+// as hookSkipped so the daemon can log them rather than letting
 // them silently starve.
 func TestRunCapsHookCount(t *testing.T) {
 	t.Parallel()
@@ -553,7 +553,7 @@ func TestRunCapsHookCount(t *testing.T) {
 	}
 	var ranCount, skipped int
 	for _, res := range results {
-		if res.Skipped {
+		if res.Outcome == hookSkipped {
 			skipped++
 		} else {
 			ranCount++

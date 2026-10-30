@@ -74,18 +74,21 @@ func TestHookNotifierPreservesDecisionOrderAndData(t *testing.T) {
 	awaitHook(t, started)
 	switchCtx := HookContext{
 		Event: EventSwitch, Group: "home", WanOld: "primary", WanNew: "backup",
-		IfaceOld: "eth0", IfaceNew: "wwan0", GatewayV4Old: "192.0.2.1", GatewayV4New: "198.51.100.1",
-		GatewayV6Old: "2001:db8::1", GatewayV6New: "2001:db8:1::1", Families: []string{"v4", "v6"},
+		InterfaceOld: "eth0", InterfaceNew: "wwan0", GatewayV4Old: "192.0.2.1", GatewayV4New: "198.51.100.1",
+		GatewayV6Old: "2001:db8::1", GatewayV6New: "2001:db8:1::1",
+		FamiliesOld: []string{"v4", "v6"}, FamiliesNew: []string{"v4"},
 		Table: 100, Mark: 200, Timestamp: up.Timestamp.Add(time.Second),
 	}
 	wantSwitch := switchCtx
-	wantSwitch.Families = slices.Clone(switchCtx.Families)
+	wantSwitch.FamiliesOld = slices.Clone(switchCtx.FamiliesOld)
+	wantSwitch.FamiliesNew = slices.Clone(switchCtx.FamiliesNew)
 	if !notifyHook(t, n, switchCtx) {
 		t.Fatal("queued notification rejected")
 	}
 	// Caller-owned data can change while the first script is still running.
 	switchCtx.Group = "mutated"
-	switchCtx.Families[0] = "mutated"
+	switchCtx.FamiliesOld[0] = "mutated"
+	switchCtx.FamiliesNew[0] = "mutated"
 	switchCtx.Timestamp = time.Time{}
 	before := time.Now().UTC()
 	if !notifyHook(t, n, HookContext{Event: EventDown, Group: "home"}) {
@@ -259,7 +262,7 @@ func TestHookNotifierExecutesScriptsAndReportsResults(t *testing.T) {
 	var logs bytes.Buffer
 	n := NewHookNotifier(t.Context(), dir, 200*time.Millisecond, mreg, slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(n.Close)
-	if !n.Notify(HookContext{Event: EventSwitch}) {
+	if !n.Notify(HookContext{Event: EventSwitch, Group: "home"}) {
 		t.Fatal("notification rejected")
 	}
 	n.Close()
@@ -272,7 +275,7 @@ func TestHookNotifierExecutesScriptsAndReportsResults(t *testing.T) {
 	}
 	for result, want := range map[string]float64{"ok": 6, "nonzero": 1, "timeout": 1} {
 		var m dto.Metric
-		if err := mreg.HookInvocations.WithLabelValues("switch", result).Write(&m); err != nil {
+		if err := mreg.HookInvocations.WithLabelValues("home", "switch", result).Write(&m); err != nil {
 			t.Fatal(err)
 		}
 		if got := m.GetCounter().GetValue(); got != want {

@@ -104,8 +104,8 @@ func assertDecisionTimes(tb testing.TB, h *harness, s step, decisions []state.Ho
 			tb.Errorf("step %q made more than one Decision in Group %q; split it so each is checked", s.name, d.Group)
 		}
 		groups[d.Group] = true
-		if since := st.Groups[d.Group].ActiveSince; since == nil || !since.Equal(d.Timestamp) {
-			tb.Errorf("step %q: %s activeSince = %v, want the Hook timestamp %v", s.name, d.Group, since, d.Timestamp)
+		if since := st.Groups[d.Group].SelectionSince; since == nil || !since.Equal(d.Timestamp) {
+			tb.Errorf("step %q: %s selectionSince = %v, want the Hook timestamp %v", s.name, d.Group, since, d.Timestamp)
 		}
 		if st.UpdatedAt.Before(d.Timestamp) {
 			tb.Errorf("step %q: updatedAt = %v precedes the %s Decision at %v", s.name, st.UpdatedAt, d.Group, d.Timestamp)
@@ -259,11 +259,11 @@ func TestDecisionPublication(t *testing.T) {
 				{
 					name: "primary recovers v4 before backup's retry",
 					do: func(h *harness) {
-						since := h.State().Groups["home"].ActiveSince
+						since := h.State().Groups["home"].SelectionSince
 						published := readCounter(h.tb, h.metrics.StatePublications)
 						h.Probe(healthy("primary", probe.FamilyV4))
-						if got := h.State().Groups["home"].ActiveSince; !reflect.DeepEqual(got, since) {
-							h.tb.Errorf("activeSince = %v, want the unchanged %v", got, since)
+						if got := h.State().Groups["home"].SelectionSince; !reflect.DeepEqual(got, since) {
+							h.tb.Errorf("selectionSince = %v, want the unchanged %v", got, since)
 						}
 						// The repair and the Health flip each publish State.
 						if n := readCounter(h.tb, h.metrics.StatePublications) - published; n != 2 {
@@ -413,18 +413,19 @@ func TestDecisionPublication(t *testing.T) {
 				want := []state.HookContext{
 					{
 						Event: state.EventUp, Group: "home",
-						WanNew: "backup", IfaceNew: "wwan0",
+						WanNew: "backup", InterfaceNew: "wwan0",
 						GatewayV4New: "198.51.100.1",
-						Families:     []string{"v4"},
+						FamiliesNew:  []string{"v4"},
 						Table:        100, Mark: 0x100,
 					},
 					{
 						Event: state.EventSwitch, Group: "home",
 						WanOld: "backup", WanNew: "primary",
-						IfaceOld: "wwan0", IfaceNew: "eth0",
+						InterfaceOld: "wwan0", InterfaceNew: "eth0",
 						GatewayV4Old: "198.51.100.1", GatewayV4New: "192.0.2.1",
 						GatewayV6New: "2001:db8::1",
-						Families:     []string{"v4", "v6"},
+						FamiliesOld:  []string{"v4"},
+						FamiliesNew:  []string{"v4", "v6"},
 						Table:        100, Mark: 0x100,
 					},
 				}
@@ -744,8 +745,8 @@ func TestDecisionPublication(t *testing.T) {
 					tb.Errorf("guest State = %+v, want backup after 1 Decision", guest)
 				}
 				for _, g := range []struct{ group, wan string }{{"home", "primary"}, {"guest", "backup"}} {
-					if v := readGauge(tb, h.metrics.GroupActive.WithLabelValues(g.group, g.wan)); v != 1 {
-						tb.Errorf("group_active{%s,%s} = %v, want 1", g.group, g.wan, v)
+					if v := readGauge(tb, h.metrics.GroupSelected.WithLabelValues(g.group, g.wan)); v != 1 {
+						tb.Errorf("group_selected{%s,%s} = %v, want 1", g.group, g.wan, v)
 					}
 				}
 			},

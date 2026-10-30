@@ -2,7 +2,8 @@
   metrics — Telegraf round trip. With the wanwatch and Telegraf
   modules enabled, Telegraf writes its scrapes to a file that must
   contain wanwatch_* series, and the telegraf user must belong to the
-  wanwatch group.
+  wanwatch group. Before the first probe cycle, the probe gauges exist
+  and report NaN, no data.
 */
 { inputs, pkgs }:
 
@@ -89,7 +90,9 @@ pkgs.testers.runNixOSTest {
       };
     };
 
-  testScript = ''
+  testScript = (builtins.readFile ./observation.py) + ''
+    observe = Observation(router, curl="${pkgs.curl}/bin/curl")
+
     router.wait_for_unit("wanwatch.service")
     router.wait_for_unit("telegraf.service")
     router.succeed("ip link set wan0 up")
@@ -116,6 +119,13 @@ pkgs.testers.runNixOSTest {
     assert "wanwatch_wan_carrier" in body, (
         f"telegraf scrape missing wanwatch_wan_carrier:\n{body}"
     )
+
+    # The 10-minute probe interval keeps every Window empty, so the
+    # probe gauges, labelled per (WAN, Family) and per Target, report
+    # NaN: no RTT, jitter, or loss data yet.
+    observe.wait_probe_unmeasured("primary", "v4", targets=["192.0.2.1"])
+    loss = 'wanwatch_probe_loss_ratio{family="v4",wan="primary"} NaN'
+    assert loss in observe.scrape().splitlines(), f"scrape missing {loss}"
 
     # The telegraf user reads the 0660 socket through the group.
     groups = router.succeed("groups telegraf")

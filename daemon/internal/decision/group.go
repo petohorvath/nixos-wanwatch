@@ -58,8 +58,8 @@ type Group struct {
 	applyRoutes    ApplyRoutes
 	metrics        *metrics.Registry
 	logger         *slog.Logger
-	active         selector.Active
-	activeSince    time.Time
+	selection      selector.Active
+	selectionSince time.Time
 	decisionsTotal int
 	pending        *selector.Active
 	// repairDue records a failed refresh of the committed Selection's
@@ -67,10 +67,14 @@ type Group struct {
 	repairDue bool
 }
 
-// New constructs a Group with no Selection and performs no I/O. applyRoutes
-// is the existing kernel Apply adapter, scoped to cfg's routing table.
+// New constructs a Group with no Selection and performs no I/O. It exposes
+// every Member's wanwatch_group_selected at 0, so a Group that never gets a
+// Selection is visible. applyRoutes is the existing kernel Apply adapter,
+// scoped to cfg's routing table.
 func New(cfg selector.Group, applyRoutes ApplyRoutes, mreg *metrics.Registry, logger *slog.Logger) *Group {
-	return &Group{cfg: cfg, applyRoutes: applyRoutes, metrics: mreg, logger: logger}
+	g := &Group{cfg: cfg, applyRoutes: applyRoutes, metrics: mreg, logger: logger}
+	g.publishSelected()
+	return g
 }
 
 // Recompute selects from current Member Health. A changed target replaces
@@ -86,7 +90,7 @@ func (g *Group) Recompute(ctx context.Context, members []selector.MemberHealth, 
 		return nil
 	}
 	g.logger.Info("decision", "group", g.cfg.Name, "reason", reason,
-		"old", g.active.Wan, "new", sel.Active.Wan)
+		"old", g.selection.Wan, "new", sel.Active.Wan)
 	g.pending = &sel.Active
 	g.decisionsTotal++
 	g.metrics.GroupDecisions.WithLabelValues(g.cfg.Name, reason).Inc()
@@ -104,7 +108,7 @@ func (g *Group) Probe(ctx context.Context, wan string) *Commit {
 		}
 		return g.commit(ctx)
 	}
-	if g.repairDue && g.active.Wan == wan {
+	if g.repairDue && g.selection.Wan == wan {
 		g.refresh(ctx)
 	}
 	return nil
@@ -129,19 +133,19 @@ func (g *Group) RouteObserved(ctx context.Context, wan string, family probe.Fami
 	return nil
 }
 
-// Snapshot returns the Group's externalized State. Active and ActiveSince
-// describe the last commit; DecisionsTotal also includes pending and
+// Snapshot returns the Group's externalized State. Selection and
+// SelectionSince describe the last commit; DecisionsTotal also includes pending and
 // superseded targets. Pointer fields are copied so callers cannot mutate
 // the Group through the snapshot.
 func (g *Group) Snapshot() state.Group {
 	snap := state.Group{Strategy: g.cfg.Strategy, DecisionsTotal: g.decisionsTotal}
-	if g.active.Has {
-		wan := g.active.Wan
-		snap.Active = &wan
+	if g.selection.Has {
+		wan := g.selection.Wan
+		snap.Selection = &wan
 	}
-	if !g.activeSince.IsZero() {
-		since := g.activeSince
-		snap.ActiveSince = &since
+	if !g.selectionSince.IsZero() {
+		since := g.selectionSince
+		snap.SelectionSince = &since
 	}
 	return snap
 }
@@ -150,7 +154,7 @@ func (g *Group) intent() selector.Active {
 	if g.pending != nil {
 		return *g.pending
 	}
-	return g.active
+	return g.selection
 }
 
 // refresh rewrites the committed Selection's routes for families, or for
@@ -160,14 +164,14 @@ func (g *Group) refresh(ctx context.Context, families ...probe.Family) {
 	if g.repairDue {
 		families = nil
 	}
-	if err := g.applyRoutes(ctx, g.active.Wan, families...); err != nil {
+	if err := g.applyRoutes(ctx, g.selection.Wan, families...); err != nil {
 		g.logger.Warn("route refresh incomplete; will retry",
-			"group", g.cfg.Name, "wan", g.active.Wan, "err", err)
+			"group", g.cfg.Name, "wan", g.selection.Wan, "err", err)
 		g.repairDue = true
 		return
 	}
 	if g.repairDue {
-		g.logger.Info("routes repaired", "group", g.cfg.Name, "wan", g.active.Wan)
+		g.logger.Info("routes repaired", "group", g.cfg.Name, "wan", g.selection.Wan)
 		g.repairDue = false
 	}
 }
@@ -181,8 +185,8 @@ func (g *Group) commit(ctx context.Context) *Commit {
 			return nil
 		}
 	}
-	committed := &Commit{Old: g.active, New: next, At: time.Now().UTC()}
-	g.active = next
+	committed := &Commit{Old: g.selection, New: next, At: time.Now().UTC()}
+	g.selection = next
 	g.pending = nil
 	// A commit wrote every family of its WAN, or left a down's routes in
 	// place on purpose, so no earlier Repair remains due.
@@ -190,14 +194,20 @@ func (g *Group) commit(ctx context.Context) *Commit {
 	// Every Selection change restamps, a down included. A commit that
 	// keeps its WAN keeps its Selection's start.
 	if committed.Event() != "" {
-		g.activeSince = committed.At
+		g.selectionSince = committed.At
 	}
+	g.publishSelected()
+	return committed
+}
+
+// publishSelected sets wanwatch_group_selected to 1 for the committed
+// Selection and to 0 for every other Member.
+func (g *Group) publishSelected() {
 	for _, m := range g.cfg.Members {
 		v := 0.0
-		if next.Has && next.Wan == m.Wan {
+		if g.selection.Has && g.selection.Wan == m.Wan {
 			v = 1
 		}
-		g.metrics.GroupActive.WithLabelValues(g.cfg.Name, m.Wan).Set(v)
+		g.metrics.GroupSelected.WithLabelValues(g.cfg.Name, m.Wan).Set(v)
 	}
-	return committed
 }

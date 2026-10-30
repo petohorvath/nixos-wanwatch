@@ -18,7 +18,7 @@
 //     decisionReason enum
 //   - gateway.go      — GatewayCache (kernel default-route mirror)
 //   - helpers.go      — small free utilities (interfaceIndex, …)
-//   - buildinfo.go    — version / commit / goVersion (ldflags)
+//   - buildinfo.go    — version / revision / goVersion (ldflags)
 //   - sdnotify.go     — sd_notify READY + watchdog keepalive
 package main
 
@@ -130,7 +130,7 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 	}()
 
 	mreg := metrics.New()
-	mreg.BuildInfo.WithLabelValues(version, goVersion, commit).Set(1)
+	mreg.SetBuildInfo(version, revision, goVersion)
 
 	mserver := &metrics.Server{
 		Socket:  cfg.Global.MetricsSocket,

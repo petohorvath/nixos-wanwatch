@@ -35,6 +35,8 @@ func TestNewWindowRejectsNonPositiveCapacity(t *testing.T) {
 	}
 }
 
+// TestWindowEmpty pins "no data" on an empty Window: no loss, RTT,
+// or jitter to report, rather than a perfect 0.
 func TestWindowEmpty(t *testing.T) {
 	t.Parallel()
 	w := mustNewWindow(t, 5)
@@ -44,21 +46,22 @@ func TestWindowEmpty(t *testing.T) {
 	if got := w.Capacity(); got != 5 {
 		t.Errorf("Capacity() = %d, want 5", got)
 	}
-	if got := w.LossRatio(); got != 0 {
-		t.Errorf("LossRatio() = %f, want 0", got)
+	if got, ok := w.LossRatio(); ok {
+		t.Errorf("LossRatio() = %f, want no data", got)
 	}
-	if got := w.MeanRTT(); got != 0 {
-		t.Errorf("MeanRTT() = %d, want 0", got)
+	if got, ok := w.MeanRTT(); ok {
+		t.Errorf("MeanRTT() = %d, want no data", got)
 	}
-	if got := w.JitterMicros(); got != 0 {
-		t.Errorf("JitterMicros() = %d, want 0", got)
+	if got, ok := w.JitterMicros(); ok {
+		t.Errorf("JitterMicros() = %d, want no data", got)
 	}
 }
 
 // TestWindowScenarios exercises Len / LossRatio / MeanRTT /
-// JitterMicros across a representative mix of inputs — empty,
-// single-sample, all-loss, all-good, mixed, wrap-around, and the
-// capacity=1 degenerate case.
+// JitterMicros across a representative mix of inputs — single-sample,
+// all-loss, all-good, mixed, wrap-around, and the capacity=1
+// degenerate case. A Window without a successful Sample has no RTT or
+// jitter; one successful Sample has a jitter of 0.
 //
 // Jitter is the population standard deviation; expected values are
 // computed in the table as truncated-uint64 of sqrt(variance):
@@ -75,6 +78,9 @@ func TestWindowScenarios(t *testing.T) {
 		wantLoss   float64
 		wantMean   uint64
 		wantJitter uint64
+		// wantNoRTT: no Sample succeeded, so MeanRTT and
+		// JitterMicros report no data.
+		wantNoRTT bool
 	}{
 		{
 			name:     "single good sample",
@@ -84,11 +90,12 @@ func TestWindowScenarios(t *testing.T) {
 			wantMean: 100,
 		},
 		{
-			name:     "single lost sample",
-			capacity: 5,
-			pushes:   []Sample{{Lost: true}},
-			wantLen:  1,
-			wantLoss: 1,
+			name:      "single lost sample",
+			capacity:  5,
+			pushes:    []Sample{{Lost: true}},
+			wantLen:   1,
+			wantLoss:  1,
+			wantNoRTT: true,
 		},
 		{
 			name:     "three goods varied RTT",
@@ -121,8 +128,9 @@ func TestWindowScenarios(t *testing.T) {
 				{Lost: true},
 				{Lost: true},
 			},
-			wantLen:  3,
-			wantLoss: 1,
+			wantLen:   3,
+			wantLoss:  1,
+			wantNoRTT: true,
 		},
 		{
 			name:     "mixed lost and good — two of each",
@@ -150,7 +158,7 @@ func TestWindowScenarios(t *testing.T) {
 			wantLen:  4,
 			wantLoss: 0.75,
 			wantMean: 50,
-			// only 1 non-lost → jitter = 0 (stddev below 2 samples)
+			// One successful Sample: jitter is a measured 0, not no data.
 		},
 		{
 			name:     "wrap-around drops oldest",
@@ -201,14 +209,23 @@ func TestWindowScenarios(t *testing.T) {
 			if got := w.Len(); got != tc.wantLen {
 				t.Errorf("Len() = %d, want %d", got, tc.wantLen)
 			}
-			if got := w.LossRatio(); !floatEq(got, tc.wantLoss) {
-				t.Errorf("LossRatio() = %f, want %f", got, tc.wantLoss)
+			if got, ok := w.LossRatio(); !ok || !floatEq(got, tc.wantLoss) {
+				t.Errorf("LossRatio() = %f, %v, want %f, true", got, ok, tc.wantLoss)
 			}
-			if got := w.MeanRTT(); got != tc.wantMean {
-				t.Errorf("MeanRTT() = %d, want %d", got, tc.wantMean)
+			if tc.wantNoRTT {
+				if got, ok := w.MeanRTT(); ok {
+					t.Errorf("MeanRTT() = %d, want no data", got)
+				}
+				if got, ok := w.JitterMicros(); ok {
+					t.Errorf("JitterMicros() = %d, want no data", got)
+				}
+				return
 			}
-			if got := w.JitterMicros(); got != tc.wantJitter {
-				t.Errorf("JitterMicros() = %d, want %d", got, tc.wantJitter)
+			if got, ok := w.MeanRTT(); !ok || got != tc.wantMean {
+				t.Errorf("MeanRTT() = %d, %v, want %d, true", got, ok, tc.wantMean)
+			}
+			if got, ok := w.JitterMicros(); !ok || got != tc.wantJitter {
+				t.Errorf("JitterMicros() = %d, %v, want %d, true", got, ok, tc.wantJitter)
 			}
 		})
 	}
@@ -225,7 +242,7 @@ func TestPushOrderingPreservedAfterWrap(t *testing.T) {
 	w.Push(Sample{RTTMicros: 3})
 	w.Push(Sample{RTTMicros: 4})
 	// Window now holds {2, 3, 4} in oldest-to-newest order.
-	if got := w.MeanRTT(); got != 3 {
+	if got, _ := w.MeanRTT(); got != 3 {
 		t.Errorf("MeanRTT after wrap = %d, want 3 (oldest sample should have been dropped)", got)
 	}
 }

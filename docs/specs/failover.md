@@ -41,7 +41,7 @@ Results that arrive before the Window fills update metrics and retry pending App
 
 ```text
 t=0      primary healthy, backup healthy
-         active = primary
+         Selection = primary
          table 1000 v4 default = via primary's gw, dev wan0
          table 1000 v6 default = via primary's gw, dev wan0
 
@@ -49,11 +49,11 @@ t=1      carrier drops on wan0
          rtnl emits LinkEvent{Name: wan0, Carrier: down}
          health.Wans.Link flips primary's carrierUp() = false
          Wans.MemberHealth: primary unhealthy, backup healthy
-         selector.Select: active = backup
+         selector.Select: Selection = backup
 
          apply.WriteDefault(family=v4, table=1000, gw=backup.v4, ifindex=wan1)
          apply.WriteDefault(family=v6, table=1000, gw=backup.v6, ifindex=wan1)
-         state.Writer.Write: active=backup, activeSince=t1
+         state.Writer.Write: selection=backup, selectionSince=t1
          state.HookNotifier.Notify queues the switch notification
          wanwatch_group_decisions_total{reason=carrier}++
 
@@ -71,7 +71,7 @@ t=10     carrier returns on wan0
          Wans.MemberHealth: primary healthy again (cold-start path:
                             primary.healthy was true at boot and never
                             went false from probes)
-         selector.Select: active = primary (lower priority among healthy)
+         selector.Select: Selection = primary (lower priority among healthy)
          Decision fires; routes rewritten; hooks run.
 ```
 
@@ -79,9 +79,9 @@ After a Probe-driven failure (rather than a carrier loss), the WAN stays unhealt
 
 ## Single-active invariant
 
-v1 selects exactly one Member per Group, or none. The selector never returns multiple active Members, and Apply never installs multipath routes.
+v1 selects exactly one Member per Group, or none. A Group's Selection is never more than one Member, and Apply never installs multipath routes.
 
-Multi-active arrives with the v2 `load-balance` Strategy. Apply's `RouteReplace` path will then need multipath nexthops, and `wanwatch_group_active{group,wan}` will report several `1`s per Group.
+Multi-active arrives with the v2 `load-balance` Strategy. Apply's `RouteReplace` path will then need multipath nexthops, and `wanwatch_group_selected{group,wan}` will report several `1`s per Group.
 
 ## Determinism
 
@@ -102,7 +102,7 @@ Replaying the same event sequence (config, ProbeResults, LinkEvents) always prod
 | A Hook times out (5 s default)         | Logged and counted; the remaining Hooks in the `.d` directory still run.                                                                                                                                                                                              |
 | ProbeResult arrives during a Decision  | Buffered on its channel; processed after the current Decision completes.                                                                                                                                                                                              |
 | LinkEvent arrives during a Decision    | Same: one goroutine drains every channel, each in order. Events on different channels have no order between them.                                                                                                                                                     |
-| All Members unhealthy                  | A transition to `active = null` commits without route writes and emits a `down` Hook if a Member was active. Routes stay in place; repeated all-down observations emit no Decision.                                                                                   |
+| All Members unhealthy                  | A transition to `selection = null` commits without route writes and emits a `down` Hook if the Group had a Selection. Routes stay in place; repeated all-down observations emit no Decision.                                                                          |
 
 Keeping stale routes when every Member is unhealthy is intentional: removing the last default route would leave no egress at all. Operators who want a different policy can add a `down` Hook that runs `ip route flush table <T>`.
 

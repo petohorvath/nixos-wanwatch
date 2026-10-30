@@ -90,7 +90,7 @@ pkgs.testers.runNixOSTest {
 
     # 1. Cold start: primary is Selected on carrier alone, before
     #    any probe has cooked (docs/specs/failover.md cold-start carrier health).
-    observe.wait_active("home-uplink", "primary")
+    observe.wait_selection("home-uplink", "primary")
 
     # 2. Let the first good probe Window land and seed the
     #    hysteresis. wanwatch_wan_family_healthy reaching 1 proves a
@@ -116,7 +116,7 @@ pkgs.testers.runNixOSTest {
 
     # 5. Sanity: the Selection held throughout.
     state = observe.state()
-    active = state["groups"]["home-uplink"]["active"]
-    assert active == "primary", f"active = {active!r}, want 'primary'"
+    selection = state["groups"]["home-uplink"]["selection"]
+    assert selection == "primary", f"selection = {selection!r}, want 'primary'"
   '';
 }

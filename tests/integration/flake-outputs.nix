@@ -4,12 +4,13 @@
 {
   fixtures,
   helpers,
+  lib,
   self,
   wanwatch,
   ...
 }:
 let
-  inherit (helpers) evalNixosWith renderConfig;
+  inherit (helpers) evalNixosWith renderConfig revisionFlags;
 
   # The config rendered from the shared declaration, with the
   # `evalNixosWith` arguments given.
@@ -29,8 +30,24 @@ let
 
   # `evalNixosWith` arguments that evaluate the flake's modules.
   flakeModulesArgs.wanwatchModules = self.nixosModules;
+
+  # The `lib` names that ADR-0018 declares stable across 0.x minor
+  # releases.
+  stableLibPaths = [
+    [ "types" ]
+    [
+      "config"
+      "paths"
+    ]
+    [ "version" ]
+  ];
 in
 {
+  testStableLibNamesExist = {
+    expr = builtins.filter (path: !lib.hasAttrByPath path self.lib) stableLibPaths;
+    expected = [ ];
+  };
+
   testLibExports = {
     expr = builtins.attrNames self.lib;
     expected = builtins.attrNames wanwatch;
@@ -68,4 +85,15 @@ in
     expr = scrapeInputWith flakeModulesArgs;
     expected = scrapeInputWith { };
   };
+
+  # The flake passes one revision to its `packages` output and to the
+  # module's default package.
+  testModulePackageRevisionMatchesPackages =
+    let
+      config = evalNixosWith flakeModulesArgs [ fixtures.nixos.primaryAndBackup ];
+    in
+    {
+      expr = revisionFlags config.services.wanwatch.package;
+      expected = revisionFlags self.packages.${config.nixpkgs.hostPlatform.system}.wanwatchd;
+    };
 }

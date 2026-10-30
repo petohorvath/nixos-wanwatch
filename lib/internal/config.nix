@@ -24,9 +24,10 @@ let
   # stays qualified as `internal.global`.
   inherit (internal) group wan;
 
-  # Pinned at 1 until the first tagged release, then bumped on every
-  # incompatible change to the daemon-config shape; the daemon rejects
-  # configs with another version.
+  # Bumped, in lockstep with the daemon's SupportedSchema, on every
+  # incompatible change to the daemon-config shape
+  # (docs/specs/daemon-config.md); the daemon rejects configs with
+  # another version.
   schemaVersion = 1;
 
   # The daemon's paths, which are fixed rather than settings: the NixOS

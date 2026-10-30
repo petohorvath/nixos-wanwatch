@@ -104,9 +104,9 @@ class Observation:
             timeout,
         )
 
-    def wait_active(self, group, active, timeout=15):
+    def wait_selection(self, group, selection, timeout=15):
         """Selection can succeed on cold-start carrier Health alone."""
-        return self.state({"groups": {group: {"active": active}}}, timeout)
+        return self.state({"groups": {group: {"selection": selection}}}, timeout)
 
     def wait_healthy(self, wan, timeout=15):
         """Wait for aggregate Probe Health, including an unselected backup.
@@ -147,12 +147,13 @@ class Observation:
         )
 
     @staticmethod
-    def _metric(body, series):
+    def _metric(body, series, *, nan_ok=False):
+        """Parse a present series; nan_ok admits NaN, a probe gauge's no data."""
         prefix = series + " "
         for line in body.splitlines():
             if line.startswith(prefix):
                 value = float(line[len(prefix) :].split()[0])
-                if not _math.isfinite(value):
+                if _math.isinf(value) or (_math.isnan(value) and not nan_ok):
                     raise ValueError(f"non-finite metric {series}: {value}")
                 return value
         return None
@@ -185,6 +186,18 @@ class Observation:
             timeout,
         )
 
+    def _wait_probe(self, series, low, high, timeout):
+        # NaN is a probe gauge's no data; it never falls within bounds.
+        body = self._wait_metrics(
+            f"live {series} in [{low}, {high}]",
+            lambda body: (
+                (value := self._metric(body, series, nan_ok=True)) is not None
+                and low <= value <= high
+            ),
+            timeout,
+        )
+        return self._metric(body, series)
+
     def wait_probe_loss(self, wan, family, low, high=1.0, timeout=10):
         """Wait for a present live gauge in the inclusive range [low, high]."""
         self._family_flag(family)
@@ -193,15 +206,52 @@ class Observation:
         series = self._series(
             "wanwatch_probe_loss_ratio", {"wan": wan, "family": family}
         )
-        body = self._wait_metrics(
-            f"live {series} in [{low}, {high}]",
-            lambda body: (
-                (value := self._metric(body, series)) is not None
-                and low <= value <= high
-            ),
-            timeout,
-        )
-        return self._metric(body, series)
+        return self._wait_probe(series, low, high, timeout)
+
+    def wait_probe_rtt(
+        self, wan, family, low=0.0, high=_math.inf, *, target=None, timeout=10
+    ):
+        """Wait for a measured live RTT in seconds, in the inclusive range [low, high].
+
+        target=None reads the Family's RTT; otherwise that Target's RTT.
+        """
+        self._family_flag(family)
+        if not 0 <= low <= high:
+            raise ValueError("Probe RTT bounds must satisfy 0 <= low <= high")
+        if target is None:
+            series = self._series(
+                "wanwatch_probe_rtt_seconds", {"wan": wan, "family": family}
+            )
+        else:
+            series = self._series(
+                "wanwatch_probe_target_rtt_seconds",
+                {"wan": wan, "family": family, "target": target},
+            )
+        return self._wait_probe(series, low, high, timeout)
+
+    def wait_probe_unmeasured(self, wan, family, targets=(), timeout=10):
+        """Wait until no Sample in the Window succeeded, in one live scrape.
+
+        The Family's RTT and jitter, and the RTT of each listed Target, must
+        all be present and NaN.
+        """
+        self._family_flag(family)
+        labels = {"wan": wan, "family": family}
+        series = [
+            self._series("wanwatch_probe_rtt_seconds", labels),
+            self._series("wanwatch_probe_jitter_seconds", labels),
+        ] + [
+            self._series(
+                "wanwatch_probe_target_rtt_seconds", {**labels, "target": target}
+            )
+            for target in targets
+        ]
+
+        def unmeasured(body):
+            values = [self._metric(body, name, nan_ok=True) for name in series]
+            return all(value is not None and _math.isnan(value) for value in values)
+
+        return self._wait_metrics(f"NaN {series!r}", unmeasured, timeout)
 
     def wait_family_metrics(self, wan, families, timeout=10):
         """Wait for all per-family Health gauges in the same live scrape."""

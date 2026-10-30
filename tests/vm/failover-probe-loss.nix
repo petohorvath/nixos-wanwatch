@@ -130,7 +130,7 @@ pkgs.testers.runNixOSTest {
 
     # 1. Primary wins on cold-start carrier health and stays active
     #    once the probes cook both WANs healthy.
-    observe.wait_active("home-uplink", "primary", timeout=10)
+    observe.wait_selection("home-uplink", "primary", timeout=10)
 
     # Carrier alone satisfies the wait above; require probe Health on
     # both WANs so step 3 cannot wait on an unreachable backup.
@@ -146,7 +146,7 @@ pkgs.testers.runNixOSTest {
 
     # 3. Failover takes about consecutiveDown × intervalMs (400 ms)
     #    plus Apply and State latency.
-    observe.wait_active("home-uplink", "backup", timeout=10)
+    observe.wait_selection("home-uplink", "backup", timeout=10)
 
     # 4. The Decision was health-driven; carrier stayed up.
     observe.wait_decisions("home-uplink", "health", minimum=before + 1)
@@ -162,13 +162,18 @@ pkgs.testers.runNixOSTest {
         f"transition lossRatio = {failed_v4['lossRatio']}, want ≥ 0.25"
     )
     observe.wait_probe_loss("primary", "v4", 0.5)
+    # Once every Sample in the Window is lost, the RTT and jitter
+    # gauges report NaN, no data, rather than a perfect 0.
+    observe.wait_probe_unmeasured("primary", "v4", targets=["192.168.1.1"])
 
     # 5. Clearing netem restores primary after consecutiveUp good
     #    cycles.
     router.succeed("tc qdisc del dev eth1 root")
-    observe.wait_active("home-uplink", "primary", timeout=10)
+    observe.wait_selection("home-uplink", "primary", timeout=10)
 
-    # Primary's live loss falls back to the recovery band.
+    # Primary's live loss falls back to the recovery band, and its
+    # Target's RTT is measured again.
     observe.wait_probe_loss("primary", "v4", 0.0, 0.10)
+    observe.wait_probe_rtt("primary", "v4", target="192.168.1.1")
   '';
 }
