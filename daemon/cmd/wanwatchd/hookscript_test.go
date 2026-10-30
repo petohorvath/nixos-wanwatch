@@ -112,7 +112,7 @@ func TestHookScriptSeesDecisionVariables(t *testing.T) {
 	}
 	for _, name := range []string{"WANWATCH_IFACE_OLD", "WANWATCH_IFACE_NEW", "WANWATCH_FAMILIES", "WANWATCH_TS"} {
 		if value, ok := env[name]; ok {
-			t.Errorf("pre-release variable %s = %q is still set", name, value)
+			t.Errorf("renamed variable %s = %q is still set", name, value)
 		}
 	}
 }

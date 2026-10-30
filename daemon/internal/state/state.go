@@ -19,10 +19,11 @@ import (
 	"time"
 )
 
-// SchemaVersion is the state-file schema version. Pre-release we
-// keep it pinned at 1 — there are no external consumers and bumping
-// for in-tree refactors is bookkeeping noise. The first tagged
-// release freezes shape 1; future incompatible changes bump it.
+// SchemaVersion is the state-file schema version. It is bumped only
+// on an incompatible change: a field removed or renamed, or a field
+// whose type or meaning changes. An added field keeps it, because
+// readers ignore fields they do not know (docs/specs/daemon-state.md,
+// "Compatibility policy").
 const SchemaVersion = 1
 
 // State is the daemon's externalized snapshot, written atomically

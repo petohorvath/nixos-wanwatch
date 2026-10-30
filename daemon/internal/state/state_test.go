@@ -225,11 +225,11 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 
 func TestSchemaVersionConstantStable(t *testing.T) {
 	t.Parallel()
-	// Pre-release we pin SchemaVersion at 1. Changing this is a
-	// load-bearing decision — see the TODO.md schema-evolution item and the constant's
-	// doc-comment for the bump policy.
+	// Changing SchemaVersion breaks every reader that checks
+	// `schema == 1`; the Compatibility policy in
+	// docs/specs/daemon-state.md says when a change bumps it.
 	if SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1 (pre-release pin)", SchemaVersion)
+		t.Errorf("SchemaVersion = %d, want 1 (a bump follows the state.json compatibility policy)", SchemaVersion)
 	}
 }
 
@@ -322,10 +322,10 @@ func TestWriteFailsOnUnmarshalableState(t *testing.T) {
 }
 
 // TestWireShapeMatchesGolden pins the on-disk state.json byte-
-// for-byte against testdata/state.golden.json. It guards against
-// accidental field renames before the first tagged release locks
-// schema-1 down: an unintended rename (RTTSeconds → RTTMs, say)
-// turns this test red instead of slipping past code review.
+// for-byte against testdata/state.golden.json. It guards the frozen
+// schema-1 shape against accidental field renames: an unintended
+// rename (RTTSeconds → RTTMs, say) turns this test red instead of
+// slipping past code review.
 //
 // `updatedAt` is normalized because Writer.Write stamps it with
 // time.Now() — comparing the stamp would be flaky.

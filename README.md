@@ -1,7 +1,5 @@
 # nixos-wanwatch
 
-`nixos-wanwatch` has no release yet: its options and contracts may still change, and [`CHANGELOG.md`](./CHANGELOG.md) records each change under Unreleased.
-
 `nixos-wanwatch` monitors a host's WANs and fails traffic over to a healthy one. It provides a NixOS module, `services.wanwatch`, and a daemon, `wanwatchd`, that probes each WAN with ICMP, derives its Health, and rewrites policy-routing tables when the preferred WAN fails or recovers. It serves NixOS routers and gateways with a backup connection, such as an LTE modem behind a fixed-line link.
 
 ## Overview
@@ -42,7 +40,7 @@ Add the flake as an input and import its module into the host's configuration:
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     wanwatch = {
-      url = "github:petohorvath/nixos-wanwatch";
+      url = "github:petohorvath/nixos-wanwatch/v0.1.0";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         treefmt-nix.follows = "";
@@ -65,6 +63,8 @@ Add the flake as an input and import its module into the host's configuration:
     };
 }
 ```
+
+The `url` pins the `v0.1.0` release. To upgrade, change the tag after reading the release's entry in [`CHANGELOG.md`](./CHANGELOG.md).
 
 The `treefmt-nix`, `nix-unit`, and `nixos-nftzones` inputs serve only the flake's own checks. Setting their `follows` to `""` drops them, so they stay out of the host's `flake.lock`.
 

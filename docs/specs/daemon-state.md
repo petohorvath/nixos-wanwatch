@@ -2,7 +2,7 @@
 
 The daemon publishes this JSON snapshot to the config's `global.statePath`, which the NixOS module fixes at `/run/wanwatch/state.json`. Writes are atomic (tmpfile + `rename`), so readers always see a complete file. `daemon/internal/state/state.go` produces it, and the on-disk shape matches the `State` value types exactly.
 
-**Schema version**: `1`. Pre-release, the version is pinned: with no external consumers, in-tree refactors do not bump it. The first tagged release freezes shape 1; after that, any backwards-incompatible field change bumps the number.
+**Schema version**: `1`, frozen from v0.1.0. Readers ignore fields they do not know; see [Compatibility policy](#compatibility-policy).
 
 ## When `state.json` is rewritten
 

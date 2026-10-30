@@ -2,7 +2,7 @@
 
 The NixOS module writes this JSON to `/etc/wanwatch/config.json`, and `wanwatchd` reads it at startup. `wanwatch.config.toJSON` in `lib/internal/config.nix` produces it; `daemon/internal/config/config.go` parses it and re-validates its structure.
 
-**Schema version**: `1`. The daemon refuses to start when `schema` does not match its `SupportedSchema`. Pre-release, the version is pinned: the renderer and the daemon ship together, so in-tree shape changes do not bump it. The first tagged release freezes shape 1; after that, any backwards-incompatible field change bumps the number.
+**Schema version**: `1`, frozen from v0.1.0. The daemon refuses to start when `schema` does not match its `SupportedSchema`; see [Compatibility policy](#compatibility-policy).
 
 ## Top-level shape
 
