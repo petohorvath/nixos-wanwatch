@@ -43,7 +43,12 @@ Add the flake as an input and import its module into the host's configuration:
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     wanwatch = {
       url = "github:petohorvath/nixos-wanwatch";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        treefmt-nix.follows = "";
+        nix-unit.follows = "";
+        nixos-nftzones.follows = "";
+      };
     };
   };
 
@@ -60,6 +65,8 @@ Add the flake as an input and import its module into the host's configuration:
     };
 }
 ```
+
+The `treefmt-nix`, `nix-unit`, and `nixos-nftzones` inputs serve only the flake's own checks. Setting their `follows` to `""` drops them, so they stay out of the host's `flake.lock`.
 
 ## Usage
 
