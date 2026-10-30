@@ -87,8 +87,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
-		<-errCh
-		return ctx.Err()
+		// Joined with the cancellation, Serve's error still reads as an
+		// orderly shutdown to the caller instead of being dropped.
+		return errors.Join(ctx.Err(), <-errCh)
 	case err := <-errCh:
 		return err
 	}
