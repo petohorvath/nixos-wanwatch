@@ -60,7 +60,7 @@ in
     package = lib.mkOption {
       type = lib.types.package;
       default = defaultPackage;
-      defaultText = lib.literalExpression "pkgs.callPackage ../packages/wanwatchd/package.nix { }";
+      defaultText = lib.literalMD "`wanwatchd` from this flake's `packages`, built with the system's `pkgs`";
       description = "The wanwatchd derivation to run.";
     };
 
@@ -92,7 +92,7 @@ in
     };
 
     marks = lib.mkOption {
-      type = lib.types.attrsOf lib.types.int;
+      type = lib.types.attrsOf wanwatch.types.fwmark;
       readOnly = true;
       default = lib.mapAttrs (_: group: group.mark) validatedGroups;
       defaultText = lib.literalMD ''
@@ -108,7 +108,7 @@ in
     };
 
     tables = lib.mkOption {
-      type = lib.types.attrsOf lib.types.int;
+      type = lib.types.attrsOf wanwatch.types.routingTableId;
       readOnly = true;
       default = lib.mapAttrs (_: group: group.table) validatedGroups;
       defaultText = lib.literalMD ''

@@ -23,15 +23,15 @@ let
     `modules`: further modules, such as a `services.wanwatch`
     declaration.
 
-    Returns the system's `config`.
+    Returns the evaluated system, with its `config` and `options`.
   */
-  evalNixosWith =
+  evalSystemWith =
     {
       wanwatchModules ? nixosModules,
       telegraf ? false,
     }:
     modules:
-    (nixpkgs.lib.nixosSystem {
+    nixpkgs.lib.nixosSystem {
       modules = [
         wanwatchModules.default
         {
@@ -42,13 +42,20 @@ let
       ]
       ++ nixpkgs.lib.optional telegraf wanwatchModules.telegraf
       ++ modules;
-    }).config;
+    };
+
+  # `evalSystemWith`, returning the system's `config`.
+  evalNixosWith = evalArgs: modules: (evalSystemWith evalArgs modules).config;
 in
 {
   inherit evalNixosWith;
 
   # `evalNixosWith` with the source modules and no Telegraf module.
   evalNixos = evalNixosWith { };
+
+  # The option declarations of a system with the source modules, for
+  # suites that test option documentation and types.
+  evalNixosOptions = modules: (evalSystemWith { } modules).options;
 
   /*
     Parse the daemon config that a system renders. Rendering forces

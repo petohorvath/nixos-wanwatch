@@ -2,7 +2,7 @@
 # the values it publishes, and the service it defines.
 { fixtures, helpers, ... }:
 let
-  inherit (helpers) evalNixos renderConfig;
+  inherit (helpers) evalNixos evalNixosOptions renderConfig;
 
   baseConfig = evalNixos [ fixtures.nixos.primaryAndBackup ];
   debugConfig = evalNixos [
@@ -10,6 +10,8 @@ let
     { services.wanwatch.global.logLevel = "debug"; }
   ];
   rendered = renderConfig baseConfig;
+
+  options = (evalNixosOptions [ fixtures.nixos.primaryAndBackup ]).services.wanwatch;
 
   # The unit file that `switch-to-configuration` compares to decide
   # whether to restart the service.
@@ -122,5 +124,26 @@ in
       "CAP_NET_ADMIN"
       "CAP_NET_RAW"
     ];
+  };
+
+  # The option docs name the package a consumer gets, not a path
+  # inside this repository.
+  testPackageDefaultText = {
+    expr = options.package.defaultText;
+    expected = {
+      _type = "literalMD";
+      text = "`wanwatchd` from this flake's `packages`, built with the system's `pkgs`";
+    };
+  };
+
+  # The option types document the range of the published values.
+  testMarksType = {
+    expr = options.marks.type.description;
+    expected = "attribute set of integer between 1000 and 32767 (both inclusive)";
+  };
+
+  testTablesType = {
+    expr = options.tables.type.description;
+    expected = "attribute set of integer between 1000 and 32767 (both inclusive)";
   };
 }
