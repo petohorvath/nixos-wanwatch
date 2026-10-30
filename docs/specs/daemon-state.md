@@ -148,6 +148,10 @@ logger -t wanwatch \
 
 ## Compatibility policy
 
-Pre-release, `state.SchemaVersion` stays at 1; with no external consumers, in-tree refactors do not bump it.
+From v0.1.0, schema 1 is frozen ([ADR-0018](../adr/0018-0x-stability-promise.md)); the changes before that release kept schema 1, because no release had shipped it.
 
-Post-release, bump `state.SchemaVersion` whenever a field is added, renamed, or changes meaning. This is stricter than `config.json`, whose only reader is the daemon. `state.json` readers are downstream (dashboards, scripts, monitoring agents) and need a schema number to branch on before opting into new fields, so additive bumps are deliberate.
+Readers ignore fields they do not know. A release may add a field to any object in `state.json` and keep `state.SchemaVersion`, so a reader that checks `schema == 1` keeps reading the fields it knows, with the same meaning.
+
+No field is removed or renamed, and none changes its type or meaning; making a field nullable changes its type. An incompatible change needs a new ADR that supersedes ADR-0018. It bumps `state.SchemaVersion`, updates this spec and the golden `daemon/internal/state/testdata/state.golden.json`, and adds a migration note to `CHANGELOG.md`.
+
+The Hook variables follow the same rule: a release may add a `WANWATCH_*` variable, but never removes, renames, or redefines one.

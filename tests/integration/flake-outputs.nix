@@ -4,6 +4,7 @@
 {
   fixtures,
   helpers,
+  lib,
   self,
   wanwatch,
   ...
@@ -29,8 +30,24 @@ let
 
   # `evalNixosWith` arguments that evaluate the flake's modules.
   flakeModulesArgs.wanwatchModules = self.nixosModules;
+
+  # The `lib` names that ADR-0018 declares stable across 0.x minor
+  # releases.
+  stableLibPaths = [
+    [ "types" ]
+    [
+      "config"
+      "paths"
+    ]
+    [ "version" ]
+  ];
 in
 {
+  testStableLibNamesExist = {
+    expr = builtins.filter (path: !lib.hasAttrByPath path self.lib) stableLibPaths;
+    expected = [ ];
+  };
+
   testLibExports = {
     expr = builtins.attrNames self.lib;
     expected = builtins.attrNames wanwatch;

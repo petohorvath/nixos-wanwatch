@@ -219,6 +219,14 @@ The daemon runs as the `wanwatch` user and group, which the module creates. Its 
 - On a switch, the daemon flushes conntrack entries by the vacated WAN's addresses. When several Groups share that WAN, the flush also resets the flows of the Groups that still route through it; those flows reconnect through the same WAN.
 - On hosts that run systemd-networkd, the module defaults `ManageForeignRoutingPolicyRules` and `ManageForeignRoutes` to `false`, so networkd stops removing routes and rules it did not create.
 
+## Stability
+
+From v0.1.0, every 0.x release keeps these contracts compatible: `config.json` and `state.json` schema 1, the Hook variables, and the metric catalog. A release may add State fields, Hook variables, and metrics, so readers of `state.json` ignore the fields they do not know.
+
+The `services.wanwatch` options and `lib` may still break in a 0.x minor release, with a migration note in [`CHANGELOG.md`](./CHANGELOG.md). In `lib`, only `lib.types`, `lib.config.paths`, and `lib.version` are stable; every other name is an unstable internal of the module.
+
+[ADR-0018](./docs/adr/0018-0x-stability-promise.md) records the promise and its reasoning.
+
 ## Contributing
 
 Ask questions and report bugs in [GitHub issues](https://github.com/petohorvath/nixos-wanwatch/issues). [`AGENTS.md`](./AGENTS.md) describes the development shell, checks, conventions, and commit format that pull requests follow.

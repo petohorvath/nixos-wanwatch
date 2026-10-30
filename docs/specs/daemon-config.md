@@ -152,7 +152,7 @@ See [ADR 0003](../adr/0003-user-declared-marks-and-tables.md) for why marks and 
 
 ## Compatibility policy
 
-Pre-release, `schemaVersion` and `SupportedSchema` stay at 1; the renderer and the daemon ship together, so in-tree shape changes do not bump them. The rules below apply from the first tagged release.
+From v0.1.0, schema 1 is frozen ([ADR-0018](../adr/0018-0x-stability-promise.md)); the changes before that release kept schema 1, because no release had shipped it. No field is removed or renamed, none changes its type or meaning, and the daemon never starts to require a new field. A release may add a field that the daemon accepts as absent, because a `config.json` written for the previous release still starts the daemon with the same meaning.
 
 The committed golden `daemon/internal/config/testdata/config.golden.json` pins the shape on both sides. The nix-unit test `unit.internal.config.render.testMatchesGolden` checks that `config.render` produces it from the unit fixtures, and the daemon's config tests parse it and re-encode it to the same document. A change to the rendered shape, breaking or not, regenerates the golden in the same commit:
 
@@ -161,11 +161,10 @@ nix eval --json .#tests.systems.x86_64-linux.unit.internal.config.render.testMat
   | jq . > daemon/internal/config/testdata/config.golden.json
 ```
 
-The schema version is bumped only when an existing field changes meaning or a required field is added without a default. An optional field with a backwards-compatible default needs no bump.
+The renderer and the daemon ship together, and the daemon rejects unknown fields. Any change to the rendered shape, even an added optional field, therefore needs a daemon of the same release: an older daemon refuses the new file. A `services.wanwatch.package` override must come from the same release as the module.
 
-A breaking change requires:
+An incompatible change needs a new ADR that supersedes ADR-0018, and then:
 
 1. Increment `schemaVersion` in `lib/internal/config.nix` and `SupportedSchema` in `daemon/internal/config/config.go`.
 2. Update this spec.
 3. Add a `CHANGELOG.md` entry with the migration note under the next release.
-4. Ship in a major version bump (`0.2.0` → `0.3.0`, and so on).
