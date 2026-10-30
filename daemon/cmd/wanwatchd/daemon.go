@@ -40,6 +40,8 @@ type daemon struct {
 	health   *health.Wans
 	groups   map[string]*decision.Group
 	gateways *gatewayCache
+	// startedAt is State's startedAt, fixed when the daemon is built.
+	startedAt time.Time
 }
 
 // newDaemon constructs the runtime state from `cfg` — cold WAN
@@ -47,15 +49,16 @@ type daemon struct {
 // kernel and Hook sink. It performs no I/O and starts no goroutines.
 func newDaemon(cfg *config.Config, k kernel, hooks hookSink, mreg *metrics.Registry, logger *slog.Logger) *daemon {
 	d := &daemon{
-		cfg:      cfg,
-		kernel:   k,
-		hooks:    hooks,
-		metrics:  mreg,
-		stateW:   &state.Writer{Path: cfg.Global.StatePath},
-		logger:   logger,
-		health:   health.New(cfg.Wans, mreg),
-		groups:   make(map[string]*decision.Group, len(cfg.Groups)),
-		gateways: newGatewayCache(),
+		cfg:       cfg,
+		kernel:    k,
+		hooks:     hooks,
+		metrics:   mreg,
+		stateW:    &state.Writer{Path: cfg.Global.StatePath},
+		logger:    logger,
+		health:    health.New(cfg.Wans, mreg),
+		groups:    make(map[string]*decision.Group, len(cfg.Groups)),
+		gateways:  newGatewayCache(),
+		startedAt: time.Now().UTC(),
 	}
 	for name, g := range cfg.Groups {
 		d.groups[name] = decision.New(g, func(ctx context.Context, wan string, families ...probe.Family) error {
@@ -370,6 +373,8 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 // concurrent hook invocation (publishDecision).
 func (d *daemon) writeStateSnapshot(now time.Time) {
 	snap := state.State{
+		Version:   version,
+		StartedAt: d.startedAt,
 		UpdatedAt: now,
 		Wans:      make(map[string]state.Wan, len(d.cfg.Wans)),
 		Groups:    make(map[string]state.Group, len(d.groups)),

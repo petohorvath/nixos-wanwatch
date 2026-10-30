@@ -334,6 +334,8 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 	selection, gatewayV4 := "primary", "192.0.2.1"
 	selectionSince := time.Date(2026, 10, 13, 9, 12, 4, 118204511, time.UTC)
 	s := State{
+		Version:   "0.1.0",
+		StartedAt: time.Date(2026, 10, 13, 9, 11, 58, 402117358, time.UTC),
 		Wans: map[string]Wan{
 			"primary": {
 				Interface: "eth0",

@@ -29,6 +29,8 @@ const SchemaVersion = 1
 // on every Decision.
 type State struct {
 	Schema    int              `json:"schema"`
+	Version   string           `json:"version"`   // the publishing daemon's linked version
+	StartedAt time.Time        `json:"startedAt"` // daemon start; decisionsTotal counts from here
 	UpdatedAt time.Time        `json:"updatedAt"`
 	Wans      map[string]Wan   `json:"wans"`
 	Groups    map[string]Group `json:"groups"`

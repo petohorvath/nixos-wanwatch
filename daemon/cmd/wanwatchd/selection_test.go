@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,17 +15,8 @@ import (
 // sees it, without the daemon's own decoding.
 func rawGroup(tb testing.TB, h *harness, group string) map[string]any {
 	tb.Helper()
-	data, err := os.ReadFile(h.statePath)
-	if err != nil {
-		tb.Fatalf("read State: %v", err)
-	}
-	var s struct {
-		Groups map[string]map[string]any `json:"groups"`
-	}
-	if err := json.Unmarshal(data, &s); err != nil {
-		tb.Fatalf("decode State: %v", err)
-	}
-	g, ok := s.Groups[group]
+	groups, _ := rawState(tb, h)["groups"].(map[string]any)
+	g, ok := groups[group].(map[string]any)
 	if !ok {
 		tb.Fatalf("State has no Group %q", group)
 	}

@@ -22,6 +22,8 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 ```json
 {
   "schema": 1,
+  "version": "0.1.0",
+  "startedAt": "2026-05-12T14:29:55.012345678Z",
   "updatedAt": "2026-05-12T14:30:01.234567890Z",
   "wans":   { "<name>": { ... }, ... },
   "groups": { "<name>": { ... }, ... }
@@ -31,6 +33,8 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 | Field       | Type                        | Meaning                                                                                                                                                                  |
 | ----------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `schema`    | int                         | The daemon's `SchemaVersion`.                                                                                                                                            |
+| `version`   | string                      | Version of the daemon build that published this State, as linked into `wanwatchd`.                                                                                       |
+| `startedAt` | string (RFC 3339 nanos UTC) | When the daemon started. Set once at startup and unchanged by later writes; `groups.<name>.decisionsTotal` counts from this moment.                                      |
 | `updatedAt` | string (RFC 3339 nanos UTC) | Write time. The daemon fills it with the current time unless the caller supplies one; a Decision supplies the same timestamp it passes to Hooks as `WANWATCH_TIMESTAMP`. |
 | `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                                      |
 | `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                                  |
@@ -100,7 +104,7 @@ A kernel operstate outside the `operstate` set reports as `unknown`, as in `wanw
 | ---------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `selection`      | string \| null                      | The Group's Selection. `null` when no Member is healthy.                                                                                                          |
 | `selectionSince` | string (RFC 3339 nanos UTC) \| null | When the Selection last changed, including to `null` on a `down`. Reapplying the current Selection leaves it unchanged. `null` before the Group's first Decision. |
-| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start.                                                                                                              |
+| `decisionsTotal` | int                                 | Decisions emitted for this Group since daemon start (`startedAt`).                                                                                                |
 | `strategy`       | string                              | Echo of `groups.<name>.strategy`.                                                                                                                                 |
 
 ## Hook env-var contract

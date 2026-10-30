@@ -1,5 +1,7 @@
 {
   "schema": 1,
+  "version": "0.1.0",
+  "startedAt": "2026-10-13T09:11:58.402117358Z",
   "updatedAt": "__REPLACED__",
   "wans": {
     "primary": {
