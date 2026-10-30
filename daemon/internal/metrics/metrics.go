@@ -24,6 +24,12 @@ import (
 // in this package — `wanwatch_*` per docs/metrics.md.
 const Namespace = "wanwatch"
 
+// routeDurationBuckets spans 100 µs to 1 s. A route write is one
+// netlink round trip that usually takes well under a millisecond, so
+// prometheus.DefBuckets, which start at 5 ms, would put almost every
+// write in the first bucket.
+var routeDurationBuckets = []float64{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.1, 1}
+
 // Registry bundles the typed metric handles plus the underlying
 // prometheus.Registry. One per daemon instance, created at startup
 // and passed to every package that needs to record a sample.
@@ -140,7 +146,7 @@ func New() *Registry {
 			Subsystem: "apply",
 			Name:      "route_duration_seconds",
 			Help:      "Wall time of a default-route RTM_NEWROUTE call.",
-			Buckets:   prometheus.DefBuckets,
+			Buckets:   routeDurationBuckets,
 		}, []string{"group", "family"}),
 
 		ApplyRouteErrors: prometheus.NewCounterVec(prometheus.CounterOpts{

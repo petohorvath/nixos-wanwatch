@@ -43,6 +43,8 @@ Apply metrics are split into per-Family and Family-agnostic series so no label i
 | `wanwatch_apply_route_errors_total`     | counter   | `group`, `family` | Route writes that returned a netlink error.                                             |
 | `wanwatch_apply_op_errors_total`        | counter   | `group`, `op`     | Family-agnostic errors. `op` is `conntrack_flush`, `ifindex_lookup`, or `rule_install`. |
 
+A route write is one netlink round trip that usually takes well under a millisecond, so the `wanwatch_apply_route_duration_seconds` buckets run from 100 µs to 1 s: 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.1, and 1 seconds.
+
 ## Daemon
 
 | Metric                              | Type    | Labels                             | Meaning                                                                                     |

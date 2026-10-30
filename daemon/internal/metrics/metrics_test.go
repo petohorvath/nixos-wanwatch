@@ -4,7 +4,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -102,6 +104,30 @@ func TestStatePublicationsIncrement(t *testing.T) {
 	body := scrape(t, r)
 	if !strings.Contains(body, "wanwatch_state_publications_total 3") {
 		t.Errorf("expected state_publications_total = 3; body:\n%s", body)
+	}
+}
+
+// Route writes are netlink round trips that usually finish well
+// under a millisecond, so the buckets start at 100 µs.
+func TestApplyRouteDurationBuckets(t *testing.T) {
+	t.Parallel()
+	r := New()
+	r.ApplyRouteDuration.WithLabelValues("home", "v4").Observe(0.0003)
+
+	bucket := regexp.MustCompile(`(?m)^wanwatch_apply_route_duration_seconds_bucket\{family="v4",group="home",le="([^"]+)"\} (\d+)$`)
+	var bounds, counts []string
+	for _, m := range bucket.FindAllStringSubmatch(scrape(t, r), -1) {
+		bounds = append(bounds, m[1])
+		counts = append(counts, m[2])
+	}
+	wantBounds := []string{"0.0001", "0.00025", "0.0005", "0.001", "0.0025", "0.005", "0.01", "0.025", "0.1", "1", "+Inf"}
+	if !slices.Equal(bounds, wantBounds) {
+		t.Errorf("bucket bounds = %v, want %v", bounds, wantBounds)
+	}
+	// A 300 µs write lands from the 500 µs bucket up.
+	wantCounts := []string{"0", "0", "1", "1", "1", "1", "1", "1", "1", "1", "1"}
+	if !slices.Equal(counts, wantCounts) {
+		t.Errorf("cumulative bucket counts = %v, want %v", counts, wantCounts)
 	}
 }
 
