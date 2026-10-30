@@ -15,7 +15,7 @@ import (
 // each publication snapshots the Window statistics.
 func TestHealthPublication(t *testing.T) {
 	t.Parallel()
-	partialStats := probe.FamilyStats{RTTMicros: 12_500, JitterMicros: 800, LossRatio: 0.05}
+	partialStats := probe.FamilyStats{RTTMicros: ptr[uint64](12_500), JitterMicros: ptr[uint64](800), LossRatio: ptr(0.05)}
 	fullStats := partialStats
 	fullStats.WindowFilled = true
 	for _, tc := range []struct {
@@ -35,7 +35,7 @@ func TestHealthPublication(t *testing.T) {
 			want:      []string{"hook switch home primary→backup"},
 			active:    "backup",
 			published: true,
-			v4:        state.FamilyHealth{LossRatio: 1, Targets: []string{"198.51.100.53"}},
+			v4:        state.FamilyHealth{LossRatio: ptr(1.0), Targets: []string{"198.51.100.53"}},
 		},
 		{
 			name:      "a Family flip under policy any republishes without a Decision",
@@ -44,7 +44,7 @@ func TestHealthPublication(t *testing.T) {
 			active:    "primary",
 			published: true,
 			healthy:   true,
-			v4:        state.FamilyHealth{LossRatio: 1, Targets: []string{"198.51.100.53"}},
+			v4:        state.FamilyHealth{LossRatio: ptr(1.0), Targets: []string{"198.51.100.53"}},
 		},
 		{
 			name:    "a partial Window publishes nothing",
@@ -63,9 +63,9 @@ func TestHealthPublication(t *testing.T) {
 			healthy:   true,
 			v4: state.FamilyHealth{
 				Healthy:       true,
-				RTTSeconds:    0.0125,
-				JitterSeconds: 0.0008,
-				LossRatio:     0.05,
+				RTTSeconds:    ptr(0.0125),
+				JitterSeconds: ptr(0.0008),
+				LossRatio:     ptr(0.05),
 				Targets:       []string{"198.51.100.53"},
 			},
 		},

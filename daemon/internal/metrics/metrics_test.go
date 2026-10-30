@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // scrape runs `r`'s handler against an in-memory request and
@@ -35,7 +37,8 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	// Touch each *Vec metric with a representative label set so it
 	// appears in the scrape output — Prometheus elides Vec
 	// metrics that have never been observed.
-	r.ProbeRTT.WithLabelValues("primary", "1.1.1.1", "v4").Set(12.3)
+	r.ProbeRTT.With(prometheus.Labels{"wan": "primary", "family": "v4"}).Set(0.0123)
+	r.ProbeTargetRTT.With(prometheus.Labels{"wan": "primary", "family": "v4", "target": "1.1.1.1"}).Set(0.0123)
 	r.ProbeJitter.WithLabelValues("primary", "v4").Set(1.2)
 	r.ProbeLoss.WithLabelValues("primary", "v4").Set(0)
 	r.WanCarrier.WithLabelValues("primary").Set(1)
@@ -55,6 +58,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	body := scrape(t, r)
 	for _, want := range []string{
 		"wanwatch_probe_rtt_seconds",
+		"wanwatch_probe_target_rtt_seconds",
 		"wanwatch_probe_jitter_seconds",
 		"wanwatch_probe_loss_ratio",
 		"wanwatch_wan_carrier",

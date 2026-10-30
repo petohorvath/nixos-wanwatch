@@ -30,7 +30,7 @@ func TestRunReopensSocketOfRecreatedInterface(t *testing.T) {
 			d := &dialer{steps: []dialStep{{conn: stale, ifindex: 1}, {conn: fresh, ifindex: 2}}}
 			sock := p.newSocket(d.dial, ifindexIs(2))
 
-			runUntil(t, p, sock, func(r ProbeResult) bool { return r.Stats.LossRatio < 1 })
+			runUntil(t, p, sock, func(r ProbeResult) bool { return r.Stats.RTTMicros != nil })
 
 			if !stale.isClosed() {
 				t.Error("stale socket was not closed")
@@ -60,8 +60,8 @@ func TestRunKeepsSocketWhileInterfaceIsDown(t *testing.T) {
 	if down.isClosed() {
 		t.Error("socket of a down interface was closed")
 	}
-	if loss := results[len(results)-1].Stats.LossRatio; loss != 1 {
-		t.Errorf("loss = %v, want 1 (sends fail while the interface is down)", loss)
+	if loss := results[len(results)-1].Stats.LossRatio; loss == nil || *loss != 1 {
+		t.Errorf("loss = %s, want 1 (sends fail while the interface is down)", show(loss))
 	}
 }
 
@@ -76,10 +76,10 @@ func TestRunWaitsForAbsentInterface(t *testing.T) {
 	d := &dialer{steps: []dialStep{{err: unix.ENODEV}, {err: unix.ENODEV}, {conn: fresh, ifindex: 3}}}
 	sock := p.newSocket(d.dial, ifindexIs(3))
 
-	results := runUntil(t, p, sock, func(r ProbeResult) bool { return r.Stats.LossRatio < 1 })
+	results := runUntil(t, p, sock, func(r ProbeResult) bool { return r.Stats.RTTMicros != nil })
 
-	if loss := results[0].Stats.LossRatio; loss != 1 {
-		t.Errorf("first loss = %v, want 1 (no socket while the interface is absent)", loss)
+	if loss := results[0].Stats.LossRatio; loss == nil || *loss != 1 {
+		t.Errorf("first loss = %s, want 1 (no socket while the interface is absent)", show(loss))
 	}
 	if got := d.count(); got != 3 {
 		t.Errorf("dials = %d, want 3 (two absent, one success)", got)

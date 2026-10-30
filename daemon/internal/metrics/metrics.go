@@ -36,10 +36,12 @@ var routeDurationBuckets = []float64{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.0
 type Registry struct {
 	reg *prometheus.Registry
 
-	// Probe layer — labels per docs/metrics.md.
-	ProbeRTT    *prometheus.GaugeVec
-	ProbeJitter *prometheus.GaugeVec
-	ProbeLoss   *prometheus.GaugeVec
+	// Probe layer — labels per docs/metrics.md. Each reports the
+	// value state.json reports, or NaN where it reports null.
+	ProbeRTT       *prometheus.GaugeVec
+	ProbeJitter    *prometheus.GaugeVec
+	ProbeLoss      *prometheus.GaugeVec
+	ProbeTargetRTT *prometheus.GaugeVec
 
 	// WAN layer.
 	WanCarrier        *prometheus.GaugeVec
@@ -75,22 +77,29 @@ func New() *Registry {
 			Namespace: Namespace,
 			Subsystem: "probe",
 			Name:      "rtt_seconds",
-			Help:      "Last sample's round-trip time per probe target, seconds.",
-		}, []string{"wan", "target", "family"}),
+			Help:      "Mean RTT over the window per (WAN, family), averaged across the family's targets, in seconds; NaN when no sample in the window succeeded.",
+		}, []string{"wan", "family"}),
 
 		ProbeJitter: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: "probe",
 			Name:      "jitter_seconds",
-			Help:      "Per-(WAN, family) jitter across the sliding window, seconds.",
+			Help:      "Jitter (RTT standard deviation) over the window per (WAN, family), averaged across the family's targets, in seconds; NaN when no sample in the window succeeded.",
 		}, []string{"wan", "family"}),
 
 		ProbeLoss: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Subsystem: "probe",
 			Name:      "loss_ratio",
-			Help:      "Per-(WAN, family) packet loss fraction in [0, 1].",
+			Help:      "Lost fraction of the window per (WAN, family), in [0, 1], averaged across the family's targets; NaN when the window holds no sample.",
 		}, []string{"wan", "family"}),
+
+		ProbeTargetRTT: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Subsystem: "probe",
+			Name:      "target_rtt_seconds",
+			Help:      "Mean RTT over the window per target, in seconds; NaN when none of the target's samples succeeded.",
+		}, []string{"wan", "family", "target"}),
 
 		WanCarrier: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,
@@ -185,7 +194,7 @@ func New() *Registry {
 	}
 
 	reg.MustRegister(
-		r.ProbeRTT, r.ProbeJitter, r.ProbeLoss,
+		r.ProbeRTT, r.ProbeJitter, r.ProbeLoss, r.ProbeTargetRTT,
 		r.WanCarrier, r.WanOperstate, r.WanFamilyHealthy, r.WanHealthy, r.WanCarrierChanges,
 		r.GroupSelected, r.GroupDecisions,
 		r.ApplyRouteDuration, r.ApplyRouteErrors, r.ApplyOpErrors,

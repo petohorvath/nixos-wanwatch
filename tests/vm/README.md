@@ -20,6 +20,13 @@ Choose the observation that proves the behavior (docs/specs/daemon-state.md):
   together. `state()` reads a snapshot for scenario-specific assertions.
 - `wait_probe_loss(wan, family, low, high=1.0)` reads live Prometheus statistics,
   with inclusive bounds. State freezes those statistics between transitions.
+- `wait_probe_rtt(wan, family, low=0, high=inf, target=None)` waits for a
+  measured live RTT in seconds, with inclusive bounds: the Family's, or one
+  Target's when `target` is given.
+- `wait_probe_unmeasured(wan, family, targets=())` waits until the Family's RTT
+  and jitter gauges, and the RTT gauge of each listed Target, all report NaN in
+  one scrape: no Sample in the Window succeeded. A NaN probe gauge never
+  satisfies a bound; any other non-finite value fails immediately.
 - `wait_family_metrics(wan, families)` checks all specified Health gauges in
   one live scrape, for example `{"v4": True, "v6": False}`.
 - `decisions(group, reason)` reads a counter; `wait_decisions(group, reason,

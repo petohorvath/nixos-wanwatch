@@ -207,18 +207,73 @@ class ObservationTests(unittest.TestCase):
         observe.wait_probe_loss("primary", "v4", 0, 0)
         self.assertEqual(machine.count(SCRAPE), 2)
 
-    def test_non_finite_probe_metrics_fail_loudly(self):
-        for value in ("NaN", "+Inf", "-Inf"):
+    def test_infinite_probe_metrics_fail_loudly(self):
+        for value in ("+Inf", "-Inf"):
             with self.subTest(value=value):
                 observe, _ = self.make_observation(
                     {
                         SCRAPE: [
-                            f'wanwatch_probe_loss_ratio{{family="v4",wan="primary"}} {value}\n',
+                            (
+                                f'wanwatch_probe_loss_ratio{{family="v4",wan="primary"}} {value}\n'
+                                f'wanwatch_probe_rtt_seconds{{family="v4",wan="primary"}} {value}\n'
+                            ),
                         ]
                     }
                 )
                 with self.assertRaisesRegex(ValueError, "non-finite metric"):
                     observe.wait_probe_loss("primary", "v4", 0)
+                with self.assertRaisesRegex(ValueError, "non-finite metric"):
+                    observe.wait_probe_rtt("primary", "v4")
+
+    def test_nan_loss_is_no_data_and_never_matches(self):
+        series = 'wanwatch_probe_loss_ratio{family="v4",wan="primary"}'
+        observe, machine = self.make_observation(
+            {SCRAPE: [series + " NaN\n", series + " 0.5\n"]}
+        )
+        self.assertEqual(observe.wait_probe_loss("primary", "v4", 0), 0.5)
+        self.assertEqual(machine.count(SCRAPE), 2)
+
+    def test_rtt_waits_for_a_measured_value_in_bounds(self):
+        for target, series in (
+            (None, 'wanwatch_probe_rtt_seconds{family="v4",wan="primary"}'),
+            (
+                "192.0.2.1",
+                'wanwatch_probe_target_rtt_seconds{family="v4",target="192.0.2.1",wan="primary"}',
+            ),
+        ):
+            with self.subTest(target=target):
+                observe, machine = self.make_observation(
+                    {
+                        SCRAPE: [
+                            "",
+                            series + " NaN\n",
+                            series + " 0.3\n",
+                            series + " 0.012\n",
+                        ]
+                    }
+                )
+                self.assertEqual(
+                    observe.wait_probe_rtt("primary", "v4", 0, 0.1, target=target),
+                    0.012,
+                )
+                self.assertEqual(machine.count(SCRAPE), 4)
+
+    def test_unmeasured_requires_every_rtt_and_jitter_series_nan_together(self):
+        rtt = 'wanwatch_probe_rtt_seconds{family="v6",wan="primary"} NaN\n'
+        jitter = 'wanwatch_probe_jitter_seconds{family="v6",wan="primary"} NaN\n'
+        target = 'wanwatch_probe_target_rtt_seconds{family="v6",target="fd00:1::1",wan="primary"}'
+        observe, machine = self.make_observation(
+            {
+                SCRAPE: [
+                    rtt + target + " NaN\n",
+                    rtt + jitter + target + " 0.01\n",
+                    rtt + jitter,
+                    rtt + jitter + target + " NaN\n",
+                ]
+            }
+        )
+        observe.wait_probe_unmeasured("primary", "v6", targets=["fd00:1::1"])
+        self.assertEqual(machine.count(SCRAPE), 4)
 
     def test_absent_decision_counter_is_zero_but_present_counter_is_parsed(self):
         observe, _ = self.make_observation(
@@ -364,8 +419,15 @@ class ObservationTests(unittest.TestCase):
         for low, high in ((-0.1, 1), (0.5, 0.25), (0, 1.1)):
             with self.subTest(low=low, high=high), self.assertRaises(ValueError):
                 observe.wait_probe_loss("primary", "v4", low, high)
+        for low, high in ((-0.1, 1), (0.5, 0.25), (0, float("nan"))):
+            with self.subTest(low=low, high=high), self.assertRaises(ValueError):
+                observe.wait_probe_rtt("primary", "v4", low, high)
         with self.assertRaises(KeyError):
             observe.wait_gateway("primary", "v5", None)
+        with self.assertRaises(KeyError):
+            observe.wait_probe_rtt("primary", "v5")
+        with self.assertRaises(KeyError):
+            observe.wait_probe_unmeasured("primary", "v5")
         self.assertEqual(machine.calls, [])
 
 

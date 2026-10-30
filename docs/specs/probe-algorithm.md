@@ -105,25 +105,29 @@ A dial that fails with `ENODEV` means the interface is absent and is retried. An
 
 `WindowStats` is a fixed-capacity ring buffer of `Sample` values, one per Target.
 
-| Stat           | Computation                             | Boundary case                             |
-| -------------- | --------------------------------------- | ----------------------------------------- |
-| `LossRatio`    | `lost / total`                          | `0` when the Window is empty.             |
-| `MeanRTT`      | Mean over non-Lost Samples              | `0` with no non-Lost Samples.             |
-| `JitterMicros` | Population stddev over non-Lost Samples | `0` with fewer than two non-Lost Samples. |
+| Stat           | Computation                             | Boundary case                                            |
+| -------------- | --------------------------------------- | -------------------------------------------------------- |
+| `LossRatio`    | `lost / total`                          | No data when the Window is empty.                        |
+| `MeanRTT`      | Mean over non-Lost Samples              | No data without a non-Lost Sample.                       |
+| `JitterMicros` | Population stddev over non-Lost Samples | No data without a non-Lost Sample; `0` with exactly one. |
 
-`Aggregate(targets) → FamilyStats` combines the per-Target Windows with an unweighted mean:
+Each statistic reports whether the Window has data for it, so a Window in which every Sample was lost never reads as a perfect RTT of `0`.
+
+`Aggregate(targets) → FamilyStats` combines the per-Target Windows with an unweighted mean over the Targets that have data for each statistic:
 
 ```go
 FamilyStats{
-    RTTMicros:    mean(t.RTTMicros    for t in nonEmptyTargets),
-    JitterMicros: mean(t.JitterMicros for t in nonEmptyTargets),
-    LossRatio:    mean(t.LossRatio    for t in nonEmptyTargets),
+    RTTMicros:    mean(t.RTTMicros    for t in targets with an RTT),
+    JitterMicros: mean(t.JitterMicros for t in targets with a jitter),
+    LossRatio:    mean(t.LossRatio    for t in targets with a loss),
     WindowFilled: every target's window has wrapped at least once,
-    PerTarget:    all targets (including empty),
+    PerTarget:    all targets (including those without data),
 }
 ```
 
-Targets with empty Windows still appear in `PerTarget`, as zeros, so the Prometheus label set stays stable through startup.
+A statistic is nil, no data, when no Target has data for it, and in `PerTarget` when its Target has none. `state.json` reports nil as `null` and the probe gauges report it as NaN ([daemon-state](./daemon-state.md#wansnamefamiliesv4v6), [metrics catalog](../metrics.md#probe)). Targets without data still appear in `PerTarget`, so the Prometheus label set stays stable through startup.
+
+The thresholds treat a statistic without data as passing: a full Window in which no Sample succeeded has no RTT, and its loss of `1` decides the verdict.
 
 The daemon's cold-start gate keys on `WindowFilled`: Hysteresis seeds only once every per-Target Window is full. Otherwise a Lost first Sample, sent before the route to the Target has converged, would seed the verdict unhealthy and cause a spurious down→up Decision pair once Probes catch up. See [Cold-start invariant](./failover.md#cold-start-invariant).
 

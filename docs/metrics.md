@@ -6,11 +6,16 @@ This catalog matches the series registered in `daemon/internal/metrics/metrics.g
 
 ## Probe
 
-| Metric                          | Type  | Labels                    | Meaning                            |
-| ------------------------------- | ----- | ------------------------- | ---------------------------------- |
-| `wanwatch_probe_rtt_seconds`    | gauge | `wan`, `target`, `family` | RTT of the last Sample per Target. |
-| `wanwatch_probe_jitter_seconds` | gauge | `wan`, `family`           | Jitter across the Window.          |
-| `wanwatch_probe_loss_ratio`     | gauge | `wan`, `family`           | Loss in `[0, 1]`.                  |
+| Metric                              | Type  | Labels                    | Meaning                                                                                      |
+| ----------------------------------- | ----- | ------------------------- | -------------------------------------------------------------------------------------------- |
+| `wanwatch_probe_rtt_seconds`        | gauge | `wan`, `family`           | Mean RTT over the Window, averaged across the Family's Targets.                              |
+| `wanwatch_probe_jitter_seconds`     | gauge | `wan`, `family`           | Jitter, the standard deviation of RTT over the Window, averaged across the Family's Targets. |
+| `wanwatch_probe_loss_ratio`         | gauge | `wan`, `family`           | Lost fraction of the Window in `[0, 1]`, averaged across the Family's Targets.               |
+| `wanwatch_probe_target_rtt_seconds` | gauge | `wan`, `family`, `target` | One Target's mean RTT over its Window.                                                       |
+
+The per-Family gauges report the values that `state.json` reports under `wans.<name>.families.<family>` and that the Probe thresholds compare, updated after every probe cycle rather than only at transitions. Each one averages over the Targets that have data for it, so a Target whose Samples were all lost does not pull the RTT toward 0.
+
+A probe gauge reports NaN where `state.json` reports `null`: RTT and jitter until a Sample in the Window succeeds, and loss until the Window holds a Sample. A single successful Sample has a jitter of `0`. Every probe gauge is set for each (WAN, Family) and Target at daemon start, so the series exist and report NaN until the first probe cycle. NaN shows as a gap in a graph, and a comparison with NaN is false, so an RTT alert stays silent on a WAN whose Samples are all lost while the loss alerts fire.
 
 ## WAN
 
@@ -91,10 +96,16 @@ Loss above 30% on any (WAN, Family):
 wanwatch_probe_loss_ratio > 0.30
 ```
 
-RTT across Families on one WAN:
+RTT of each Family on one WAN:
 
 ```promql
 wanwatch_probe_rtt_seconds{wan="primary"}
+```
+
+Targets of one WAN with a mean RTT above 100 ms:
+
+```promql
+wanwatch_probe_target_rtt_seconds{wan="primary"} > 0.1
 ```
 
 ## Scrape configuration

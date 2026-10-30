@@ -1,6 +1,7 @@
 package health
 
 import (
+	"math"
 	"reflect"
 	"slices"
 	"testing"
@@ -38,10 +39,12 @@ func link(iface string, carrier rtnl.Carrier, operstate rtnl.Operstate) event {
 func up(iface string) event   { return link(iface, rtnl.CarrierUp, rtnl.OperstateUp) }
 func down(iface string) event { return link(iface, rtnl.CarrierDown, rtnl.OperstateDown) }
 
+func ptr[T any](v T) *T { return &v }
+
 // window is a probe result whose Window is full.
 func window(wan string, family probe.Family, lossRatio float64, rttMs uint64) event {
 	return event{probe: &probe.ProbeResult{Wan: wan, Family: family, Stats: probe.FamilyStats{
-		LossRatio: lossRatio, RTTMicros: rttMs * 1000, WindowFilled: true,
+		LossRatio: ptr(lossRatio), RTTMicros: ptr(rttMs * 1000), WindowFilled: true,
 	}}}
 }
 
@@ -52,8 +55,23 @@ func partial(wan string, family probe.Family, lossRatio float64, rttMs uint64) e
 	return e
 }
 
+// lost is a full Window in which every Sample was lost, so it has no
+// RTT or jitter.
+func lost(wan string, family probe.Family) event {
+	return event{probe: &probe.ProbeResult{Wan: wan, Family: family, Stats: probe.FamilyStats{
+		LossRatio: ptr(1.0), WindowFilled: true,
+	}}}
+}
+
+// lostPartial is lost before the Window has filled.
+func lostPartial(wan string, family probe.Family) event {
+	e := lost(wan, family)
+	e.probe.Stats.WindowFilled = false
+	return e
+}
+
 func good(wan string, family probe.Family) event { return window(wan, family, 0, 10) }
-func bad(wan string, family probe.Family) event  { return window(wan, family, 1, 0) }
+func bad(wan string, family probe.Family) event  { return lost(wan, family) }
 
 var (
 	noChange  = Change{}
@@ -253,7 +271,7 @@ func TestColdStart(t *testing.T) {
 	}{
 		{"partial Windows keep carrier-only Health, then a good Window seeds healthy", []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: healthy},
-			{event: partial("primary", v4, 1, 0), change: noChange, healthy: healthy},
+			{event: lostPartial("primary", v4), change: noChange, healthy: healthy},
 			{event: partial("primary", v4, 0.5, 10), change: noChange, healthy: healthy},
 			{event: good("primary", v4), change: republish, healthy: healthy},
 			{event: bad("primary", v4), change: noChange, healthy: healthy},
@@ -268,8 +286,8 @@ func TestColdStart(t *testing.T) {
 		{"a partial Window after cooking still counts", []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: healthy},
 			{event: good("primary", v4), change: republish, healthy: healthy},
-			{event: partial("primary", v4, 1, 0), change: noChange, healthy: healthy},
-			{event: partial("primary", v4, 1, 0), change: flipped("primary"), healthy: unhealthy},
+			{event: lostPartial("primary", v4), change: noChange, healthy: healthy},
+			{event: lostPartial("primary", v4), change: flipped("primary"), healthy: unhealthy},
 		}},
 		{"cooking before carrier is up publishes without flipping", []step{
 			{event: good("primary", v4), change: republish, healthy: unhealthy},
@@ -355,8 +373,9 @@ func TestFamilyPolicy(t *testing.T) {
 }
 
 // TestGauges pins the gauges Wans owns. Probe gauges follow every
-// result, including partial Windows. wanwatch_wan_family_healthy is
-// the measured verdict, so it stays 0 until the first full Window.
+// result, including partial Windows, and report NaN where a statistic
+// has no data, from startup on. wanwatch_wan_family_healthy is the
+// measured verdict, so it stays 0 until the first full Window.
 // wanwatch_wan_healthy follows WAN Health after every event, including
 // a link event after probes have cooked (the stale-gauge regression).
 func TestGauges(t *testing.T) {
@@ -366,21 +385,32 @@ func TestGauges(t *testing.T) {
 	w := New(wans(wanCfg("primary", "eth0", 1, 1, v4)), mreg)
 	familyHealthy := func() float64 { return readGauge(t, mreg.WanFamilyHealthy.WithLabelValues("primary", "v4")) }
 	wanHealthy := func() float64 { return readGauge(t, mreg.WanHealthy.WithLabelValues("primary")) }
+	assertProbeGauges := func(step string, rtt, jitter, loss, targetRTT float64) {
+		t.Helper()
+		for _, g := range []struct {
+			name      string
+			got, want float64
+		}{
+			{"wanwatch_probe_rtt_seconds", readGauge(t, mreg.ProbeRTT.WithLabelValues("primary", "v4")), rtt},
+			{"wanwatch_probe_jitter_seconds", readGauge(t, mreg.ProbeJitter.WithLabelValues("primary", "v4")), jitter},
+			{"wanwatch_probe_loss_ratio", readGauge(t, mreg.ProbeLoss.WithLabelValues("primary", "v4")), loss},
+			{"wanwatch_probe_target_rtt_seconds", readGauge(t, mreg.ProbeTargetRTT.WithLabelValues("primary", "v4", "192.0.2.1")), targetRTT},
+		} {
+			if g.got != g.want && !(math.IsNaN(g.got) && math.IsNaN(g.want)) {
+				t.Errorf("%s: %s = %v, want %v", step, g.name, g.got, g.want)
+			}
+		}
+	}
+	nan := math.NaN()
+
+	assertProbeGauges("startup", nan, nan, nan, nan)
 
 	w.Link(*up("eth0").link)
 	w.Probe(probe.ProbeResult{Wan: "primary", Family: v4, Stats: probe.FamilyStats{
-		RTTMicros: 12_000, JitterMicros: 800, LossRatio: 0.5,
-		PerTarget: []probe.TargetStats{{Target: "192.0.2.1", RTTMicros: 12_000}},
+		RTTMicros: ptr[uint64](12_000), JitterMicros: ptr[uint64](800), LossRatio: ptr(0.5),
+		PerTarget: []probe.TargetStats{{Target: "192.0.2.1", RTTMicros: ptr[uint64](12_000)}},
 	}})
-	if v := readGauge(t, mreg.ProbeRTT.WithLabelValues("primary", "192.0.2.1", "v4")); v != 0.012 {
-		t.Errorf("wanwatch_probe_rtt_seconds = %v, want 0.012", v)
-	}
-	if v := readGauge(t, mreg.ProbeJitter.WithLabelValues("primary", "v4")); v != 0.0008 {
-		t.Errorf("wanwatch_probe_jitter_seconds = %v, want 0.0008", v)
-	}
-	if v := readGauge(t, mreg.ProbeLoss.WithLabelValues("primary", "v4")); v != 0.5 {
-		t.Errorf("wanwatch_probe_loss_ratio = %v, want 0.5", v)
-	}
+	assertProbeGauges("partial Window", 0.012, 0.0008, 0.5, 0.012)
 	if v := familyHealthy(); v != 0 {
 		t.Errorf("partial Window: wanwatch_wan_family_healthy = %v, want 0", v)
 	}
@@ -400,7 +430,11 @@ func TestGauges(t *testing.T) {
 		t.Errorf("carrier down: wanwatch_wan_family_healthy = %v, want 1 (carrier is not a Family verdict)", v)
 	}
 	w.Link(*up("eth0").link)
-	w.Probe(*bad("primary", v4).probe)
+	w.Probe(probe.ProbeResult{Wan: "primary", Family: v4, Stats: probe.FamilyStats{
+		LossRatio: ptr(1.0), WindowFilled: true,
+		PerTarget: []probe.TargetStats{{Target: "192.0.2.1", LossRatio: ptr(1.0)}},
+	}})
+	assertProbeGauges("fully lost Window", nan, nan, 1, nan)
 	if v := familyHealthy(); v != 0 {
 		t.Errorf("bad Window: wanwatch_wan_family_healthy = %v, want 0", v)
 	}
@@ -411,7 +445,9 @@ func TestGauges(t *testing.T) {
 
 // TestSnapshot pins the state.Wan view: link state, WAN Health, and per
 // Family the measured verdict, the latest Window statistics (even from
-// a partial Window), and the Targets. Gateways are left to the caller.
+// a partial Window), and the Targets. A statistic without data, such as
+// the RTT of a fully lost Window or every statistic before the first
+// result, is nil. Gateways are left to the caller.
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
 	v4, v6 := probe.FamilyV4, probe.FamilyV6
@@ -421,15 +457,15 @@ func TestSnapshot(t *testing.T) {
 	w.Link(*up("eth0").link)
 	w.Probe(*bad("primary", v4).probe)
 	w.Probe(probe.ProbeResult{Wan: "primary", Family: v6, Stats: probe.FamilyStats{
-		RTTMicros: 12_500, JitterMicros: 800, LossRatio: 0.05,
+		RTTMicros: ptr[uint64](12_500), JitterMicros: ptr[uint64](800), LossRatio: ptr(0.05),
 	}})
 
 	want := map[string]state.Wan{
 		"primary": {
 			Interface: "eth0", Carrier: "up", Operstate: "up", Healthy: true,
 			Families: map[string]state.FamilyHealth{
-				"v4": {Healthy: false, LossRatio: 1, Targets: []string{"192.0.2.1"}},
-				"v6": {Healthy: false, RTTSeconds: 0.0125, JitterSeconds: 0.0008, LossRatio: 0.05, Targets: []string{"2001:db8::1"}},
+				"v4": {Healthy: false, LossRatio: ptr(1.0), Targets: []string{"192.0.2.1"}},
+				"v6": {Healthy: false, RTTSeconds: ptr(0.0125), JitterSeconds: ptr(0.0008), LossRatio: ptr(0.05), Targets: []string{"2001:db8::1"}},
 			},
 		},
 		"backup": {

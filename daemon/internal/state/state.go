@@ -63,12 +63,14 @@ type Gateways struct {
 // surfaced in state.json. The type was renamed from `Family` to
 // avoid colliding with `probe.Family` (the IP-family enum used
 // everywhere else). Numeric units are seconds and a [0, 1] ratio
-// for parity with the Prometheus gauges.
+// for parity with the Prometheus gauges. A nil statistic, JSON null,
+// has no data: RTTSeconds and JitterSeconds until a Sample in the
+// Family's Window succeeds, LossRatio while the Window holds no Sample.
 type FamilyHealth struct {
 	Healthy       bool     `json:"healthy"`
-	RTTSeconds    float64  `json:"rttSeconds"`
-	JitterSeconds float64  `json:"jitterSeconds"`
-	LossRatio     float64  `json:"lossRatio"`
+	RTTSeconds    *float64 `json:"rttSeconds"`
+	JitterSeconds *float64 `json:"jitterSeconds"`
+	LossRatio     *float64 `json:"lossRatio"`
 	Targets       []string `json:"targets"`
 }
 

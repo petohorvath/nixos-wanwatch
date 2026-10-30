@@ -264,17 +264,20 @@ func baseConfig() *config.Config {
 	}
 }
 
+func ptr[T any](v T) *T { return &v }
+
 // healthy is a full Window that passes baseConfig's thresholds.
 func healthy(wan string, fam probe.Family) probe.ProbeResult {
 	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
-		RTTMicros: 10_000, WindowFilled: true,
+		RTTMicros: ptr[uint64](10_000), JitterMicros: ptr[uint64](0), LossRatio: ptr(0.0), WindowFilled: true,
 	}}
 }
 
-// lossy is a full Window in which every Sample was lost.
+// lossy is a full Window in which every Sample was lost, so it has no
+// RTT or jitter.
 func lossy(wan string, fam probe.Family) probe.ProbeResult {
 	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
-		LossRatio: 1, WindowFilled: true,
+		LossRatio: ptr(1.0), WindowFilled: true,
 	}}
 }
 

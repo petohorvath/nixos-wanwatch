@@ -39,7 +39,7 @@ Window statistics (`rttSeconds`, `jitterSeconds`, `lossRatio`) are not republish
 | `wans`      | object                      | Map from WAN name to per-WAN State.                                                                                                                                      |
 | `groups`    | object                      | Map from Group name to per-Group State.                                                                                                                                  |
 
-An absent value is always `null`, never `""`: a Gateway not yet known, no Selection, or no `selectionSince`. Hook env vars are strings, so they encode the same absences as `""`.
+An absent value is always `null`, never `""`: a Gateway not yet known, no Selection, no `selectionSince`, or a probe statistic without data. Hook env vars are strings, so they encode the same absences as `""`.
 
 ## `wans.<name>`
 
@@ -81,13 +81,15 @@ A kernel operstate outside the `operstate` set reports as `unknown`, as in `wanw
 }
 ```
 
-| Field           | Type          | Meaning                                                                                                                                                        |
-| --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `healthy`       | bool          | Verdict after thresholds and Hysteresis. `false` until the first ProbeResult cooks the Family; see [Cold-start invariant](./failover.md#cold-start-invariant). |
-| `rttSeconds`    | float         | Mean RTT across the Family's Targets, in seconds.                                                                                                              |
-| `jitterSeconds` | float         | Mean jitter (stddev) across the Family's Targets, in seconds.                                                                                                  |
-| `lossRatio`     | float         | Mean loss in `[0, 1]`.                                                                                                                                         |
-| `targets`       | array<string> | The Family's Targets, echoed from config.                                                                                                                      |
+| Field           | Type          | Meaning                                                                                                                                                                                            |
+| --------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `healthy`       | bool          | Verdict after thresholds and Hysteresis. `false` until the first ProbeResult cooks the Family; see [Cold-start invariant](./failover.md#cold-start-invariant).                                     |
+| `rttSeconds`    | float \| null | Mean RTT over the Window, in seconds, averaged across the Family's Targets that have a successful Sample. `null` when no Sample in the Window succeeded.                                           |
+| `jitterSeconds` | float \| null | Jitter, the population standard deviation of RTT over the Window, in seconds, averaged across the same Targets. `0` for a single successful Sample; `null` when no Sample in the Window succeeded. |
+| `lossRatio`     | float \| null | Lost fraction of the Window in `[0, 1]`, averaged across the Family's Targets that have a Sample. `null` only when the Window holds no Sample, as before the first probe cycle.                    |
+| `targets`       | array<string> | The Family's Targets, echoed from config.                                                                                                                                                          |
+
+A WAN whose Samples are all lost reports `rttSeconds` and `jitterSeconds` as `null` and `lossRatio` as `1`, never a perfect RTT of `0`. The Prometheus probe gauges report the same values, with NaN for `null` ([metrics catalog](../metrics.md#probe)).
 
 ## `groups.<name>`
 

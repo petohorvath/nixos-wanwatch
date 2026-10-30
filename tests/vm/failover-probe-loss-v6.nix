@@ -170,6 +170,11 @@ pkgs.testers.runNixOSTest {
     )
     # Per-sample stats continue updating only on the Prometheus surface.
     observe.wait_probe_loss("primary", "v6", 0.5)
+    # Once every Sample in the Window is lost, the RTT and jitter
+    # gauges report NaN, no data, rather than a perfect 0.
+    observe.wait_probe_unmeasured(
+        "primary", "v6", targets=["fd00:1::1", "fd00:1::2"]
+    )
 
     # ==== Phase B — clear netem ⇒ recovery ====
 
@@ -177,6 +182,7 @@ pkgs.testers.runNixOSTest {
     observe.wait_selection("home-uplink", "primary", timeout=10)
     # Poll live probe stats; state.json changes only on transitions.
     observe.wait_probe_loss("primary", "v6", 0.0, 0.10)
+    observe.wait_probe_rtt("primary", "v6")
 
     # ==== Phase C — blip suppression (removed) ====
     #

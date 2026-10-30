@@ -6,6 +6,7 @@ package health
 
 import (
 	"cmp"
+	"math"
 	"slices"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
@@ -57,18 +58,25 @@ type family struct {
 }
 
 // New builds cold Health for every WAN in cfgs: carrier and operstate
-// unknown, no Family cooked. It sets the link-state gauges to unknown
-// and performs no I/O.
+// unknown, no Family cooked, no probe statistics. It sets the
+// link-state gauges to unknown and the probe gauges to NaN, and
+// performs no I/O.
 func New(cfgs map[string]config.Wan, mreg *metrics.Registry) *Wans {
 	w := &Wans{byName: make(map[string]*wan, len(cfgs)), metrics: mreg}
 	for name, cfg := range cfgs {
 		ws := &wan{name: name, cfg: cfg, families: make(map[probe.Family]*family, 2)}
 		hyst := cfg.Probe.Hysteresis
 		for _, fam := range cfg.Probe.Targets.Families() {
-			ws.families[fam] = &family{
-				targets: cfg.Probe.Targets.For(fam),
+			targets := cfg.Probe.Targets.For(fam)
+			fs := &family{
+				targets: targets,
 				hyst:    newHysteresis(hyst.ConsecutiveUp, hyst.ConsecutiveDown),
 			}
+			for _, t := range targets {
+				fs.stats.PerTarget = append(fs.stats.PerTarget, probe.TargetStats{Target: t})
+			}
+			ws.families[fam] = fs
+			w.recordStats(name, fam, fs.stats)
 		}
 		w.byName[name] = ws
 		w.recordLink(ws)
@@ -127,14 +135,41 @@ func (ws *wan) fold(fs *family, stats probe.FamilyStats) Change {
 // see live RTT and loss before the first full Window, and the Health
 // gauges from the verdicts the result left behind.
 func (w *Wans) recordProbe(ws *wan, fs *family, r probe.ProbeResult) {
+	w.recordStats(ws.name, r.Family, r.Stats)
 	fam := r.Family.String()
-	w.metrics.ProbeJitter.WithLabelValues(ws.name, fam).Set(float64(r.Stats.JitterMicros) / 1e6)
-	w.metrics.ProbeLoss.WithLabelValues(ws.name, fam).Set(r.Stats.LossRatio)
-	for _, t := range r.Stats.PerTarget {
-		w.metrics.ProbeRTT.WithLabelValues(ws.name, t.Target, fam).Set(float64(t.RTTMicros) / 1e6)
-	}
 	w.metrics.WanFamilyHealthy.WithLabelValues(ws.name, fam).Set(boolToFloat(fs.healthy))
 	w.metrics.WanHealthy.WithLabelValues(ws.name).Set(boolToFloat(ws.healthy()))
+}
+
+// recordStats sets the probe gauges of one (WAN, Family) to the values
+// State reports for it, and NaN where State reports null.
+func (w *Wans) recordStats(wan string, fam probe.Family, stats probe.FamilyStats) {
+	f := fam.String()
+	w.metrics.ProbeRTT.WithLabelValues(wan, f).Set(gaugeValue(seconds(stats.RTTMicros)))
+	w.metrics.ProbeJitter.WithLabelValues(wan, f).Set(gaugeValue(seconds(stats.JitterMicros)))
+	w.metrics.ProbeLoss.WithLabelValues(wan, f).Set(gaugeValue(stats.LossRatio))
+	for _, t := range stats.PerTarget {
+		w.metrics.ProbeTargetRTT.WithLabelValues(wan, f, t.Target).Set(gaugeValue(seconds(t.RTTMicros)))
+	}
+}
+
+// seconds converts an optional microsecond statistic to seconds; nil,
+// no data, stays nil.
+func seconds(micros *uint64) *float64 {
+	if micros == nil {
+		return nil
+	}
+	s := float64(*micros) / 1e6
+	return &s
+}
+
+// gaugeValue is the gauge encoding of an optional statistic: NaN for
+// no data, so a graph shows a gap and a threshold alert stays false.
+func gaugeValue(v *float64) float64 {
+	if v == nil {
+		return math.NaN()
+	}
+	return *v
 }
 
 // Link folds a LinkEvent into every WAN on its interface before
@@ -234,8 +269,9 @@ func (w *Wans) MemberHealth(g selector.Group) []selector.MemberHealth {
 
 // Snapshot returns every WAN's State view, keyed by WAN name. Each
 // Family carries its measured verdict and the latest Window
-// statistics. Gateways are left empty: the caller owns the Gateway
-// cache, which Health does not depend on.
+// statistics, nil where a statistic has no data. Gateways are left
+// empty: the caller owns the Gateway cache, which Health does not
+// depend on.
 func (w *Wans) Snapshot() map[string]state.Wan {
 	out := make(map[string]state.Wan, len(w.byName))
 	for name, ws := range w.byName {
@@ -243,8 +279,8 @@ func (w *Wans) Snapshot() map[string]state.Wan {
 		for fam, fs := range ws.families {
 			fams[fam.String()] = state.FamilyHealth{
 				Healthy:       fs.healthy,
-				RTTSeconds:    float64(fs.stats.RTTMicros) / 1e6,
-				JitterSeconds: float64(fs.stats.JitterMicros) / 1e6,
+				RTTSeconds:    seconds(fs.stats.RTTMicros),
+				JitterSeconds: seconds(fs.stats.JitterMicros),
 				LossRatio:     fs.stats.LossRatio,
 				Targets:       fs.targets,
 			}
@@ -295,9 +331,12 @@ func (ws *wan) combineFamilies() bool {
 // evaluateThresholds is a two-threshold band-pass: at or above Down,
 // unhealthy; at or below Up, healthy; in between, hold prev. The Nix
 // option type guarantees Up < Down, so the band is never empty.
+//
+// A statistic without data passes its thresholds: a Window in which no
+// Sample succeeded has no RTT, and its loss decides the verdict.
 func evaluateThresholds(prev bool, stats probe.FamilyStats, t config.Thresholds) bool {
-	lossPct := stats.LossRatio * 100
-	rttMs := float64(stats.RTTMicros) / 1000
+	lossPct := orZero(stats.LossRatio) * 100
+	rttMs := float64(orZero(stats.RTTMicros)) / 1000
 	if prev {
 		return lossPct < float64(t.LossPctDown) && rttMs < float64(t.RttMsDown)
 	}
@@ -324,6 +363,14 @@ func (ws *wan) carrierUp() bool {
 		return false
 	}
 	return ws.carrier == rtnl.CarrierUp || ws.operstate == rtnl.OperstateUp
+}
+
+// orZero reads an optional statistic, no data as 0.
+func orZero[T uint64 | float64](v *T) T {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 func boolToFloat(b bool) float64 {

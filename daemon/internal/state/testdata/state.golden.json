@@ -4,6 +4,36 @@
   "startedAt": "2026-10-13T09:11:58.402117358Z",
   "updatedAt": "__REPLACED__",
   "wans": {
+    "backup": {
+      "interface": "wwan0",
+      "carrier": "up",
+      "operstate": "up",
+      "healthy": false,
+      "gateways": {
+        "v4": "198.51.100.1",
+        "v6": null
+      },
+      "families": {
+        "v4": {
+          "healthy": false,
+          "rttSeconds": null,
+          "jitterSeconds": null,
+          "lossRatio": 1,
+          "targets": [
+            "9.9.9.9"
+          ]
+        },
+        "v6": {
+          "healthy": false,
+          "rttSeconds": null,
+          "jitterSeconds": null,
+          "lossRatio": null,
+          "targets": [
+            "2620:fe::fe"
+          ]
+        }
+      }
+    },
     "primary": {
       "interface": "eth0",
       "carrier": "up",

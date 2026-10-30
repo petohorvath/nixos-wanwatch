@@ -40,7 +40,8 @@ type Sample struct {
 // WindowStats is a sliding-window aggregator over Samples. The caller
 // pushes one Sample per probe cycle via Push; older samples are
 // discarded once Capacity is reached. Metrics — loss ratio, mean
-// RTT, jitter — are read via the accessor methods.
+// RTT, jitter — are read via the accessor methods, each of which
+// reports whether the window holds data for it.
 //
 // The zero value is unusable; construct via NewWindow. WindowStats
 // is not safe for concurrent use; wrap externally if multiple
@@ -98,11 +99,12 @@ func (w *WindowStats) Len() int {
 func (w *WindowStats) Filled() bool { return w.filled }
 
 // LossRatio returns the fraction of Samples in the window that were
-// Lost, as a float in [0.0, 1.0]. Returns 0 when the window is empty.
-func (w *WindowStats) LossRatio() float64 {
+// Lost, as a float in [0.0, 1.0]. It reports false, no data, when the
+// window is empty.
+func (w *WindowStats) LossRatio() (float64, bool) {
 	n := w.Len()
 	if n == 0 {
-		return 0
+		return 0, false
 	}
 	var lost int
 	w.forEach(func(s Sample) {
@@ -110,12 +112,13 @@ func (w *WindowStats) LossRatio() float64 {
 			lost++
 		}
 	})
-	return float64(lost) / float64(n)
+	return float64(lost) / float64(n), true
 }
 
 // MeanRTT returns the arithmetic mean of RTTs across non-Lost Samples,
-// in microseconds. Returns 0 when no non-Lost Samples are in the window.
-func (w *WindowStats) MeanRTT() uint64 {
+// in microseconds. It reports false, no data, when no non-Lost Sample
+// is in the window, so a dead link never reads as a perfect RTT of 0.
+func (w *WindowStats) MeanRTT() (uint64, bool) {
 	var sum, n uint64
 	w.forEach(func(s Sample) {
 		if !s.Lost {
@@ -124,17 +127,20 @@ func (w *WindowStats) MeanRTT() uint64 {
 		}
 	})
 	if n == 0 {
-		return 0
+		return 0, false
 	}
-	return sum / n
+	return sum / n, true
 }
 
 // JitterMicros returns the population standard deviation of RTTs
-// across non-Lost Samples, in microseconds. Returns 0 when fewer than
-// two non-Lost Samples are in the window — stddev is degenerate
-// below that threshold.
-func (w *WindowStats) JitterMicros() uint64 {
-	mean := w.MeanRTT()
+// across non-Lost Samples, in microseconds. It reports false, no data,
+// when no non-Lost Sample is in the window. A single non-Lost Sample
+// has a jitter of 0, so no data always means no successful Sample.
+func (w *WindowStats) JitterMicros() (uint64, bool) {
+	mean, ok := w.MeanRTT()
+	if !ok {
+		return 0, false
+	}
 	var sumSq float64
 	var n uint64
 	w.forEach(func(s Sample) {
@@ -144,11 +150,8 @@ func (w *WindowStats) JitterMicros() uint64 {
 			n++
 		}
 	})
-	if n < 2 {
-		return 0
-	}
 	variance := sumSq / float64(n)
-	return uint64(math.Sqrt(variance))
+	return uint64(math.Sqrt(variance)), true
 }
 
 // forEach iterates every Sample in the window in oldest-to-newest

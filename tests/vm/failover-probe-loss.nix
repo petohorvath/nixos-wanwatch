@@ -162,13 +162,18 @@ pkgs.testers.runNixOSTest {
         f"transition lossRatio = {failed_v4['lossRatio']}, want ≥ 0.25"
     )
     observe.wait_probe_loss("primary", "v4", 0.5)
+    # Once every Sample in the Window is lost, the RTT and jitter
+    # gauges report NaN, no data, rather than a perfect 0.
+    observe.wait_probe_unmeasured("primary", "v4", targets=["192.168.1.1"])
 
     # 5. Clearing netem restores primary after consecutiveUp good
     #    cycles.
     router.succeed("tc qdisc del dev eth1 root")
     observe.wait_selection("home-uplink", "primary", timeout=10)
 
-    # Primary's live loss falls back to the recovery band.
+    # Primary's live loss falls back to the recovery band, and its
+    # Target's RTT is measured again.
     observe.wait_probe_loss("primary", "v4", 0.0, 0.10)
+    observe.wait_probe_rtt("primary", "v4", target="192.168.1.1")
   '';
 }

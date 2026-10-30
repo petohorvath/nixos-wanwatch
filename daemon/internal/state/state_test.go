@@ -184,6 +184,7 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	w := Writer{Path: path}
 
 	selection := "primary"
+	rtt, jitter, loss := 0.0124, 0.0012, 0.0
 	s := State{
 		Wans: map[string]Wan{
 			"primary": {
@@ -192,7 +193,7 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 				Operstate: "up",
 				Healthy:   true,
 				Families: map[string]FamilyHealth{
-					"v4": {Healthy: true, RTTSeconds: 0.0124, JitterSeconds: 0.0012, LossRatio: 0.0, Targets: []string{"1.1.1.1"}},
+					"v4": {Healthy: true, RTTSeconds: &rtt, JitterSeconds: &jitter, LossRatio: &loss, Targets: []string{"1.1.1.1"}},
 				},
 			},
 		},
@@ -214,8 +215,8 @@ func TestWriteEmbedsFamilyAndGroupState(t *testing.T) {
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if out.Wans["primary"].Families["v4"].RTTSeconds != 0.0124 {
-		t.Errorf("nested RTT did not round-trip: %v", out.Wans["primary"].Families["v4"].RTTSeconds)
+	if got := out.Wans["primary"].Families["v4"].RTTSeconds; got == nil || *got != 0.0124 {
+		t.Errorf("nested RTT did not round-trip: %v", got)
 	}
 	if out.Groups["home"].Selection == nil || *out.Groups["home"].Selection != "primary" {
 		t.Errorf("Selection did not round-trip: %v", out.Groups["home"].Selection)
@@ -302,11 +303,12 @@ func TestWriteReturnsRecognizableErrors(t *testing.T) {
 func TestWriteFailsOnUnmarshalableState(t *testing.T) {
 	t.Parallel()
 	w := Writer{Path: filepath.Join(t.TempDir(), "state.json")}
+	nan := math.NaN()
 	err := w.Write(State{
 		Wans: map[string]Wan{
 			"primary": {
 				Families: map[string]FamilyHealth{
-					"v4": {LossRatio: math.NaN()},
+					"v4": {LossRatio: &nan},
 				},
 			},
 		},
@@ -331,7 +333,8 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.json")
 	w := Writer{Path: path}
-	selection, gatewayV4 := "primary", "192.0.2.1"
+	selection, gatewayV4, backupGatewayV4 := "primary", "192.0.2.1", "198.51.100.1"
+	rtt, jitter, loss, lost := 0.0124, 0.0012, 0.05, 1.0
 	selectionSince := time.Date(2026, 10, 13, 9, 12, 4, 118204511, time.UTC)
 	s := State{
 		Version:   "0.1.0",
@@ -347,10 +350,31 @@ func TestWireShapeMatchesGolden(t *testing.T) {
 				Families: map[string]FamilyHealth{
 					"v4": {
 						Healthy:       true,
-						RTTSeconds:    0.0124,
-						JitterSeconds: 0.0012,
-						LossRatio:     0.05,
+						RTTSeconds:    &rtt,
+						JitterSeconds: &jitter,
+						LossRatio:     &loss,
 						Targets:       []string{"1.1.1.1"},
+					},
+				},
+			},
+			// Every Sample in backup's v4 Window was lost: no RTT or
+			// jitter to report. Its v6 Window holds no Sample yet, so
+			// it has no loss to report either.
+			"backup": {
+				Interface: "wwan0",
+				Carrier:   "up",
+				Operstate: "up",
+				Healthy:   false,
+				Gateways:  Gateways{V4: &backupGatewayV4},
+				Families: map[string]FamilyHealth{
+					"v4": {
+						Healthy:   false,
+						LossRatio: &lost,
+						Targets:   []string{"9.9.9.9"},
+					},
+					"v6": {
+						Healthy: false,
+						Targets: []string{"2620:fe::fe"},
 					},
 				},
 			},

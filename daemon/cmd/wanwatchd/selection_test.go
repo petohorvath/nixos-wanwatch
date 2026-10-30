@@ -1,9 +1,6 @@
 package main
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -91,28 +88,6 @@ func TestStateNamesTheSelection(t *testing.T) {
 	assertSelection(t, h, "down", "", hooks[2].Timestamp)
 }
 
-// selectedSeries scrapes h's metrics endpoint and returns each
-// wanwatch_group_selected series, keyed by its label set, with its
-// value as exposed.
-func selectedSeries(tb testing.TB, h *harness) map[string]string {
-	tb.Helper()
-	rec := httptest.NewRecorder()
-	h.metrics.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody))
-	if rec.Code != http.StatusOK {
-		tb.Fatalf("scrape status = %d, want 200", rec.Code)
-	}
-	series := map[string]string{}
-	for line := range strings.Lines(rec.Body.String()) {
-		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "wanwatch_group_selected{")
-		if !ok {
-			continue
-		}
-		labels, value, _ := strings.Cut(rest, "} ")
-		series[labels] = value
-	}
-	return series
-}
-
 // TestGroupSelectedGauge pins wanwatch_group_selected: every Member
 // of every Group is exposed at 0 from startup, so a Group that never
 // had a Selection is visible, and a Decision sets its Selection to 1.
@@ -128,7 +103,7 @@ func TestGroupSelectedGauge(t *testing.T) {
 
 	assertSeries := func(step string, want map[string]string) {
 		t.Helper()
-		got := selectedSeries(t, h)
+		got := scrapeSeries(t, h, "wanwatch_group_selected")
 		if len(got) != len(want) {
 			t.Errorf("%s: wanwatch_group_selected = %v, want %v", step, got, want)
 			return
