@@ -174,8 +174,8 @@ func New() *Registry {
 			Namespace: Namespace,
 			Subsystem: "hook",
 			Name:      "invocations_total",
-			Help:      "Hook invocations partitioned by event and result ∈ {ok,nonzero,timeout}.",
-		}, []string{"event", "result"}),
+			Help:      "Hook runs by Group, event, and result: ok, nonzero, timeout, or error.",
+		}, []string{"group", "event", "result"}),
 
 		BuildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: Namespace,

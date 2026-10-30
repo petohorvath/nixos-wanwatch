@@ -48,15 +48,30 @@ type HookContext struct {
 	Timestamp    time.Time
 }
 
-// hookResult records the outcome of one hook: invoked (with its
-// exit code, timeout flag, and captured output), or skipped because
-// hookRunner.MaxHooks was reached. Returned in a slice from hookRunner.run;
-// hooks that timed out have `TimedOut = true` and `ExitCode = -1`.
+// hookOutcome classifies one Hook of an event. The first four values
+// are the `result` label of wanwatch_hook_invocations_total
+// (docs/metrics.md); skipped and cancelled Hooks are not counted.
+type hookOutcome string
+
+const (
+	hookOK      hookOutcome = "ok"      // ran and exited 0
+	hookNonzero hookOutcome = "nonzero" // ran and exited non-zero, or was killed by a signal
+	hookTimeout hookOutcome = "timeout" // killed at the per-Hook deadline
+	hookError   hookOutcome = "error"   // could not be run: unreadable event directory or exec failure
+	// hookSkipped: not run because hookRunner.MaxHooks was reached.
+	hookSkipped hookOutcome = "skipped"
+	// hookCancelled: killed, or never started, because the daemon is
+	// shutting down.
+	hookCancelled hookOutcome = "cancelled"
+)
+
+// hookResult records one Hook of an event: its outcome, exit code,
+// error, and captured output. Hooks that were killed or never ran
+// have `ExitCode = -1`.
 type hookResult struct {
 	Path     string
+	Outcome  hookOutcome
 	ExitCode int
-	TimedOut bool
-	Skipped  bool
 	Err      error
 	Duration time.Duration
 	Output   string // combined stdout+stderr, capped at maxHookOutput
@@ -70,7 +85,7 @@ type hookResult struct {
 // `global.hookTimeoutMs` (docs/specs/daemon-config.md). A zero Timeout falls back
 // to DefaultHookTimeout — the value a hookRunner constructed directly,
 // without a config, gets. MaxHooks caps how many hooks one event
-// runs — the rest come back as hookResult{Skipped: true}; zero
+// runs — the rest come back with Outcome hookSkipped; zero
 // MaxHooks means unlimited.
 type hookRunner struct {
 	Dir      string
@@ -112,12 +127,15 @@ const (
 // run executes the hooks under `<Dir>/<ctx.Event>.d/` with the env
 // vars in docs/specs/daemon-state.md. Returns one hookResult per file. A missing
 // event directory returns nil — not an error; users with no hooks
-// shouldn't see noise in the logs.
+// shouldn't see noise in the logs. Any other failure to read it
+// returns a single hookError result for the directory.
 //
 // Files run in lexicographic order (matching `run-parts`), each in
 // its own context with the configured timeout. At most MaxHooks of
-// them run; the rest are returned with `Skipped = true` so the
-// caller can surface the cap rather than starving them silently.
+// them run; the rest are returned as hookSkipped so the caller can
+// surface the cap rather than starving them silently. Once parent is
+// cancelled, the Hook it killed is hookCancelled and the rest are
+// not run or returned.
 func (r *hookRunner) run(parent context.Context, ctx HookContext) []hookResult {
 	eventDir := filepath.Join(r.Dir, string(ctx.Event)+".d")
 	entries, err := os.ReadDir(eventDir)
@@ -125,7 +143,7 @@ func (r *hookRunner) run(parent context.Context, ctx HookContext) []hookResult {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return []hookResult{{Path: eventDir, Err: err}}
+		return []hookResult{{Path: eventDir, Outcome: hookError, ExitCode: -1, Err: err}}
 	}
 
 	timeout := r.Timeout
@@ -150,8 +168,11 @@ func (r *hookRunner) run(parent context.Context, ctx HookContext) []hookResult {
 
 	results := make([]hookResult, 0, len(paths))
 	for i, p := range paths {
+		if parent.Err() != nil {
+			break
+		}
 		if r.MaxHooks > 0 && i >= r.MaxHooks {
-			results = append(results, hookResult{Path: p, Skipped: true})
+			results = append(results, hookResult{Path: p, Outcome: hookSkipped, ExitCode: -1})
 			continue
 		}
 		results = append(results, runOne(parent, p, env, timeout))
@@ -187,22 +208,24 @@ func runOne(parent context.Context, path string, env []string, timeout time.Dura
 	err := cmd.Run()
 	dur := time.Since(start)
 
-	res := hookResult{Path: path, Duration: dur, Output: out.String()}
-	if hookCtx.Err() == context.DeadlineExceeded {
-		res.TimedOut = true
-		res.ExitCode = -1
-		res.Err = hookCtx.Err()
+	res := hookResult{Path: path, Outcome: hookOK, Duration: dur, Output: out.String()}
+	if err == nil {
 		return res
 	}
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			res.ExitCode = exitErr.ExitCode()
-		} else {
-			res.ExitCode = -1
-		}
-		res.Err = err
-		return res
+	res.Err = err
+	res.ExitCode = -1
+	var exitErr *exec.ExitError
+	switch {
+	case parent.Err() != nil:
+		res.Outcome = hookCancelled
+	case errors.Is(hookCtx.Err(), context.DeadlineExceeded):
+		res.Outcome = hookTimeout
+		res.Err = hookCtx.Err()
+	case errors.As(err, &exitErr):
+		res.Outcome = hookNonzero
+		res.ExitCode = exitErr.ExitCode()
+	default:
+		res.Outcome = hookError
 	}
 	return res
 }

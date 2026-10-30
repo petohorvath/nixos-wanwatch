@@ -147,8 +147,13 @@ A Hook runs with the daemon's identity and privileges. Installing a Hook grants 
 - Files run in lexicographic order (`a-first.sh`, `b-second.sh`, …), following the `run-parts` convention.
 - At most eight executable files run per event; the rest are skipped and logged.
 - Each invocation is a fresh process with the `global.hookTimeoutMs` deadline (5 seconds by default, `state.DefaultHookTimeout`).
-- Non-zero exits and timeouts are logged and counted in `wanwatch_hook_invocations_total{event,result}`, but never abort Apply. Hooks are notifications, not gates.
-- Daemon shutdown cancels in-flight scripts, kills their process groups, discards queued events, and waits for the worker to finish.
+- Each Hook run counts once in `wanwatch_hook_invocations_total{group,event,result}`, with `result`:
+  - `ok`: the Hook exited 0.
+  - `nonzero`: the Hook ran and exited non-zero, or a signal killed it.
+  - `timeout`: the Hook ran past its deadline and was killed.
+  - `error`: the Hook could not be run, because the event directory exists but could not be read, or exec failed. An unreadable event directory counts one `error` for the event.
+- Every result except `ok` is logged with the Group, event, and Hook path. No result aborts Apply. Hooks are notifications, not gates.
+- Daemon shutdown cancels in-flight scripts, kills their process groups, discards queued events, and waits for the worker to finish. A Hook killed or left unstarted by shutdown is neither counted nor logged as a failure.
 
 ### Example Hook
 

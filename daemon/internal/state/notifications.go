@@ -112,23 +112,21 @@ func (n *HookNotifier) deliver() {
 
 func (n *HookNotifier) execute(hookCtx HookContext) {
 	for _, r := range n.run(n.parent, hookCtx) {
-		if r.Skipped {
-			n.logger.Warn("hook skipped: per-event limit reached",
-				"event", string(hookCtx.Event), "hook", r.Path, "limit", maxHooksPerEvent)
+		attrs := []any{"group", hookCtx.Group, "event", string(hookCtx.Event), "hook", r.Path}
+		switch r.Outcome {
+		case hookSkipped:
+			n.logger.Warn("hook skipped: per-event limit reached", append(attrs, "limit", maxHooksPerEvent)...)
 			continue
+		case hookCancelled:
+			n.logger.Debug("hook cancelled by shutdown", attrs...)
+			continue
+		case hookError:
+			n.logger.Error("hook could not be run", append(attrs, "result", string(r.Outcome), "err", r.Err)...)
+		case hookNonzero, hookTimeout:
+			n.logger.Warn("hook failed", append(attrs,
+				"result", string(r.Outcome), "exitCode", r.ExitCode, "err", r.Err, "output", r.Output)...)
 		}
-		result := "ok"
-		switch {
-		case r.TimedOut:
-			result = "timeout"
-		case r.ExitCode != 0:
-			result = "nonzero"
-		}
-		n.metrics.HookInvocations.WithLabelValues(string(hookCtx.Event), result).Inc()
-		if result != "ok" {
-			n.logger.Warn("hook failed",
-				"event", string(hookCtx.Event), "hook", r.Path, "result", result,
-				"exitCode", r.ExitCode, "err", r.Err, "output", r.Output)
-		}
+		// Counted after logging, so a counted failure is already in the log.
+		n.metrics.HookInvocations.WithLabelValues(hookCtx.Group, string(hookCtx.Event), string(r.Outcome)).Inc()
 	}
 }

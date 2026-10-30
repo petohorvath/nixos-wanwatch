@@ -107,8 +107,8 @@ func TestRunHonorsTimeout(t *testing.T) {
 	if elapsed > 2*time.Second {
 		t.Errorf("Run took %v — timeout did not fire", elapsed)
 	}
-	if !results[0].TimedOut {
-		t.Errorf("TimedOut = false, want true")
+	if results[0].Outcome != hookTimeout {
+		t.Errorf("Outcome = %q, want %q", results[0].Outcome, hookTimeout)
 	}
 	if results[0].ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1 for timeout", results[0].ExitCode)
@@ -275,7 +275,7 @@ func TestRunBoundsMultipleSlowHooks(t *testing.T) {
 		t.Errorf("len(results) = %d, want 3", len(results))
 	}
 	for _, r := range results {
-		if !r.TimedOut {
+		if r.Outcome != hookTimeout {
 			t.Errorf("hook %q did not time out", r.Path)
 		}
 	}
@@ -322,8 +322,8 @@ func TestRunCapturesNonExitError(t *testing.T) {
 	if results[0].ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1 for non-ExitError failure", results[0].ExitCode)
 	}
-	if results[0].TimedOut {
-		t.Error("TimedOut = true, want false for non-timeout failure")
+	if results[0].Outcome != hookError {
+		t.Errorf("Outcome = %q, want %q for an exec failure", results[0].Outcome, hookError)
 	}
 }
 
@@ -342,8 +342,8 @@ func TestRunTimeoutKillsBackgroundedDescendants(t *testing.T) {
 
 	r := hookRunner{Dir: dir, Timeout: 200 * time.Millisecond}
 	results := r.run(context.Background(), HookContext{Event: EventUp})
-	if !results[0].TimedOut {
-		t.Fatalf("setup: hook did not time out (TimedOut = false)")
+	if results[0].Outcome != hookTimeout {
+		t.Fatalf("setup: hook did not time out (Outcome = %q)", results[0].Outcome)
 	}
 
 	// Well past the backgrounded subshell's 1s sleep: with the process
@@ -534,7 +534,7 @@ func TestCancelHookDirectKillError(t *testing.T) {
 
 // TestRunCapsHookCount: with more executable hooks than MaxHooks,
 // only the first MaxHooks (lexicographic) run; the rest come back
-// marked Skipped so the daemon can log them rather than letting
+// as hookSkipped so the daemon can log them rather than letting
 // them silently starve.
 func TestRunCapsHookCount(t *testing.T) {
 	t.Parallel()
@@ -553,7 +553,7 @@ func TestRunCapsHookCount(t *testing.T) {
 	}
 	var ranCount, skipped int
 	for _, res := range results {
-		if res.Skipped {
+		if res.Outcome == hookSkipped {
 			skipped++
 		} else {
 			ranCount++

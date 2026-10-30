@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -35,6 +35,7 @@ type harness struct {
 	metrics   *metrics.Registry
 	recorder  *hookRecorder
 	trace     *trace
+	logs      *logBuffer
 	statePath string
 
 	ctx    context.Context
@@ -79,6 +80,7 @@ func buildHarness(tb testing.TB, cfg *config.Config, hooks func(*harness, *slog.
 		metrics:    metrics.New(),
 		recorder:   &hookRecorder{trace: tr},
 		trace:      tr,
+		logs:       &logBuffer{},
 		statePath:  cfg.Global.StatePath,
 		probes:     make(chan probe.ProbeResult),
 		links:      make(chan rtnl.LinkEvent),
@@ -87,7 +89,7 @@ func buildHarness(tb testing.TB, cfg *config.Config, hooks func(*harness, *slog.
 	}
 	h.ctx, h.cancel = context.WithCancel(tb.Context())
 	tb.Cleanup(h.cancel)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(h.logs, nil))
 	h.d = newDaemon(cfg, h.kernel, hooks(h, logger), h.metrics, logger)
 	return h
 }
@@ -161,6 +163,12 @@ func (h *harness) Stop() {
 // since the previous call, in order.
 func (h *harness) Trace() []string {
 	return h.trace.take()
+}
+
+// Logs returns everything the daemon has logged so far, in slog's
+// text format.
+func (h *harness) Logs() string {
+	return h.logs.String()
 }
 
 // State reads the published state.json.
@@ -329,4 +337,23 @@ func (r *hookRecorder) accepted() []state.HookContext {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.hooks)
+}
+
+// logBuffer collects the daemon's log output. The event loop and the
+// Hook worker log concurrently, so writes are serialized.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

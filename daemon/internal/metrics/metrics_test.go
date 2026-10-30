@@ -49,7 +49,7 @@ func TestNewRegistersEveryCatalogMetric(t *testing.T) {
 	r.ApplyRouteErrors.WithLabelValues("home", "v4").Inc()
 	r.ApplyOpErrors.WithLabelValues("home", "ifindex_lookup").Inc()
 	r.StatePublications.Inc()
-	r.HookInvocations.WithLabelValues("up", "ok").Inc()
+	r.HookInvocations.WithLabelValues("home", "up", "ok").Inc()
 	r.SetBuildInfo("0.1.0", "deadbeef", runtime.Version())
 
 	body := scrape(t, r)

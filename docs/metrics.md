@@ -47,11 +47,13 @@ A route write is one netlink round trip that usually takes well under a millisec
 
 ## Daemon
 
-| Metric                              | Type    | Labels                             | Meaning                                                                                     |
-| ----------------------------------- | ------- | ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| `wanwatch_state_publications_total` | counter | —                                  | Successful atomic writes of `state.json`.                                                   |
-| `wanwatch_hook_invocations_total`   | counter | `event`, `result`                  | Hook runs. `event` is `up`, `down`, or `switch`; `result` is `ok`, `nonzero`, or `timeout`. |
-| `wanwatch_build_info`               | gauge   | `version`, `revision`, `goversion` | `1`; the labels identify the binary.                                                        |
+| Metric                              | Type    | Labels                             | Meaning                                                                                              |
+| ----------------------------------- | ------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `wanwatch_state_publications_total` | counter | —                                  | Successful atomic writes of `state.json`.                                                            |
+| `wanwatch_hook_invocations_total`   | counter | `group`, `event`, `result`         | Hook runs. `event` is `up`, `down`, or `switch`; `result` is `ok`, `nonzero`, `timeout`, or `error`. |
+| `wanwatch_build_info`               | gauge   | `version`, `revision`, `goversion` | `1`; the labels identify the binary.                                                                 |
+
+A Hook result is `nonzero` when the Hook ran and exited non-zero, and `error` when it could not be run: its event directory could not be read, or exec failed. Every result except `ok` is logged. A Hook cancelled by daemon shutdown is not counted. The [Hook execution rules](./specs/daemon-state.md#hook-execution) define each result.
 
 The `wanwatch_build_info` labels follow Prometheus's own `*_build_info` series. `revision` is the flake's short revision, its dirty short revision for a dirty tree, or `unknown` for a build without Git metadata. `goversion` is the Go toolchain version.
 

@@ -262,7 +262,7 @@ func TestHookNotifierExecutesScriptsAndReportsResults(t *testing.T) {
 	var logs bytes.Buffer
 	n := NewHookNotifier(t.Context(), dir, 200*time.Millisecond, mreg, slog.New(slog.NewTextHandler(&logs, nil)))
 	t.Cleanup(n.Close)
-	if !n.Notify(HookContext{Event: EventSwitch}) {
+	if !n.Notify(HookContext{Event: EventSwitch, Group: "home"}) {
 		t.Fatal("notification rejected")
 	}
 	n.Close()
@@ -275,7 +275,7 @@ func TestHookNotifierExecutesScriptsAndReportsResults(t *testing.T) {
 	}
 	for result, want := range map[string]float64{"ok": 6, "nonzero": 1, "timeout": 1} {
 		var m dto.Metric
-		if err := mreg.HookInvocations.WithLabelValues("switch", result).Write(&m); err != nil {
+		if err := mreg.HookInvocations.WithLabelValues("home", "switch", result).Write(&m); err != nil {
 			t.Fatal(err)
 		}
 		if got := m.GetCounter().GetValue(); got != want {
