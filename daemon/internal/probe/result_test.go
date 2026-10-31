@@ -2,6 +2,8 @@ package probe
 
 import (
 	"fmt"
+	"math"
+	"slices"
 	"testing"
 )
 
@@ -222,5 +224,59 @@ func TestAggregateNoData(t *testing.T) {
 				assertStat(t, ts.Target+" loss", ts.LossRatio, want.loss)
 			}
 		})
+	}
+}
+
+// lossyWindows returns one full Window of the given capacity per entry
+// of lost, keyed "t0", "t1", ..., whose Window holds lost[i] Lost
+// Samples followed by successful ones.
+func lossyWindows(tb testing.TB, capacity int, lost ...int) map[string]*WindowStats {
+	tb.Helper()
+	windows := make(map[string]*WindowStats, len(lost))
+	for i, l := range lost {
+		w, err := NewWindow(capacity)
+		if err != nil {
+			tb.Fatalf("NewWindow(%d): %v", capacity, err)
+		}
+		for j := range capacity {
+			w.Push(Sample{RTTMicros: 10_000, Lost: j < l})
+		}
+		windows[fmt.Sprintf("t%d", i)] = w
+	}
+	return windows
+}
+
+// TestAggregateLossRatioIsNearestToExactMean: three Targets each
+// losing 1 of 10 Samples report exactly 0.1, the float64 nearest the
+// exact mean, not the 0.10000000000000002 that summing the per-Target
+// floats gives.
+func TestAggregateLossRatioIsNearestToExactMean(t *testing.T) {
+	t.Parallel()
+	got := Aggregate(lossyWindows(t, 10, 1, 1, 1))
+	assertStat(t, "LossRatio", got.LossRatio, ptr(0.1))
+	for _, ts := range got.PerTarget {
+		assertStat(t, ts.Target+" LossRatio", ts.LossRatio, ptr(0.1))
+	}
+}
+
+// TestAggregateIsDeterministic: Aggregate over the same Windows gives a
+// bit-identical LossRatio and the same PerTarget order on every call,
+// whatever order the map yields its Targets in.
+func TestAggregateIsDeterministic(t *testing.T) {
+	t.Parallel()
+	windows := lossyWindows(t, 10, 1, 2, 3)
+	wantTargets := []string{"t0", "t1", "t2"}
+	for i := range 200 {
+		got := Aggregate(windows)
+		if got.LossRatio == nil || math.Float64bits(*got.LossRatio) != math.Float64bits(0.2) {
+			t.Fatalf("run %d: LossRatio = %s, want 0.2 bit for bit", i, show(got.LossRatio))
+		}
+		targets := make([]string, 0, len(got.PerTarget))
+		for _, ts := range got.PerTarget {
+			targets = append(targets, ts.Target)
+		}
+		if !slices.Equal(targets, wantTargets) {
+			t.Fatalf("run %d: PerTarget order = %v, want %v", i, targets, wantTargets)
+		}
 	}
 }

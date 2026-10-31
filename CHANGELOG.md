@@ -8,6 +8,10 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 - Update `nix-libnet` to v0.2.0 and `nixos-nftzones` to v0.1.0, whose `nix-nftypes` input now follows a new root `nix-nftypes` input at v0.2.0. Like `nixos-nftzones`, it serves only the flake's checks; a host drops it with `inputs.wanwatch.inputs.nix-nftypes.follows = "";`, as the README shows.
 
+### Fixed
+
+- Loss thresholds compare exactly and independently of Target order. A Family's loss stays the unweighted mean of its Targets' loss ratios, now computed as an exact rational, so a WAN at exactly `lossPctUp` or `lossPctDown` gets the documented verdict, and replaying the same Samples gives the same Decisions. RTT thresholds compare in integer microseconds. `lossRatio` in `state.json` and `wanwatch_probe_loss_ratio` report the float nearest the exact loss, so three Targets that each lost 1 of 10 Samples report `0.1` rather than `0.10000000000000002`.
+
 ## [0.1.0] - 2026-10-30
 
 The first release: multi-WAN monitoring and single-active failover for NixOS.
