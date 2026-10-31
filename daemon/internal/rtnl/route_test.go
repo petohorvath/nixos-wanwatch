@@ -387,11 +387,16 @@ func TestRouteSubscriberStartWrapsSubscribeError(t *testing.T) {
 // TestRouteSubscriberStartWiresSubscribeToRunLoop: pushing a
 // default-route update through the seam yields a RouteEvent.
 // Uses an ifaceLookup stub so the test doesn't need real
-// netlink-resolvable ifindices.
+// netlink-resolvable ifindices. The subscription also forces its
+// receive buffer size past net.core.rmem_max.
 func TestRouteSubscriberStartWiresSubscribeToRunLoop(t *testing.T) {
 	t.Parallel()
 	subscribed := make(chan struct{})
-	subscribe := func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, _ netlink.RouteSubscribeOptions) error {
+	subscribe := func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, opts netlink.RouteSubscribeOptions) error {
+		if opts.ReceiveBufferSize != netlinkRcvBufBytes || !opts.ReceiveBufferForceSize {
+			t.Errorf("receive buffer = %d (force %t), want %d forced past net.core.rmem_max",
+				opts.ReceiveBufferSize, opts.ReceiveBufferForceSize, netlinkRcvBufBytes)
+		}
 		ch <- mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 7, nil)
 		closeRouteUpdatesOnStop(ch, done)
 		close(subscribed)
