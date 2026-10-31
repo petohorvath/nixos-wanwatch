@@ -222,8 +222,8 @@ func (c routeCandidate) key() routeKey { return routeKey{c.Iface, c.Family} }
 
 // handleUpdate folds one RouteUpdate into a routeCandidate per watched
 // interface it touches: the route's own LinkIndex for a single-path
-// route, or each nexthop's LinkIndex for a multipath route. When several
-// nexthops of one route sit on the same interface, the first one listed
+// route, or each next-hop's LinkIndex for a multipath route. When several
+// next-hops of one route sit on the same interface, the first one listed
 // wins. Each candidate carries the route's metric (RTA_PRIORITY).
 //
 // Filters applied (returning no candidates when any fails):
@@ -237,7 +237,7 @@ func (c routeCandidate) key() routeKey { return routeKey{c.Iface, c.Family} }
 //     others (RTM_GETROUTE responses outside ListExisting) are
 //     ignored.
 //
-// A LinkIndex must also resolve to a watched interface; nexthops on
+// A LinkIndex must also resolve to a watched interface; next-hops on
 // unwatchable interfaces (lookup error) are dropped silently, since
 // they can't be a WAN we care about.
 func (s *RouteSubscriber) handleUpdate(upd netlink.RouteUpdate) []routeCandidate {

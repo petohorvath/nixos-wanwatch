@@ -4,7 +4,7 @@
   publish it in State, and write a `via` default route into the
   Group's table. It must then follow the default the kernel uses:
   the lowest metric of two defaults on the WAN's interface, the
-  next-best default once that one is deleted, and the nexthop on the
+  next-best default once that one is deleted, and the next-hop on the
   WAN's interface of a multipath default.
 */
 { inputs, pkgs }:
@@ -110,7 +110,7 @@ pkgs.testers.runNixOSTest {
     )
 
     # A multipath default has no gateway of its own. The WAN takes the
-    # nexthop on its interface, listed after a nexthop on another link.
+    # next-hop on its interface, listed after a next-hop on another link.
     router.succeed(
         "ip link add dummy0 type dummy",
         "ip address add 10.0.0.1/24 dev dummy0",
