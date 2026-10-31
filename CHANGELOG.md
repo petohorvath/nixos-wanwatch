@@ -8,6 +8,10 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 - Update `nix-libnet` to v0.2.0 and `nixos-nftzones` to v0.1.0, whose `nix-nftypes` input now follows a new root `nix-nftypes` input at v0.2.0. Like `nixos-nftzones`, it serves only the flake's checks; a host drops it with `inputs.wanwatch.inputs.nix-nftypes.follows = "";`, as the README shows.
 
+### Fixed
+
+- `services.wanwatch` and `wanwatch.probe.make` reject an IPv4-mapped address (`::ffff:0:0/96`) in `targets.v6`, as `probeTargetIpv4Mapped`, and an address listed more than once in one Target bucket, as `probeDuplicateTarget`. Addresses compare in canonical form. The daemon read a mapped address as IPv4 and exited, and a duplicate put two Samples per cycle into one Window, halving the Hysteresis timing. NixOS concatenates list definitions, so two modules that list the same Target now fail evaluation; remove one copy or set the list with `lib.mkForce`.
+
 ## [0.1.0] - 2026-10-30
 
 The first release: multi-WAN monitoring and single-active failover for NixOS.

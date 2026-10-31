@@ -89,7 +89,7 @@ let
       [ ]
     else
       lib.pipe result.error [
-        (builtins.split "\\[([a-z][a-zA-Z]*)]")
+        (builtins.split "\\[([a-z][a-zA-Z0-9]*)]")
         (builtins.filter builtins.isList)
         (map builtins.head)
       ];
