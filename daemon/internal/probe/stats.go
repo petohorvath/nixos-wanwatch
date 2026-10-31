@@ -98,21 +98,16 @@ func (w *WindowStats) Len() int {
 // once probes catch up.
 func (w *WindowStats) Filled() bool { return w.filled }
 
-// LossRatio returns the fraction of Samples in the window that were
-// Lost, as a float in [0.0, 1.0]. It reports false, no data, when the
-// window is empty.
-func (w *WindowStats) LossRatio() (float64, bool) {
-	n := w.Len()
-	if n == 0 {
-		return 0, false
-	}
-	var lost int
+// LossCounts returns the exact loss of the Window: the number of Lost
+// Samples and the number of Samples it holds. A total of 0 means no
+// data, an empty Window.
+func (w *WindowStats) LossCounts() (lost, total int) {
 	w.forEach(func(s Sample) {
 		if s.Lost {
 			lost++
 		}
 	})
-	return float64(lost) / float64(n), true
+	return lost, w.Len()
 }
 
 // MeanRTT returns the arithmetic mean of RTTs across non-Lost Samples,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/big"
 	"reflect"
 	"testing"
 
@@ -15,7 +16,10 @@ import (
 // each publication snapshots the Window statistics.
 func TestHealthPublication(t *testing.T) {
 	t.Parallel()
-	partialStats := probe.FamilyStats{RTTMicros: ptr[uint64](12_500), JitterMicros: ptr[uint64](800), LossRatio: ptr(0.05)}
+	partialStats := probe.FamilyStats{
+		RTTMicros: ptr[uint64](12_500), JitterMicros: ptr[uint64](800),
+		ExactLoss: big.NewRat(1, 20), LossRatio: ptr(0.05),
+	}
 	fullStats := partialStats
 	fullStats.WindowFilled = true
 	for _, tc := range []struct {

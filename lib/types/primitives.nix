@@ -9,8 +9,13 @@
     fwmark         — netfilter fwmark in [1000, 32767]
     routingTableId — routing-table ID in [1000, 32767]
 
-  TODO(v0.2): move `fwmark` and `routingTableId` to nix-libnet, where
-  other route- and rule-installing modules can use them (TODO.md).
+  `fwmark` and `routingTableId` are stable under ADR-0018: their names
+  stay, and the values they accept never shrink in 0.x. The other names
+  follow the options' 0.x policy.
+
+  TODO(v0.2): if nix-libnet gains fwmark and routing-table types, build
+  these on them only as a restriction to wanwatch's [1000, 32767] range
+  (TODO.md).
 */
 { lib }:
 {

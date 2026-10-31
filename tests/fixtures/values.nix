@@ -15,6 +15,11 @@
                        predicates, the option types, and the `tryMake`
                        fields that share a domain all test the same
                        table, so the two layers agree.
+    invalidTargets   — Probe `targets` that `probe.tryMake` rejects,
+                       by error kind and case name. The unit suite
+                       calls `probe.tryMake` with them, and the
+                       integration suite declares them through the
+                       NixOS module.
 */
 let
   probe = {
@@ -131,6 +136,25 @@ in
         home-uplink = group.minimal;
         guest-uplink = group.full;
       };
+    };
+  };
+
+  invalidTargets = {
+    # The daemon reads a mapped address as IPv4, a Family mismatch.
+    probeTargetIpv4Mapped = {
+      mappedInV6.v6 = [ "::ffff:1.1.1.1" ];
+    };
+    # A duplicate puts two Samples per cycle into one Window. Targets
+    # compare as canonical addresses, not as strings.
+    probeDuplicateTarget = {
+      duplicateInV4.v4 = [
+        "1.1.1.1"
+        "1.1.1.1"
+      ];
+      nonCanonicalDuplicateInV6.v6 = [
+        "2606:4700:4700::1111"
+        "2606:4700:4700:0:0:0:0:1111"
+      ];
     };
   };
 

@@ -110,6 +110,32 @@ func TestStartupInstallsFwmarkRules(t *testing.T) {
 	}
 }
 
+// TestStartupLogsRemovedRuleCopies: bootstrap logs, at Info, each
+// Family whose fwmark rule copies EnsureRule removed, and stays quiet
+// about a Family it found clean.
+func TestStartupLogsRemovedRuleCopies(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, baseConfig())
+	h.kernel.setRuleCopies(probe.FamilyV6, 2)
+	if err := h.Start(); err != nil {
+		t.Fatalf("Start = %v, want nil", err)
+	}
+	var removals []string
+	for line := range strings.Lines(h.Logs()) {
+		if strings.Contains(line, "fwmark rule copies removed") {
+			removals = append(removals, line)
+		}
+	}
+	if len(removals) != 1 {
+		t.Fatalf("copy removal log lines = %q, want one, for v6", removals)
+	}
+	for _, want := range []string{"level=INFO", "group=home", "family=v6", "mark=256", "table=100", "removed=2"} {
+		if !strings.Contains(removals[0], want) {
+			t.Errorf("copy removal log line %q lacks %q", removals[0], want)
+		}
+	}
+}
+
 // TestStartupSnapshot covers priming: the daemon folds the startup
 // route snapshot into its Gateway cache, then the link snapshot into
 // Health as one batch, before the event loop handles any event. Each

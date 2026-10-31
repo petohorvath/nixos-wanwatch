@@ -34,11 +34,16 @@ const updateChanBuffer = 256
 // closed".
 var errSubscriptionClosed = errors.New("rtnl: subscription channel closed")
 
-// netlinkRcvBufBytes is the SO_RCVBUF size requested for the
+// netlinkRcvBufBytes is the receive buffer size requested for the
 // rtnetlink subscription sockets. The kernel drops messages with
 // ENOBUFS when the socket buffer overflows during a flap storm —
 // and the library reports that as a fatal error — so size the
-// buffer up front to make overflow rare. Shared by both subscribers.
+// buffer up front to make overflow rare. Both subscribers force the
+// size with SO_RCVBUFFORCE (ReceiveBufferForceSize), which bypasses
+// the net.core.rmem_max cap that SO_RCVBUF obeys and needs
+// CAP_NET_ADMIN; the kernel doubles it to ~2 MiB. Without the
+// capability the subscription fails with EPERM rather than falling
+// back to a smaller buffer.
 const netlinkRcvBufBytes = 1 << 20
 
 // translateSubClose maps runLoop's errSubscriptionClosed sentinel to
@@ -92,8 +97,9 @@ func (s *LinkSubscriber) StartWith(ctx context.Context, subscribe linkSubscribeF
 	opts := netlink.LinkSubscribeOptions{
 		// ListExisting is omitted: the snapshot comes from LinkList
 		// after subscribing, so Start can return it.
-		ReceiveBufferSize: netlinkRcvBufBytes,
-		ErrorCallback:     func(err error) { subErr.Store(&err) },
+		ReceiveBufferSize:      netlinkRcvBufBytes,
+		ReceiveBufferForceSize: true,
+		ErrorCallback:          func(err error) { subErr.Store(&err) },
 	}
 	if err := subscribe(updates, done, opts); err != nil {
 		close(done)

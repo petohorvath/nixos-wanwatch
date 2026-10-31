@@ -1,15 +1,8 @@
 package probe
 
 import (
-	"math"
 	"testing"
 )
-
-// floatEq compares floats with epsilon tolerance for use in the
-// LossRatio assertions (the rest of the API returns uint64).
-func floatEq(a, b float64) bool {
-	return math.Abs(a-b) < 1e-9
-}
 
 // mustNewWindow is a helper used across the probe-package test
 // files: NewWindow now returns (window, error) so happy-path tests
@@ -46,8 +39,8 @@ func TestWindowEmpty(t *testing.T) {
 	if got := w.Capacity(); got != 5 {
 		t.Errorf("Capacity() = %d, want 5", got)
 	}
-	if got, ok := w.LossRatio(); ok {
-		t.Errorf("LossRatio() = %f, want no data", got)
+	if lost, total := w.LossCounts(); lost != 0 || total != 0 {
+		t.Errorf("LossCounts() = %d, %d, want 0, 0 (no data)", lost, total)
 	}
 	if got, ok := w.MeanRTT(); ok {
 		t.Errorf("MeanRTT() = %d, want no data", got)
@@ -57,7 +50,7 @@ func TestWindowEmpty(t *testing.T) {
 	}
 }
 
-// TestWindowScenarios exercises Len / LossRatio / MeanRTT /
+// TestWindowScenarios exercises Len / LossCounts / MeanRTT /
 // JitterMicros across a representative mix of inputs — single-sample,
 // all-loss, all-good, mixed, wrap-around, and the capacity=1
 // degenerate case. A Window without a successful Sample has no RTT or
@@ -75,7 +68,7 @@ func TestWindowScenarios(t *testing.T) {
 		capacity   int
 		pushes     []Sample
 		wantLen    int
-		wantLoss   float64
+		wantLost   int // Lost Samples; the total is wantLen
 		wantMean   uint64
 		wantJitter uint64
 		// wantNoRTT: no Sample succeeded, so MeanRTT and
@@ -94,7 +87,7 @@ func TestWindowScenarios(t *testing.T) {
 			capacity:  5,
 			pushes:    []Sample{{Lost: true}},
 			wantLen:   1,
-			wantLoss:  1,
+			wantLost:  1,
 			wantNoRTT: true,
 		},
 		{
@@ -129,7 +122,7 @@ func TestWindowScenarios(t *testing.T) {
 				{Lost: true},
 			},
 			wantLen:   3,
-			wantLoss:  1,
+			wantLost:  3,
 			wantNoRTT: true,
 		},
 		{
@@ -142,7 +135,7 @@ func TestWindowScenarios(t *testing.T) {
 				{Lost: true},
 			},
 			wantLen:    4,
-			wantLoss:   0.5,
+			wantLost:   2,
 			wantMean:   20,
 			wantJitter: 10, // sqrt(((10-20)^2 + (30-20)^2)/2) = sqrt(100) = 10
 		},
@@ -156,7 +149,7 @@ func TestWindowScenarios(t *testing.T) {
 				{Lost: true},
 			},
 			wantLen:  4,
-			wantLoss: 0.75,
+			wantLost: 3,
 			wantMean: 50,
 			// One successful Sample: jitter is a measured 0, not no data.
 		},
@@ -209,8 +202,8 @@ func TestWindowScenarios(t *testing.T) {
 			if got := w.Len(); got != tc.wantLen {
 				t.Errorf("Len() = %d, want %d", got, tc.wantLen)
 			}
-			if got, ok := w.LossRatio(); !ok || !floatEq(got, tc.wantLoss) {
-				t.Errorf("LossRatio() = %f, %v, want %f, true", got, ok, tc.wantLoss)
+			if lost, total := w.LossCounts(); lost != tc.wantLost || total != tc.wantLen {
+				t.Errorf("LossCounts() = %d, %d, want %d, %d", lost, total, tc.wantLost, tc.wantLen)
 			}
 			if tc.wantNoRTT {
 				if got, ok := w.MeanRTT(); ok {

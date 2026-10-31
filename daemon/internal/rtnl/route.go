@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -72,8 +73,9 @@ func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscrib
 		// ListExisting is deliberately omitted: the library sends
 		// RTM_GETROUTE with an IfInfomsg instead of an RtMsg, which
 		// recent kernels reject. Use RouteList after subscribing.
-		ReceiveBufferSize: netlinkRcvBufBytes,
-		ErrorCallback:     func(err error) { subErr.Store(&err) },
+		ReceiveBufferSize:      netlinkRcvBufBytes,
+		ReceiveBufferForceSize: true,
+		ErrorCallback:          func(err error) { subErr.Store(&err) },
 	}
 	if err := subscribe(updates, done, opts); err != nil {
 		close(done)
@@ -105,7 +107,9 @@ type routeListFn func(link netlink.Link, family int) ([]netlink.Route, error)
 type routeSubscribeFn func(ch chan<- netlink.RouteUpdate, done <-chan struct{}, opts netlink.RouteSubscribeOptions) error
 
 // readSnapshot reads the route snapshot before the subscription is
-// drained. An interrupted dump of a Family is read again.
+// drained and returns one Add per watched interface and Family: the
+// Gateway of its preferred default (see selectDefaults). An
+// interrupted dump of a Family is read again.
 func (s *RouteSubscriber) readSnapshot(ctx context.Context, listFn routeListFn) ([]RouteEvent, error) {
 	if s.ifaceLookup == nil {
 		s.ifaceLookup = interfaceNameByIndex
@@ -116,22 +120,43 @@ func (s *RouteSubscriber) readSnapshot(ctx context.Context, listFn routeListFn) 
 		if err != nil {
 			return nil, fmt.Errorf("rtnl: RouteList family=%d: %w", family, err)
 		}
-		for _, r := range routes {
-			ev, emit := s.handleUpdate(netlink.RouteUpdate{
-				Type:  unix.RTM_NEWROUTE,
-				Route: r,
-			})
-			if emit {
-				snapshot = append(snapshot, ev)
-			}
-		}
+		snapshot = append(snapshot, s.selectDefaults(routes)...)
 	}
 	return snapshot, nil
 }
 
-// runLoop treats matching updates as invalidations, reads the affected
-// interface/family's current default, and queues that observation on out.
-// It exits on cancellation, a failed route read, or subscription closure.
+// selectDefaults returns one Add per watched interface and Family in a
+// route dump, in the order the pairs first appear. Each carries the
+// Gateway of the pair's preferred default: the lowest metric, ties to
+// the first listed. For IPv6, the kernel may route through another
+// equal-metric default — see docs/architecture.md.
+func (s *RouteSubscriber) selectDefaults(routes []netlink.Route) []RouteEvent {
+	var selected []RouteEvent
+	metrics := make(map[routeKey]int)
+	index := make(map[routeKey]int)
+	for _, route := range routes {
+		for _, c := range s.handleUpdate(netlink.RouteUpdate{Type: unix.RTM_NEWROUTE, Route: route}) {
+			key := c.key()
+			i, seen := index[key]
+			switch {
+			case !seen:
+				index[key] = len(selected)
+				metrics[key] = c.metric
+				selected = append(selected, c.RouteEvent)
+			case c.metric < metrics[key]:
+				metrics[key] = c.metric
+				selected[i] = c.RouteEvent
+			}
+		}
+	}
+	return selected
+}
+
+// runLoop treats matching updates as invalidations. For each watched
+// interface an update touches, such as every interface a multipath
+// default spans, it reads that interface/family's current default and
+// queues that observation on out. It exits on cancellation, a failed
+// route read, or subscription closure.
 func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.RouteUpdate, listFn routeListFn, out chan<- RouteEvent) error {
 	for {
 		select {
@@ -141,26 +166,26 @@ func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Ro
 			if !ok {
 				return errSubscriptionClosed
 			}
-			ev, emit := s.handleUpdate(upd)
-			if !emit {
-				continue
-			}
-			ev, err := s.reconcileVia(ctx, listFn, ev)
-			if err != nil {
-				return err
-			}
-			select {
-			case out <- ev:
-			case <-ctx.Done():
-				return ctx.Err()
+			for _, c := range s.handleUpdate(upd) {
+				ev, err := s.reconcileVia(ctx, listFn, c.RouteEvent)
+				if err != nil {
+					return err
+				}
+				select {
+				case out <- ev:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 		}
 	}
 }
 
-// reconcileVia returns an Add for the current default, or a Del only if
-// the interface/family has none. A stale delete must not clear a replacement,
-// so an interrupted dump is read again rather than trusted.
+// reconcileVia reads the current routes of ev's Family and returns an
+// Add for the interface's preferred default, the one readSnapshot would
+// select, or a Del only if the interface has no default left. A stale
+// delete must not clear a replacement, so an interrupted dump is read
+// again rather than trusted.
 func (s *RouteSubscriber) reconcileVia(ctx context.Context, listFn routeListFn, ev RouteEvent) (RouteEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return RouteEvent{}, err
@@ -170,61 +195,94 @@ func (s *RouteSubscriber) reconcileVia(ctx context.Context, listFn routeListFn, 
 		return RouteEvent{}, fmt.Errorf("rtnl: RouteList family=%d: %w", ev.Family, err)
 	}
 	ev.Op = RouteEventDel
-	for _, route := range routes {
-		current, emit := s.handleUpdate(netlink.RouteUpdate{Type: unix.RTM_NEWROUTE, Route: route})
-		if emit && current.Iface == ev.Iface && current.Family == ev.Family {
-			// Match the snapshot's last default for this pair when the
-			// kernel lists more than one, without emitting each candidate.
+	for _, current := range s.selectDefaults(routes) {
+		if current.Iface == ev.Iface && current.Family == ev.Family {
 			ev = current
+			break
 		}
 	}
 	ev.Time = time.Now().UTC()
 	return ev, nil
 }
 
-// handleUpdate folds one RouteUpdate into a RouteEvent.
+// routeKey identifies one watched interface and Family.
+type routeKey struct {
+	iface  string
+	family RouteFamily
+}
+
+// routeCandidate is one default route's next-hop on one watched
+// interface, with the route's metric.
+type routeCandidate struct {
+	RouteEvent
+	metric int
+}
+
+func (c routeCandidate) key() routeKey { return routeKey{c.Iface, c.Family} }
+
+// handleUpdate folds one RouteUpdate into a routeCandidate per watched
+// interface it touches: the route's own LinkIndex for a single-path
+// route, or each next-hop's LinkIndex for a multipath route. When several
+// next-hops of one route sit on the same interface, the first one listed
+// wins. Each candidate carries the route's metric (RTA_PRIORITY).
 //
-// Filters applied (returning emit=false when any fails):
+// Filters applied (returning no candidates when any fails):
 //
 //   - Table must be `RT_TABLE_MAIN` (254). The daemon's own
 //     route writes go to per-group tables and would otherwise
 //     loop back as discovery events.
 //   - Destination must be the family-zero address ("default
 //     route" — Dst.IP.IsUnspecified() or Dst == nil).
-//   - The route's LinkIndex must resolve to a watched
-//     interface. Unwatchable interfaces (LinkByIndex error)
-//     are dropped silently — they can't be a WAN we care about.
 //   - The message type must be RTM_NEWROUTE or RTM_DELROUTE;
 //     others (RTM_GETROUTE responses outside ListExisting) are
 //     ignored.
-func (s *RouteSubscriber) handleUpdate(upd netlink.RouteUpdate) (RouteEvent, bool) {
+//
+// A LinkIndex must also resolve to a watched interface; next-hops on
+// unwatchable interfaces (lookup error) are dropped silently, since
+// they can't be a WAN we care about.
+func (s *RouteSubscriber) handleUpdate(upd netlink.RouteUpdate) []routeCandidate {
 	if upd.Type != unix.RTM_NEWROUTE && upd.Type != unix.RTM_DELROUTE {
-		return RouteEvent{}, false
+		return nil
 	}
 	if upd.Table != unix.RT_TABLE_MAIN {
-		return RouteEvent{}, false
+		return nil
 	}
 	if !isDefaultRoute(upd.Route) {
-		return RouteEvent{}, false
-	}
-	name, ok := s.resolveIface(upd.LinkIndex)
-	if !ok {
-		return RouteEvent{}, false
-	}
-	if _, watch := s.Interfaces[name]; s.Interfaces != nil && !watch {
-		return RouteEvent{}, false
+		return nil
 	}
 	op := RouteEventAdd
 	if upd.Type == unix.RTM_DELROUTE {
 		op = RouteEventDel
 	}
-	return RouteEvent{
-		Op:      op,
-		Iface:   name,
-		Family:  routeFamilyFromAF(upd.Family),
-		Gateway: upd.Gw,
-		Time:    time.Now().UTC(),
-	}, true
+	nexthops := upd.MultiPath
+	if len(nexthops) == 0 {
+		nexthops = []*netlink.NexthopInfo{{LinkIndex: upd.LinkIndex, Gw: upd.Gw}}
+	}
+	now := time.Now().UTC()
+	var candidates []routeCandidate
+	for _, nh := range nexthops {
+		name, ok := s.resolveIface(nh.LinkIndex)
+		if !ok {
+			continue
+		}
+		if _, watch := s.Interfaces[name]; s.Interfaces != nil && !watch {
+			continue
+		}
+		c := routeCandidate{
+			RouteEvent: RouteEvent{
+				Op:      op,
+				Iface:   name,
+				Family:  routeFamilyFromAF(upd.Family),
+				Gateway: nh.Gw,
+				Time:    now,
+			},
+			metric: upd.Priority,
+		}
+		if !slices.ContainsFunc(candidates, func(prev routeCandidate) bool { return prev.Iface == name }) {
+			candidates = append(candidates, c)
+		}
+	}
+	return candidates
 }
 
 // resolveIface returns the interface name for `idx`, consulting

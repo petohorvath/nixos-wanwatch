@@ -2,7 +2,10 @@
   gateway-discovery — networkd installs a v4 default route via the
   isp node. The daemon must discover that gateway from the main RIB,
   publish it in State, and write a `via` default route into the
-  Group's table.
+  Group's table. It must then follow the default the kernel uses:
+  the lowest metric of two defaults on the WAN's interface, the
+  next-best default once that one is deleted, and the next-hop on the
+  WAN's interface of a multipath default.
 */
 { inputs, pkgs }:
 
@@ -84,6 +87,42 @@ pkgs.testers.runNixOSTest {
     # Verify the gateway Apply path in the Group's kernel table.
     observe.wait_default_route(
         "v4", "eth1", group="home", gateway="192.168.1.1", timeout=15
+    )
+
+    # Two defaults on eth1: the kernel uses the lower metric, and so
+    # must discovery. The gateways need not answer; only the routes count.
+    router.succeed(
+        "ip route del default via 192.168.1.1 dev eth1",
+        "ip route add default via 192.168.1.4 dev eth1 metric 200",
+        "ip route add default via 192.168.1.3 dev eth1 metric 100",
+    )
+    observe.wait_gateway("uplink", "v4", "192.168.1.3")
+    observe.wait_default_route(
+        "v4", "eth1", group="home", gateway="192.168.1.3", timeout=15
+    )
+
+    # Deleting the preferred default moves the Gateway to the next-best
+    # default rather than clearing it.
+    router.succeed("ip route del default via 192.168.1.3 dev eth1 metric 100")
+    observe.wait_gateway("uplink", "v4", "192.168.1.4")
+    observe.wait_default_route(
+        "v4", "eth1", group="home", gateway="192.168.1.4", timeout=15
+    )
+
+    # A multipath default has no gateway of its own. The WAN takes the
+    # next-hop on its interface, listed after a next-hop on another link.
+    router.succeed(
+        "ip link add dummy0 type dummy",
+        "ip address add 10.0.0.1/24 dev dummy0",
+        "ip link set dummy0 up",
+        "ip route del default via 192.168.1.4 dev eth1 metric 200",
+        "ip route add default metric 100"
+        + " nexthop via 10.0.0.2 dev dummy0"
+        + " nexthop via 192.168.1.5 dev eth1",
+    )
+    observe.wait_gateway("uplink", "v4", "192.168.1.5")
+    observe.wait_default_route(
+        "v4", "eth1", group="home", gateway="192.168.1.5", timeout=15
     )
   '';
 }

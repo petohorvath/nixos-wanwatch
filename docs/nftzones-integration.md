@@ -4,13 +4,13 @@
 
 ## Contract
 
-| Step | Owner                     | Action                                                                                                                     |
-| ---- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1    | wanwatch (module)         | Publishes each Group's user-declared `mark` and `table` as `config.services.wanwatch.marks.<group>` and `.tables.<group>`. |
-| 2    | wanwatch (daemon)         | Installs `ip rule add fwmark <mark> table <table>` and its IPv6 equivalent at startup. Idempotent.                         |
-| 3    | wanwatch (daemon)         | On every Decision, writes the Selection's default route into the Group's table for each Family.                            |
-| 4    | nftzones (user)           | Sets `meta mark set <mark>` in `sroute` or `droute` rules, referencing `config.services.wanwatch.marks.<group>`.           |
-| 5    | nftzones (user, optional) | Adds an `snat` rule for egress out of the WAN zone. It follows the active interface because the route does.                |
+| Step | Owner                     | Action                                                                                                                                                                                                                                                                                                           |
+| ---- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | wanwatch (module)         | Publishes each Group's user-declared `mark` and `table` as `config.services.wanwatch.marks.<group>` and `.tables.<group>`.                                                                                                                                                                                       |
+| 2    | wanwatch (daemon)         | At startup, installs `ip rule add fwmark <mark> table <table>` and its IPv6 equivalent unless a rule with the same mark, mask, and table and no other selector exists, and removes any copies. A narrower rule, such as one that also matches an `iif`, is left alone. The kernel assigns the rule's preference. |
+| 3    | wanwatch (daemon)         | On every Decision, writes the Selection's default route into the Group's table for each Family.                                                                                                                                                                                                                  |
+| 4    | nftzones (user)           | Sets `meta mark set <mark>` in `sroute` or `droute` rules, referencing `config.services.wanwatch.marks.<group>`.                                                                                                                                                                                                 |
+| 5    | nftzones (user, optional) | Adds an `snat` rule for egress out of the WAN zone. It follows the active interface because the route does.                                                                                                                                                                                                      |
 
 One table ID serves both Families: the same `table <table>` exists in the IPv4 and IPv6 routing tables, and one Decision populates both.
 
@@ -72,7 +72,7 @@ This configuration has the following effect:
 
 1. `services.wanwatch.marks.home-uplink` is the integer declared in `services.wanwatch.groups.home-uplink.mark`, re-exposed read-only so downstream modules reference it by name.
 2. The nftzones `mangle` rule renders to `meta mark set 0x3e8` (1000).
-3. At startup, `wanwatchd` adds `ip rule add fwmark 0x3e8 table 1000` and its IPv6 equivalent.
+3. At startup, `wanwatchd` adds `ip rule add fwmark 0x3e8 table 1000` and its IPv6 equivalent, unless an earlier start already did.
 4. On every Decision, `wanwatchd` rewrites table `1000`'s default route per Family for the Selection.
 5. The nftzones `snat` rule masquerades LAN traffic leaving the `wan-home` zone. It applies to every interface in the zone, so it follows the daemon's route changes.
 
@@ -121,12 +121,12 @@ wanwatch keeps the integer in one place, `services.wanwatch.groups.<group>.mark`
 
 ## Source map
 
-| File                                                 | Role                                                  |
-| ---------------------------------------------------- | ----------------------------------------------------- |
-| `lib/internal/config.nix:assertUniqueMarksAndTables` | Rejects duplicate marks and tables across Groups.     |
-| `daemon/internal/apply/rule.go:EnsureRule`           | Installs the fwmark policy rules at startup.          |
-| `daemon/internal/apply/route.go:WriteDefault`        | Rewrites the table's default route on every Decision. |
-| `tests/vm/nftzones-integration.nix`                  | VM scenario asserting the contract on a live kernel.  |
+| File                                                 | Role                                                                                                                                                |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/internal/config.nix:assertUniqueMarksAndTables` | Rejects duplicate marks and tables across Groups.                                                                                                   |
+| `daemon/internal/apply/rule.go:EnsureRule`           | Installs each fwmark policy rule at startup unless a rule with the same mark, mask, and table and no other selector exists, and removes any copies. |
+| `daemon/internal/apply/route.go:WriteDefault`        | Rewrites the table's default route on every Decision.                                                                                               |
+| `tests/vm/nftzones-integration.nix`                  | VM scenario asserting the contract on a live kernel.                                                                                                |
 
 ## SNAT and DNAT
 

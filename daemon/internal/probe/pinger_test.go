@@ -270,8 +270,8 @@ func TestCycleRecordsRTTOnMatchedReply(t *testing.T) {
 	if windows["1.1.1.1"].Len() != 1 {
 		t.Errorf("window len = %d, want 1", windows["1.1.1.1"].Len())
 	}
-	if loss, ok := windows["1.1.1.1"].LossRatio(); !ok || loss != 0 {
-		t.Errorf("loss = %v (data %v), want 0 (reply was matched)", loss, ok)
+	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 0 || total != 1 {
+		t.Errorf("loss = %d of %d, want 0 of 1 (reply was matched)", lost, total)
 	}
 }
 
@@ -285,8 +285,8 @@ func TestCycleRecordsLossOnNoReply(t *testing.T) {
 	buf := make([]byte, 1500)
 	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
-	if loss, ok := windows["1.1.1.1"].LossRatio(); !ok || loss != 1.0 {
-		t.Errorf("loss = %v (data %v), want 1.0 (no reply ⇒ lost)", loss, ok)
+	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 1 || total != 1 {
+		t.Errorf("loss = %d of %d, want 1 of 1 (no reply ⇒ lost)", lost, total)
 	}
 }
 
@@ -303,8 +303,8 @@ func TestCycleIgnoresWrongIdent(t *testing.T) {
 	buf := make([]byte, 1500)
 	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
-	if loss, ok := windows["1.1.1.1"].LossRatio(); !ok || loss != 1.0 {
-		t.Errorf("loss = %v (data %v), want 1.0 (stranger reply must be ignored)", loss, ok)
+	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 1 || total != 1 {
+		t.Errorf("loss = %d of %d, want 1 of 1 (stranger reply must be ignored)", lost, total)
 	}
 }
 
@@ -508,8 +508,8 @@ func TestCycleRecordsLossOnSendFailure(t *testing.T) {
 	buf := make([]byte, 1500)
 	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
-	if loss, ok := windows["1.1.1.1"].LossRatio(); !ok || loss != 1.0 {
-		t.Errorf("loss = %v (data %v), want 1.0 (send failure ⇒ lost)", loss, ok)
+	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 1 || total != 1 {
+		t.Errorf("loss = %d of %d, want 1 of 1 (send failure ⇒ lost)", lost, total)
 	}
 }
 
@@ -527,8 +527,8 @@ func TestCycleRecordsLossOnReadError(t *testing.T) {
 	buf := make([]byte, 1500)
 	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
-	if loss, ok := windows["1.1.1.1"].LossRatio(); !ok || loss != 1.0 {
-		t.Errorf("loss = %v (data %v), want 1.0 (read fault ⇒ inflight lost)", loss, ok)
+	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 1 || total != 1 {
+		t.Errorf("loss = %d of %d, want 1 of 1 (read fault ⇒ inflight lost)", lost, total)
 	}
 }
 
@@ -548,8 +548,8 @@ func TestCycleSkipsReadOnCancelledContext(t *testing.T) {
 	buf := make([]byte, 1500)
 	p.cycle(ctx, conn, addrs, windows, buf, 0)
 
-	if loss, ok := windows["1.1.1.1"].LossRatio(); !ok || loss != 1.0 {
-		t.Errorf("loss = %v (data %v), want 1.0 (cancelled ctx ⇒ read window skipped)", loss, ok)
+	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 1 || total != 1 {
+		t.Errorf("loss = %d of %d, want 1 of 1 (cancelled ctx ⇒ read window skipped)", lost, total)
 	}
 	if conn.queued() != 1 {
 		t.Errorf("queued reply was consumed (%d left, want 1) — read window not skipped", conn.queued())
@@ -575,8 +575,8 @@ func TestCycleIgnoresUnknownSequence(t *testing.T) {
 	buf := make([]byte, 1500)
 	p.cycle(context.Background(), conn, addrs, windows, buf, 0)
 
-	if loss, ok := windows["1.1.1.1"].LossRatio(); !ok || loss != 1.0 {
-		t.Errorf("loss = %v (data %v), want 1.0 (no matching-seq reply ⇒ inflight lost)", loss, ok)
+	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 1 || total != 1 {
+		t.Errorf("loss = %d of %d, want 1 of 1 (no matching-seq reply ⇒ inflight lost)", lost, total)
 	}
 	if conn.queued() != 0 {
 		t.Errorf("stale reply still queued (%d left); the unknown-seq path didn't consume it", conn.queued())

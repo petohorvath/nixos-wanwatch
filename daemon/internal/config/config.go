@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"slices"
 
@@ -87,8 +88,11 @@ type Probe struct {
 
 // Targets is the per-family probe-target list mirroring
 // `wanwatch.probe.toJSONValue.targets`. At least one of V4/V6 must
-// be non-empty — the Nix lib enforces this at render time and
-// Validate mirrors the check here.
+// be non-empty, and each bucket holds distinct, unzoned IP literals
+// of its Family, with no IPv4-mapped address in V6. The Nix lib
+// enforces this at evaluation and Validate mirrors it, so a bad
+// Target fails at load instead of in a prober goroutine. Validate
+// compares addresses, not strings, and accepts non-canonical text.
 type Targets struct {
 	V4 []string `json:"v4"`
 	V6 []string `json:"v6"`
@@ -96,8 +100,8 @@ type Targets struct {
 
 // Families lists the Families a WAN with these Targets serves, v4
 // first: a Family is served when its bucket is non-empty. Mirrors
-// `wanwatch.probe.families` on the Nix side; Validate keeps each
-// bucket to same-Family literals, so no address parsing is needed.
+// `wanwatch.probe.families` on the Nix side. Validate keeps each
+// bucket to literals of its Family, so no address parsing is needed.
 func (t Targets) Families() []probe.Family {
 	fams := make([]probe.Family, 0, 2)
 	if len(t.V4) > 0 {
@@ -181,10 +185,10 @@ func Parse(data []byte) (Config, error) {
 // Config. It catches hand-edits that bypassed the Nix-side
 // validation — empty paths, name/key disagreement, group members
 // referencing undeclared WANs — and mirrors the lib's value checks
-// (positive intervals/timeouts/windows, threshold ranges and
-// ordering, known method/strategy) so a bad value fails here with a
-// clear message instead of panicking or silently degrading a
-// runtime layer.
+// (Target literals, positive intervals/timeouts/windows, threshold
+// ranges and ordering, known method/strategy) so a bad value fails
+// here with a clear message instead of panicking or silently
+// degrading a runtime layer.
 //
 // The first failure short-circuits — config errors are
 // configuration bugs, not user input, so fix-one-find-the-next
@@ -238,6 +242,9 @@ func validateProbe(wanKey string, p Probe) error {
 	if len(p.Targets.V4) == 0 && len(p.Targets.V6) == 0 {
 		return invalidf("wans[%q].probe.targets has no entries (both v4 and v6 empty)", wanKey)
 	}
+	if err := validateTargets(wanKey, p.Targets); err != nil {
+		return err
+	}
 	if p.IntervalMs <= 0 {
 		return invalidf("wans[%q].probe.intervalMs = %d, want > 0", wanKey, p.IntervalMs)
 	}
@@ -256,6 +263,58 @@ func validateProbe(wanKey string, p Probe) error {
 		return err
 	}
 	return validateHysteresis(wanKey, p.Hysteresis)
+}
+
+// validateTargets mirrors the lib's Target checks. The Pinger fails
+// on a Target that is not a literal of its bucket's Family, which
+// cancels the daemon, and keys its Windows by Target, so a duplicate
+// would put two Samples per cycle into one Window.
+func validateTargets(wanKey string, t Targets) error {
+	if err := validateTargetBucket(wanKey, targetFamilyV4, t.V4); err != nil {
+		return err
+	}
+	return validateTargetBucket(wanKey, targetFamilyV6, t.V6)
+}
+
+// targetFamily describes the Family of one Targets bucket: its key in
+// config.json, its name in error messages, and its address test.
+type targetFamily struct {
+	bucket string
+	name   string
+	holds  func(netip.Addr) bool
+}
+
+var (
+	targetFamilyV4 = targetFamily{bucket: "v4", name: "IPv4", holds: netip.Addr.Is4}
+	targetFamilyV6 = targetFamily{bucket: "v6", name: "IPv6", holds: netip.Addr.Is6}
+)
+
+// validateTargetBucket checks one Family's Targets. An IPv4-mapped
+// address is IPv6 to netip but IPv4 to the Pinger, so it is rejected
+// in v6; in v4 it already fails the Family test.
+func validateTargetBucket(wanKey string, family targetFamily, targets []string) error {
+	seen := make(map[netip.Addr]int, len(targets))
+	for i, target := range targets {
+		field := fmt.Sprintf("wans[%q].probe.targets.%s[%d] = %q", wanKey, family.bucket, i, target)
+		addr, err := netip.ParseAddr(target)
+		if err != nil {
+			return invalidf("%s is not an IP address: %v", field, err)
+		}
+		if addr.Zone() != "" {
+			return invalidf("%s has a zone", field)
+		}
+		if !family.holds(addr) {
+			return invalidf("%s is not an %s address", field, family.name)
+		}
+		if addr.Is4In6() {
+			return invalidf("%s is an IPv4-mapped address", field)
+		}
+		if first, ok := seen[addr]; ok {
+			return invalidf("%s duplicates %s[%d]", field, family.bucket, first)
+		}
+		seen[addr] = i
+	}
+	return nil
 }
 
 // validateThresholds mirrors the lib's loss/RTT range and ordering
