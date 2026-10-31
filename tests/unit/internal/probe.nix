@@ -7,6 +7,7 @@
 {
   fixtures,
   helpers,
+  lib,
   libnet,
   wanwatch,
   ...
@@ -23,6 +24,11 @@ let
   };
 
   withThresholds = thresholds: minimal // { inherit thresholds; };
+
+  # `fixtures.invalidTargets` as `rejectionTests` cases.
+  invalidTargetInputs = lib.mapAttrs (
+    _: lib.mapAttrs (_: targets: { inherit targets; })
+  ) fixtures.invalidTargets;
 in
 {
   defaults = {
@@ -129,6 +135,20 @@ in
         lossPctDown = 100;
         lossPctUp = 0;
       })
+      # One bucket may hold several distinct Targets.
+      {
+        targets = {
+          v4 = [
+            "1.1.1.1"
+            "8.8.8.8"
+            "9.9.9.9"
+          ];
+          v6 = [
+            "2606:4700:4700::1111"
+            "2001:4860:4860::8888"
+          ];
+        };
+      }
     ];
   };
 
@@ -233,6 +253,57 @@ in
         v5 = [ ];
       };
     };
+  };
+
+  # Shared with `tests/integration/rejections.nix`.
+  targetRejections = helpers.rejectionTests probe.tryMake invalidTargetInputs;
+
+  testMakeThrowsOnIpv4MappedTarget = {
+    expr = probe.make { targets.v6 = [ "::ffff:1.1.1.1" ]; };
+    expectedError = {
+      type = "ThrownError";
+      msg = "\\[probeTargetIpv4Mapped]";
+    };
+  };
+
+  testMakeThrowsOnDuplicateTarget = {
+    expr = probe.make { targets.v4 = fixtures.invalidTargets.probeDuplicateTarget.duplicateInV4.v4; };
+    expectedError = {
+      type = "ThrownError";
+      msg = "\\[probeDuplicateTarget]";
+    };
+  };
+
+  # Each duplicated address is reported once, in canonical form.
+  testDuplicateTargetMessage = {
+    expr =
+      (probe.tryMake {
+        targets.v6 = [
+          "2606:4700:4700:0:0:0:0:1111"
+          "2606:4700:4700::1111"
+          "2606:4700:4700::1111"
+        ];
+      }).error;
+    expected = "probe.make: [probeDuplicateTarget] 2606:4700:4700::1111 appears more than once in targets.v6";
+  };
+
+  # The same address in both buckets is a Family mismatch in one of
+  # them, not a duplicate.
+  testDuplicateIsPerBucket = {
+    expr = getErrorKinds (
+      probe.tryMake {
+        targets = {
+          v4 = [ "1.1.1.1" ];
+          v6 = [ "1.1.1.1" ];
+        };
+      }
+    );
+    expected = [ "probeTargetFamilyMismatch" ];
+  };
+
+  testIpv4MappedTargetMessage = {
+    expr = (probe.tryMake { targets.v6 = [ "::ffff:1.1.1.1" ]; }).error;
+    expected = "probe.make: [probeTargetIpv4Mapped] ::ffff:1.1.1.1 in targets.v6 is an IPv4-mapped address; list the IPv4 address in targets.v4";
   };
 
   testUnknownFieldMessage = {
