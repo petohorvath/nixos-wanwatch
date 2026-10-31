@@ -249,16 +249,13 @@ func TestKeepServingRetriesWithBackoff(t *testing.T) {
 					}
 					time.Sleep(tc.runs[call])
 					returns = append(returns, time.Now())
+					// Alternate an error and a nil return: both are retried.
 					if call%2 == 0 {
 						return errListen
 					}
 					return nil
 				}
-				done := make(chan struct{})
-				go func() {
-					defer close(done)
-					keepServing(ctx, logger, "metrics server", serve, backoff)
-				}()
+				done := keepServing(ctx, logger, "metrics server", serve, backoff)
 				<-lastCall
 
 				if got, want := len(starts), len(tc.runs)+1; got != want {
@@ -292,14 +289,10 @@ func TestKeepServingStopsDuringBackoff(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		ctx, cancel := context.WithCancel(t.Context())
 		calls := 0
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			keepServing(ctx, logger, "metrics server", func() error {
-				calls++
-				return errors.New("listen: permission denied")
-			}, retryBackoff{min: time.Minute, max: time.Hour})
-		}()
+		done := keepServing(ctx, logger, "metrics server", func() error {
+			calls++
+			return errors.New("listen: permission denied")
+		}, retryBackoff{min: time.Minute, max: time.Hour})
 		synctest.Wait() // waiting out the first delay
 		start := time.Now()
 		cancel()

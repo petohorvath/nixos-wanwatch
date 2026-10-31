@@ -138,13 +138,8 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 	}
 	// Failover doesn't need metrics, so a metrics-server failure is
 	// retried rather than taking the daemon down (keepServing).
-	metricsDone := make(chan struct{})
-	go func() {
-		defer close(metricsDone)
-		keepServing(ctx, logger, "metrics server", func() error { return mserver.Serve(ctx) }, metricsRetryBackoff)
-	}()
-
-	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
+	logger.Info("metrics endpoint starting", "socket", cfg.Global.MetricsSocket)
+	metricsDone := keepServing(ctx, logger, "metrics server", func() error { return mserver.Serve(ctx) }, metricsRetryBackoff)
 
 	d := newDaemon(&cfg, netlinkKernel{}, newHookNotifier(ctx, &cfg, mreg, logger), mreg, logger)
 	if err := d.bootstrap(ctx); err != nil {
@@ -263,32 +258,38 @@ type retryBackoff struct {
 // persistent one logs about once a minute.
 var metricsRetryBackoff = retryBackoff{min: time.Second, max: time.Minute}
 
-// keepServing runs serve until ctx is done, retrying each return,
-// with an error or without one, after a backoff delay. A run that
+// keepServing runs serve on its own goroutine until ctx is done, and
+// returns a channel closed once it has stopped. It retries each
+// return, with an error or without one, after a backoff delay. A run that
 // lasted at least backoff.max resets the delay, so a fault after a
 // long healthy run is retried quickly. It never cancels the daemon:
 // the metrics server is supervised this way so that its failure
 // leaves failover running, while a scrape of the dead endpoint still
 // fails visibly.
-func keepServing(ctx context.Context, logger *slog.Logger, name string, serve func() error, backoff retryBackoff) {
-	delay := backoff.min
-	for {
-		started := time.Now()
-		err := serve()
-		if ctx.Err() != nil {
-			return
+func keepServing(ctx context.Context, logger *slog.Logger, name string, serve func() error, backoff retryBackoff) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		delay := backoff.min
+		for {
+			started := time.Now()
+			err := serve()
+			if ctx.Err() != nil {
+				return
+			}
+			if time.Since(started) >= backoff.max {
+				delay = backoff.min
+			}
+			logger.Error("subsystem exited; retrying", "subsystem", name, "err", err, "retryIn", delay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+			delay = min(2*delay, backoff.max)
 		}
-		if time.Since(started) >= backoff.max {
-			delay = backoff.min
-		}
-		logger.Error("subsystem exited; retrying", "subsystem", name, "err", err, "retryIn", delay)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-		}
-		delay = min(2*delay, backoff.max)
-	}
+	}()
+	return done
 }
 
 // exitError waits for the metrics server to finish, then maps the
