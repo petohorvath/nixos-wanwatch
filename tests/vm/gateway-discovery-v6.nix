@@ -3,6 +3,8 @@
   covering the v6 route subscription, decoding, and Apply branch on a
   real packet path. The test driver assigns only v4 addresses, so
   both nodes declare their fd00:1::/64 addresses through networkd.
+  With two v6 defaults on the WAN's interface, the daemon must follow
+  the lower metric, the one the kernel uses.
 */
 { inputs, pkgs }:
 
@@ -99,6 +101,18 @@ pkgs.testers.runNixOSTest {
     # Verify the gateway Apply path in the Group's kernel table.
     observe.wait_default_route(
         "v6", "eth1", group="home", gateway="fd00:1::1", timeout=15
+    )
+
+    # Two defaults on eth1: the kernel uses the lower metric, and so
+    # must discovery. The gateways need not answer; only the routes count.
+    router.succeed(
+        "ip -6 route del default via fd00:1::1 dev eth1",
+        "ip -6 route add default via fd00:1::4 dev eth1 metric 200",
+        "ip -6 route add default via fd00:1::3 dev eth1 metric 100",
+    )
+    observe.wait_gateway("uplink", "v6", "fd00:1::3")
+    observe.wait_default_route(
+        "v6", "eth1", group="home", gateway="fd00:1::3", timeout=15
     )
   '';
 }
