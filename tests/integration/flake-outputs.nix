@@ -34,7 +34,14 @@ let
   # The `lib` names that ADR-0018 declares stable across 0.x minor
   # releases.
   stableLibPaths = [
-    [ "types" ]
+    [
+      "types"
+      "fwmark"
+    ]
+    [
+      "types"
+      "routingTableId"
+    ]
     [
       "config"
       "paths"
@@ -46,6 +53,28 @@ in
   testStableLibNamesExist = {
     expr = builtins.filter (path: !lib.hasAttrByPath path self.lib) stableLibPaths;
     expected = [ ];
+  };
+
+  # ADR-0018 lets a stable type accept more values in 0.x but never
+  # fewer, so both ends of the range they accept at v0.1.0 stay valid.
+  testStableTypesAcceptRange = {
+    expr = lib.genAttrs [ "fwmark" "routingTableId" ] (
+      name:
+      map self.lib.types.${name}.check [
+        1000
+        32767
+      ]
+    );
+    expected = {
+      fwmark = [
+        true
+        true
+      ];
+      routingTableId = [
+        true
+        true
+      ];
+    };
   };
 
   testLibExports = {

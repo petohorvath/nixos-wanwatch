@@ -22,22 +22,22 @@ Status legend:
 Small CLI for status queries: `wanwatchctl status`, `wanwatchctl group <name>`.
 Reads `state.json`; no privileged ops.
 
-### Migrate `wanwatch.types.{fwmark,routingTableId}` to nix-libnet
+### Build `wanwatch.types.{fwmark,routingTableId}` on nix-libnet
 
-Both types currently live in `lib/types/primitives.nix` because
-landing them in libnet first would have meant a two-repo
-coordination. They're not wanwatch-specific — they're kernel
-networking primitives that nftzones (currently validating
-`meta mark set N` as raw int), systemd-networkd modules, and any
-hand-rolled rule config could share.
+Fwmarks and routing-table IDs are kernel networking primitives that
+nftzones (currently validating `meta mark set N` as a raw int),
+systemd-networkd modules, and hand-rolled rule configs could share, so
+nix-libnet may gain generic types for them. A generic type would likely
+accept the full 32-bit range, while `[1000, 32767]` is wanwatch's own
+policy. Widening wanwatch's types would also change what the
+`services.wanwatch` mark and table options accept, which is a module
+decision, and [ADR-0018](./docs/adr/0018-0x-stability-promise.md) lets a
+stable type grow but never shrink.
 
-Migration: add `fwmark` and `routingTableId` (same definitions) to
-`nix-libnet/lib/types/primitives.nix`; bump the libnet flake input
-here; switch `lib/types/primitives.nix` to
-`inherit (libnet.types) fwmark routingTableId;`; remove the local
-definitions. Wanwatch consumer API stays identical
-(`wanwatch.types.fwmark` keeps resolving — to the libnet
-definition instead of the local one).
+So wanwatch's types keep wanwatch's range. If libnet gains these types,
+`lib/types/primitives.nix` builds on them only as a restriction of the
+libnet type to `[1000, 32767]`, and `wanwatch.types.fwmark` and
+`wanwatch.types.routingTableId` keep accepting the same values.
 
 ### Declarative Hooks option
 

@@ -22,7 +22,7 @@ The first release: multi-WAN monitoring and single-active failover for NixOS.
 - Hooks in `/etc/wanwatch/hooks/{up,down,switch}.d/`, run after each Decision with the `WANWATCH_*` variables and an allowlisted environment ([daemon-state](./docs/specs/daemon-state.md#hook-env-var-contract)).
 - Prometheus metrics on the Unix socket `/run/wanwatch/metrics.sock` ([catalog](./docs/metrics.md)).
 - `config.json` schema 1, the daemon's configuration format ([daemon-config](./docs/specs/daemon-config.md)).
-- `lib`, the pure-Nix library behind the module: validated WAN, Probe, Member, Group, and global-settings values, option types, the selector, and the config renderer. Of these, `lib.types`, `lib.config.paths`, and `lib.version` are stable.
+- `lib`, the pure-Nix library behind the module: validated WAN, Probe, Member, Group, and global-settings values, option types, the selector, and the config renderer. Of these, `lib.types.fwmark`, `lib.types.routingTableId`, `lib.config.paths`, and `lib.version` are stable.
 - The 0.x stability promise ([ADR-0018](./docs/adr/0018-0x-stability-promise.md)): every 0.x release keeps both schema 1 contracts, the Hook variables, and the metric catalog compatible. The `services.wanwatch` options and the rest of `lib` may break in a minor release, with a migration note here.
 
 The README's [Limitations](./README.md#limitations) lists what this release does not do.
