@@ -11,9 +11,10 @@
     }
 
   Rendering also validates the global settings with `global.make`,
-  rejects Members that reference an undeclared WAN, which the daemon
-  would refuse, and rejects Groups that share a mark or a table,
-  because their traffic would be routed through the wrong table.
+  rejects WANs and Groups keyed by another name and Members that
+  reference an undeclared WAN, which the daemon would refuse, and
+  rejects Groups that share a mark or a table, because their traffic
+  would be routed through the wrong table.
 */
 {
   lib,
@@ -71,6 +72,31 @@ let
     else
       throw "wanwatch: duplicate mark or table across groups: ${lib.concatStringsSep "; " messages}";
 
+  /*
+    Reject values keyed by another name. The daemon requires each key
+    of `wans` and `groups` to match its value's `name` and refuses the
+    file otherwise, so a mismatch would surface as a failed unit
+    instead of an evaluation error.
+
+    `field`: the config field holding `values`, such as `"wans"`.
+    `values`: an attrset of values with a `name`.
+
+    Returns `values` unchanged. Throws a message listing every value
+    whose key differs from its name.
+  */
+  assertKeyedByName =
+    field: values:
+    let
+      messages = lib.pipe values [
+        (lib.filterAttrs (key: value: value.name != key))
+        (lib.mapAttrsToList (key: value: "${field}.${key} has name '${value.name}'"))
+      ];
+    in
+    if messages == [ ] then
+      values
+    else
+      throw "wanwatch: ${field} keyed by another name: ${lib.concatStringsSep "; " messages}";
+
   # Returns one message per Member whose `wan` is not a key of `wans`.
   describeUndeclaredMemberWans =
     wans: groups:
@@ -117,8 +143,9 @@ let
 
     Returns the JSON-shaped attrset, whose `global` also carries
     `paths`. Throws the `global.make` error when the global settings
-    are invalid, and throws when a Member references a WAN that `wans`
-    does not declare or when Groups share a mark or a table.
+    are invalid, and throws when a WAN or Group key differs from its
+    `name`, when a Member references a WAN that `wans` does not
+    declare, or when Groups share a mark or a table.
   */
   render =
     {
@@ -129,8 +156,12 @@ let
     {
       schema = schemaVersion;
       global = internal.global.toJSONValue (internal.global.make global) // paths;
-      wans = builtins.mapAttrs (_: wan.toJSONValue) wans;
+      wans = lib.pipe wans [
+        (assertKeyedByName "wans")
+        (builtins.mapAttrs (_: wan.toJSONValue))
+      ];
       groups = lib.pipe groups [
+        (assertKeyedByName "groups")
         (assertDeclaredMemberWans wans)
         assertUniqueMarksAndTables
         (builtins.mapAttrs (_: group.toJSONValue))
