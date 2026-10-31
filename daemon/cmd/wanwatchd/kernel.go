@@ -9,12 +9,13 @@ import (
 )
 
 // kernel is the daemon's seam to the kernel: the fwmark rules
-// bootstrap installs, and the lookups and mutations behind Apply and
+// bootstrap ensures (EnsureRule returns the number of copies it
+// removed), and the lookups and mutations behind Apply and
 // the post-switch conntrack flush. netlinkKernel is the production
 // adapter; tests substitute a recording fake, since the sandbox grants
 // no CAP_NET_ADMIN.
 type kernel interface {
-	EnsureRule(ctx context.Context, r apply.FwmarkRule) error
+	EnsureRule(ctx context.Context, r apply.FwmarkRule) (int, error)
 	IfIndex(name string) (int, error)
 	WriteRoute(ctx context.Context, r apply.DefaultRoute) error
 	InterfaceAddrs(name string) ([]net.IP, error)
@@ -24,7 +25,7 @@ type kernel interface {
 // netlinkKernel delegates to internal/apply and the net helpers.
 type netlinkKernel struct{}
 
-func (netlinkKernel) EnsureRule(ctx context.Context, r apply.FwmarkRule) error {
+func (netlinkKernel) EnsureRule(ctx context.Context, r apply.FwmarkRule) (int, error) {
 	return apply.EnsureRule(ctx, r)
 }
 
