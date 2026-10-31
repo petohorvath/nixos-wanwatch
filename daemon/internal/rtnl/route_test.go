@@ -1081,8 +1081,8 @@ func discoverDefaults(t *testing.T, s *RouteSubscriber, routes []netlink.Route, 
 }
 
 // TestRouteSubscriberSelectsPreferredDefault: the snapshot and the
-// reconcile path both report, per interface and Family, the default
-// the kernel uses: the lowest metric, ties to the first listed.
+// reconcile path both report, per interface and Family, the preferred
+// default: the lowest metric, ties to the first listed.
 func TestRouteSubscriberSelectsPreferredDefault(t *testing.T) {
 	t.Parallel()
 	newRoute := func(r netlink.Route) netlink.RouteUpdate {

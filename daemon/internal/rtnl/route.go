@@ -128,7 +128,8 @@ func (s *RouteSubscriber) readSnapshot(ctx context.Context, listFn routeListFn) 
 // selectDefaults returns one Add per watched interface and Family in a
 // route dump, in the order the pairs first appear. Each carries the
 // Gateway of the pair's preferred default: the lowest metric, ties to
-// the first listed, which is the route the kernel uses.
+// the first listed. For IPv6, the kernel may route through another
+// equal-metric default — see docs/architecture.md.
 func (s *RouteSubscriber) selectDefaults(routes []netlink.Route) []RouteEvent {
 	var selected []RouteEvent
 	metrics := make(map[routeKey]int)
