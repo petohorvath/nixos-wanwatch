@@ -8,8 +8,8 @@
 { inputs, pkgs }:
 
 let
-  inherit (inputs.nixos-nftzones.inputs.nftypes.lib.dsl) mangle;
-  inherit (inputs.nixos-nftzones.inputs.nftypes.lib.dsl.fields) meta;
+  inherit (inputs.nix-nftypes.lib.dsl) mangle;
+  inherit (inputs.nix-nftypes.lib.dsl.fields) meta;
 in
 pkgs.testers.runNixOSTest {
   name = "wanwatch-nftzones-integration";

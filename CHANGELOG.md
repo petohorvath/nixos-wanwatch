@@ -4,6 +4,10 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ## [Unreleased]
 
+### Changed
+
+- Update `nix-libnet` to v0.2.0 and `nixos-nftzones` to v0.1.0, whose `nix-nftypes` input now follows a new root `nix-nftypes` input at v0.2.0. Like `nixos-nftzones`, it serves only the flake's checks; a host drops it with `inputs.wanwatch.inputs.nix-nftypes.follows = "";`, as the README shows.
+
 ## [0.1.0] - 2026-10-30
 
 The first release: multi-WAN monitoring and single-active failover for NixOS.

@@ -35,10 +35,7 @@
       # every input passed as an override, so it fetches nothing.
       nix-unit = {
         package = pkgs.nix-unit;
-        inputs = removeAttrs inputs [ "self" ] // {
-          # nixos-nftzones' own input that follows no root input.
-          "nixos-nftzones/nftypes" = inputs.nixos-nftzones.inputs.nftypes;
-        };
+        inputs = removeAttrs inputs [ "self" ];
         enableSystemAgnostic = false;
         tests = {
           unit = import ../tests/unit { inherit (inputs) nix-libnet nixpkgs; };
