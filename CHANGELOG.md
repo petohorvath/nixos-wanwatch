@@ -4,6 +4,10 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ## [Unreleased]
 
+### Fixed
+
+- `wanwatchd` could keep a deleted IPv4 Gateway after the preferred default route on a WAN's interface was deleted, in State, the Hook variables, and the Group's table, until the next route change on that interface. The kernel sends an IPv4 route delete's notification before it removes the route, so the daemon's re-read could still list it. The daemon now leaves the deleted route out of that read ([#97](https://github.com/petohorvath/nixos-wanwatch/issues/97)).
+
 ## [0.1.0] - 2026-10-31
 
 The first release: multi-WAN monitoring and single-active failover for NixOS.

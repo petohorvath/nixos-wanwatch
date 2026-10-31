@@ -166,8 +166,12 @@ func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Ro
 			if !ok {
 				return errSubscriptionClosed
 			}
+			var deleted *netlink.Route
+			if upd.Type == unix.RTM_DELROUTE {
+				deleted = &upd.Route
+			}
 			for _, c := range s.handleUpdate(upd) {
-				ev, err := s.reconcileVia(ctx, listFn, c.RouteEvent)
+				ev, err := s.reconcileVia(ctx, listFn, c.RouteEvent, deleted)
 				if err != nil {
 					return err
 				}
@@ -186,13 +190,30 @@ func (s *RouteSubscriber) runLoop(ctx context.Context, updates <-chan netlink.Ro
 // select, or a Del only if the interface has no default left. A stale
 // delete must not clear a replacement, so an interrupted dump is read
 // again rather than trusted.
-func (s *RouteSubscriber) reconcileVia(ctx context.Context, listFn routeListFn, ev RouteEvent) (RouteEvent, error) {
+//
+// deleted is the route of the RTM_DELROUTE that triggered the read, or
+// nil for an RTM_NEWROUTE. The read leaves it out: the kernel sends an
+// IPv4 RTM_DELROUTE before it unlinks the route (fib_table_delete), and
+// the IPv4 route dump runs under RCU without RTNL, so a read that the
+// notification wakes can still list the route being deleted. Only that
+// route can: an earlier delete finished under RTNL before the
+// notification was sent, and a later one queues its own notification.
+// A later re-add of the same route also queues one, so dropping its
+// listing here only delays its Add. An add needs no exclusion, since
+// the kernel inserts the route before it notifies. IPv6 unlinks before
+// it notifies, so there the exclusion matters only for such a re-add.
+func (s *RouteSubscriber) reconcileVia(ctx context.Context, listFn routeListFn, ev RouteEvent, deleted *netlink.Route) (RouteEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return RouteEvent{}, err
 	}
 	routes, err := retryDump(ctx, func() ([]netlink.Route, error) { return listFn(nil, int(ev.Family)) })
 	if err != nil {
 		return RouteEvent{}, fmt.Errorf("rtnl: RouteList family=%d: %w", ev.Family, err)
+	}
+	if deleted != nil {
+		if i := slices.IndexFunc(routes, func(r netlink.Route) bool { return sameDefaultRoute(r, *deleted) }); i >= 0 {
+			routes = slices.Concat(routes[:i], routes[i+1:])
+		}
 	}
 	ev.Op = RouteEventDel
 	for _, current := range s.selectDefaults(routes) {
@@ -203,6 +224,20 @@ func (s *RouteSubscriber) reconcileVia(ctx context.Context, listFn routeListFn, 
 	}
 	ev.Time = time.Now().UTC()
 	return ev, nil
+}
+
+// sameDefaultRoute reports whether a and b are the same default route
+// by the fields that identify a route to the kernel: Family,
+// Table, Tos, metric, and next-hops. It ignores the other fields, such
+// as the offload flags, because a dump reads them afresh and they can
+// differ from a notification's.
+func sameDefaultRoute(a, b netlink.Route) bool {
+	return isDefaultRoute(a) && isDefaultRoute(b) &&
+		a.Family == b.Family && a.Table == b.Table && a.Tos == b.Tos &&
+		a.Priority == b.Priority && a.LinkIndex == b.LinkIndex && a.Gw.Equal(b.Gw) &&
+		slices.EqualFunc(a.MultiPath, b.MultiPath, func(x, y *netlink.NexthopInfo) bool {
+			return x.LinkIndex == y.LinkIndex && x.Hops == y.Hops && x.Gw.Equal(y.Gw)
+		})
 }
 
 // routeKey identifies one watched interface and Family.

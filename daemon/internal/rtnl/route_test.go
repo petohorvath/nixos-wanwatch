@@ -454,7 +454,7 @@ func TestRouteReconcileViaCancelledAtEntry(t *testing.T) {
 		return nil, nil
 	}
 	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0"})
-	ev, err := s.reconcileVia(ctx, listFn, RouteEvent{Op: RouteEventAdd, Iface: "eth0", Family: RouteFamilyV4})
+	ev, err := s.reconcileVia(ctx, listFn, RouteEvent{Op: RouteEventAdd, Iface: "eth0", Family: RouteFamilyV4}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("reconcileVia = %v, want context.Canceled", err)
 	}
@@ -764,6 +764,17 @@ func TestRouteSubscriberStartReconcilesQueuedChanges(t *testing.T) {
 				queued:       []netlink.RouteUpdate{removed, replacement},
 				wantSnapshot: []string{"add " + oldGw.String()},
 				wantLive:     []string{"add " + newGw.String(), "add " + newGw.String()},
+			},
+			{
+				// The delete's read leaves the deleted route out even
+				// though the same route is back; the re-add's own
+				// notification restores it.
+				name:         "delete then re-add after snapshot",
+				snapshot:     []netlink.Route{old.Route},
+				current:      []netlink.Route{old.Route},
+				queued:       []netlink.RouteUpdate{removed, old},
+				wantSnapshot: []string{"add " + oldGw.String()},
+				wantLive:     []string{"del " + oldGw.String(), "add " + oldGw.String()},
 			},
 			{
 				name:         "snapshot already includes queued changes",
@@ -1255,6 +1266,81 @@ func TestRouteSubscriberSelectsPreferredDefault(t *testing.T) {
 			name: "last default deleted",
 			upd:  delRoute(low),
 			live: []string{"eth0 v4 del 192.0.2.1"},
+		},
+		{
+			// The kernel sends an IPv4 RTM_DELROUTE before it unlinks
+			// the route, and its route dump doesn't take RTNL, so the
+			// read can still list the route being deleted (#97).
+			name:     "preferred default deleted but still listed",
+			routes:   []netlink.Route{low, high},
+			upd:      delRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
+			name:     "last default deleted but still listed",
+			routes:   []netlink.Route{low},
+			upd:      delRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 del 192.0.2.1"},
+		},
+		{
+			// The dump reads a route's offload flags afresh, so they
+			// can differ from the notification's.
+			name: "deleted default listed with other flags",
+			routes: []netlink.Route{
+				func() netlink.Route { r := low; r.Flags = unix.RTNH_F_OFFLOAD; return r }(),
+				high,
+			},
+			upd:      delRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
+			name: "multipath default deleted but still listed",
+			routes: []netlink.Route{
+				multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.1"),
+				high,
+			},
+			upd:      delRoute(multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.1")),
+			snapshot: []string{"eth0 v4 add 192.0.2.1", "eth1 v4 add 198.51.100.1"},
+			live:     []string{"eth0 v4 add 192.0.2.2", "eth1 v4 del 198.51.100.1"},
+		},
+		{
+			// Each listed ahead of the deleted route, a default that
+			// differs from it in one identifying field stays.
+			name:     "deleted default listed after one on another interface",
+			routes:   []netlink.Route{defaultVia("192.0.2.1", 4, 100), low, high},
+			upd:      delRoute(low),
+			snapshot: []string{"eth1 v4 add 192.0.2.1", "eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
+			name:     "deleted default listed after one at another metric",
+			routes:   []netlink.Route{defaultVia("192.0.2.1", 3, 300), low, high},
+			upd:      delRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
+			name: "deleted multipath default listed after one with another next-hop",
+			routes: []netlink.Route{
+				multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.2"),
+				multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.1"),
+				high,
+			},
+			upd:      delRoute(multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.1")),
+			snapshot: []string{"eth0 v4 add 192.0.2.1", "eth1 v4 add 198.51.100.2"},
+			live:     []string{"eth0 v4 add 192.0.2.1", "eth1 v4 add 198.51.100.2"},
+		},
+		{
+			// An add's notification follows the insert, so its dump
+			// is trusted to list the added route.
+			name:     "added default listed",
+			routes:   []netlink.Route{low, high},
+			upd:      newRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.1"},
 		},
 		{
 			name:     "multipath with one next-hop on the interface",
