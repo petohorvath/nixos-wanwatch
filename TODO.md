@@ -162,6 +162,19 @@ exiting, the subscriber could reopen its subscription and reconcile
 from a fresh dump, as it already does at startup.
 `daemon/internal/rtnl/subscriber.go`, `daemon/internal/rtnl/route.go`.
 
+### Keep failover running when the metrics server fails
+
+The metrics server is supervised like the probers and subscribers: if
+it fails while the daemon runs, the daemon exits and systemd restarts
+it (`superviseSubsystem`, `daemon/cmd/wanwatchd/main.go`). A metrics
+failure therefore interrupts failover, although failover doesn't need
+metrics, and a persistent failure, such as an unwritable socket path,
+can reach the unit's start limit and leave it `failed`. Failover
+could instead keep running and report the failure in the log and in
+`state.json`. The trade-off is that a dead metrics endpoint hides the
+daemon from monitoring until someone reads the log.
+`daemon/cmd/wanwatchd/main.go`, `daemon/internal/metrics/server.go`.
+
 ### Cheaper Gateway reconcile on a route notification
 
 The route subscriber re-reads the whole main table for the Family on

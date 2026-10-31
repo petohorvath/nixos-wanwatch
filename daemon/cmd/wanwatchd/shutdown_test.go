@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"testing"
 	"testing/synctest"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/probe"
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/rtnl"
+	"github.com/petohorvath/nixos-wanwatch/daemon/internal/selector"
 )
 
 // queue leaves v waiting in ch, as an event buffered in a subscriber
@@ -113,6 +116,52 @@ func TestStopDropsQueuedEvents(t *testing.T) {
 	}
 }
 
+// TestStopEndsInFlightHandler pins shutdown inside a handler: once the
+// daemon context is cancelled, the handler that is already running
+// applies nothing more, to its own Group or the next, counts no route
+// error, and publishes no State. primary's carrier moves both Groups
+// onto it; the first Group's ifindex lookup holds until cancellation.
+func TestStopEndsInFlightHandler(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.Groups["guest"] = selector.Group{
+			Name: "guest", Strategy: "primary-backup", Table: 200, Mark: 0x200,
+			Members: cfg.Groups["home"].Members,
+		}
+		h := startHarness(t, cfg)
+		cachedGateways(h)
+		h.Trace()
+		stateBefore := readStateFile(t, h)
+		errorsBefore := applyRouteErrorsIn(t, h, "home", "guest")
+
+		h.kernel.hold(opIfIndex, "eth0", h.ctx.Done())
+		send(h, h.links, carrier("eth0", true))
+		synctest.Wait() // the first Group's lookup holds
+
+		h.Stop()
+
+		assertTrace(t, "Stop", h.Trace(), []string{"hooks closed"})
+		if got := readStateFile(t, h); !bytes.Equal(got, stateBefore) {
+			t.Errorf("State rewritten during shutdown:\nbefore: %s\nafter:  %s", stateBefore, got)
+		}
+		if got := applyRouteErrorsIn(t, h, "home", "guest"); got != errorsBefore {
+			t.Errorf("apply_route_errors_total = %v across Stop, want %v", got, errorsBefore)
+		}
+	})
+}
+
+// applyRouteErrorsIn sums apply_route_errors_total over groups.
+func applyRouteErrorsIn(tb testing.TB, h *harness, groups ...string) float64 {
+	tb.Helper()
+	var sum float64
+	for _, g := range groups {
+		sum += readCounter(tb, h.metrics.ApplyRouteErrors.WithLabelValues(g, "v4")) +
+			readCounter(tb, h.metrics.ApplyRouteErrors.WithLabelValues(g, "v6"))
+	}
+	return sum
+}
+
 // TestPrimesNothingOnceCancelled: a daemon cancelled before priming
 // primes nothing from its startup snapshots, as the event loop
 // dispatches nothing once cancelled. Priming would otherwise drive
@@ -137,4 +186,37 @@ func TestPrimesNothingOnceCancelled(t *testing.T) {
 	if got := readStateFile(t, h); !bytes.Equal(got, stateBefore) {
 		t.Errorf("State rewritten during shutdown:\nbefore: %s\nafter:  %s", stateBefore, got)
 	}
+}
+
+// TestSubsystemExitStopsServe: a subsystem that fails while the daemon
+// runs ends the event loop, and the daemon exits non-zero so systemd
+// restarts it, as run() does with each prober, subscriber, and the
+// metrics server.
+func TestSubsystemExitStopsServe(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, baseConfig())
+		ctx, cancel := context.WithCancelCause(h.ctx)
+		defer cancel(nil)
+		exited := make(chan error)
+		subsystemDone := superviseSubsystem(ctx, cancel, h.d.logger, "route subscriber", func() error { return <-exited })
+		served := make(chan struct{})
+		go func() {
+			defer close(served)
+			serve(ctx, h.d, h.probes, h.links, h.routes, h.challenges)
+		}()
+
+		errOverrun := errors.New("ENOBUFS")
+		exited <- errOverrun
+		synctest.Wait()
+
+		select {
+		case <-served:
+		default:
+			t.Fatal("serve still running after a subsystem failed")
+		}
+		if err := exitError(ctx, subsystemDone, h.d.logger); !errors.Is(err, errOverrun) {
+			t.Errorf("exitError = %v, want %%w-wrapped %v", err, errOverrun)
+		}
+	})
 }

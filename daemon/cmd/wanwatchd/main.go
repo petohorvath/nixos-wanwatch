@@ -136,12 +136,9 @@ func run(parent context.Context, args []string, logSink io.Writer) error {
 		Socket:  cfg.Global.MetricsSocket,
 		Handler: mreg.Handler(),
 	}
-	metricsDone := make(chan struct{})
-	go func() {
-		defer close(metricsDone)
-		err := mserver.Serve(ctx)
-		onSubsystemExit(cancel, logger, "metrics server", err)
-	}()
+	metricsDone := superviseSubsystem(ctx, cancel, logger, "metrics server", func() error {
+		return mserver.Serve(ctx)
+	})
 
 	logger.Info("metrics endpoint listening", "socket", cfg.Global.MetricsSocket)
 
@@ -212,17 +209,43 @@ func isCleanShutdown(cause error) bool {
 		errors.Is(cause, context.Canceled)
 }
 
-// onSubsystemExit handles a background goroutine returning. A
-// context-cancellation error is the orderly-shutdown path and is
-// ignored; any other error is logged and recorded as the daemon
-// context's cancellation cause, so exitError reports it and the
-// process exits non-zero for systemd to restart.
-func onSubsystemExit(cancel context.CancelCauseFunc, logger *slog.Logger, name string, err error) {
-	if err == nil || errors.Is(err, context.Canceled) {
-		return
-	}
-	logger.Error("subsystem exited", "subsystem", name, "err", err)
-	cancel(fmt.Errorf("%s: %w", name, err))
+// errSubsystemStopped is the cause recorded for a subsystem that
+// returned while the daemon was still running without reporting an
+// error of its own: a nil return, or a Canceled from a context other
+// than the daemon's. It must not wrap context.Canceled, which
+// isCleanShutdown reads as an orderly stop.
+var errSubsystemStopped = errors.New("exited while the daemon was running")
+
+// superviseSubsystem runs a background subsystem's wait on its own
+// goroutine and returns a channel closed once its exit is handled.
+// Any exit while ctx is live takes the daemon down: the cause, which
+// names the subsystem, cancels ctx, so exitError reports it and the
+// process exits non-zero for systemd to restart. A subsystem that
+// stopped silently would otherwise leave failover running blind, as
+// READY and the watchdog only prove the event loop is alive. Once ctx
+// is done, an exit is the orderly-shutdown path and keeps the first
+// cause.
+func superviseSubsystem(ctx context.Context, cancel context.CancelCauseFunc, logger *slog.Logger, name string, wait func() error) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		err := wait()
+		if ctx.Err() != nil {
+			return
+		}
+		logger.Error("subsystem exited", "subsystem", name, "err", err)
+		switch {
+		case err == nil:
+			cancel(fmt.Errorf("%s: %w", name, errSubsystemStopped))
+		case errors.Is(err, context.Canceled):
+			// The text only: a wrapped Canceled would read as an
+			// orderly stop.
+			cancel(fmt.Errorf("%s: %w: %s", name, errSubsystemStopped, err.Error()))
+		default:
+			cancel(fmt.Errorf("%s: %w", name, err))
+		}
+	}()
+	return done
 }
 
 // exitError waits for the metrics server to finish, then maps the

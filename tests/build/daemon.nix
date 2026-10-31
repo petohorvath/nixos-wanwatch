@@ -15,7 +15,7 @@ pkgs.linkFarm "wanwatch-daemon" {
     Per-package coverage floors (AGENTS.md). `cmd/wanwatchd` has the
     lowest floor: its netlink kernel adapter and the run() wiring of
     probers and subscribers need a real kernel, which only the VM tier
-    exercises. Its coverage also varies between 69.7% and 70.3%: the
+    exercises. Its coverage also varies between 72.8% and 73.6%: the
     shutdown tests reach eventLoop's cancelled-context returns only when
     select picks the queued event over ctx.Done, so its floor truncates
     the lowest measurement. Floors track measured coverage: raise them as
@@ -26,7 +26,7 @@ pkgs.linkFarm "wanwatch-daemon" {
     name = "wanwatch-daemon-coverage";
     script = ''
       cat > coverage.thresholds <<'EOF'
-      cmd/wanwatchd:69
+      cmd/wanwatchd:72
       internal/apply:90
       internal/config:100
       internal/decision:100

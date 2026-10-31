@@ -11,9 +11,9 @@ import (
 
 // startLinkSubscriber opens an rtnetlink subscription filtered to the
 // daemon's WAN interfaces and returns the startup link snapshot and
-// the LinkEvent channel. A subscriber that exits with anything other
-// than context cancellation calls `cancel` with the cause, taking the
-// daemon down for a systemd restart rather than running on blind.
+// the LinkEvent channel. A subscriber that exits while ctx is live
+// calls `cancel` with the cause, taking the daemon down for a systemd
+// restart rather than running on blind (superviseSubsystem).
 //
 // Start establishes the live subscription before reading the link
 // snapshot, so a carrier change during startup cannot be missed, and
@@ -27,9 +27,7 @@ func startLinkSubscriber(ctx context.Context, cancel context.CancelCauseFunc, cf
 	if err != nil {
 		return nil, nil, fmt.Errorf("rtnl link subscriber start: %w", err)
 	}
-	go func() {
-		onSubsystemExit(cancel, logger, "link subscriber", <-exited)
-	}()
+	superviseSubsystem(ctx, cancel, logger, "link subscriber", func() error { return <-exited })
 	logger.Info("rtnl link subscriber started", "interfaces", len(watched), "snapshot", len(snapshot))
 	return snapshot, events, nil
 }
@@ -52,9 +50,7 @@ func startRouteSubscriber(ctx context.Context, cancel context.CancelCauseFunc, c
 	if err != nil {
 		return nil, nil, fmt.Errorf("rtnl route subscriber start: %w", err)
 	}
-	go func() {
-		onSubsystemExit(cancel, logger, "route subscriber", <-exited)
-	}()
+	superviseSubsystem(ctx, cancel, logger, "route subscriber", func() error { return <-exited })
 	logger.Info("rtnl route subscriber started", "interfaces", len(watched), "snapshot", len(snapshot))
 	return snapshot, events, nil
 }
