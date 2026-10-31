@@ -112,13 +112,27 @@ func TestRouteFamilyFromAFDefaultsV4(t *testing.T) {
 	}
 }
 
+// handleRoute runs handleUpdate on a single-path route update, which
+// yields at most one candidate, and returns that candidate's event.
+func handleRoute(t *testing.T, s *RouteSubscriber, upd netlink.RouteUpdate) (RouteEvent, bool) {
+	t.Helper()
+	candidates := s.handleUpdate(upd)
+	if len(candidates) > 1 {
+		t.Fatalf("handleUpdate = %d candidates for a single-path route, want at most 1", len(candidates))
+	}
+	if len(candidates) == 0 {
+		return RouteEvent{}, false
+	}
+	return candidates[0].RouteEvent, true
+}
+
 func TestRouteHandleUpdateEmitsAdd(t *testing.T) {
 	t.Parallel()
 	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0"})
 	gw := net.ParseIP("192.0.2.1")
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, gw, 3, nil)
 
-	ev, ok := s.handleUpdate(upd)
+	ev, ok := handleRoute(t, s, upd)
 	if !ok {
 		t.Fatal("default-route add did not emit")
 	}
@@ -144,7 +158,7 @@ func TestRouteHandleUpdateEmitsDel(t *testing.T) {
 	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0"})
 	upd := mkRouteUpdate(unix.RTM_DELROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil)
 
-	ev, ok := s.handleUpdate(upd)
+	ev, ok := handleRoute(t, s, upd)
 	if !ok {
 		t.Fatal("default-route del did not emit")
 	}
@@ -159,7 +173,7 @@ func TestRouteHandleUpdateEmitsV6(t *testing.T) {
 	gw := net.ParseIP("2001:db8::1")
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET6, unix.RT_TABLE_MAIN, gw, 3, nil)
 
-	ev, ok := s.handleUpdate(upd)
+	ev, ok := handleRoute(t, s, upd)
 	if !ok {
 		t.Fatal("v6 default-route add did not emit")
 	}
@@ -179,7 +193,7 @@ func TestRouteHandleUpdateEmitsScopeLink(t *testing.T) {
 	s := mkSub(map[string]struct{}{"wg0": {}}, map[int]string{5: "wg0"})
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, nil, 5, nil)
 
-	ev, ok := s.handleUpdate(upd)
+	ev, ok := handleRoute(t, s, upd)
 	if !ok {
 		t.Fatal("scope-link default did not emit")
 	}
@@ -196,7 +210,7 @@ func TestRouteHandleUpdateFiltersNonMainTable(t *testing.T) {
 	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0"})
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, 100, net.ParseIP("192.0.2.1"), 3, nil)
 
-	if _, ok := s.handleUpdate(upd); ok {
+	if _, ok := handleRoute(t, s, upd); ok {
 		t.Error("table=100 emitted; want filtered")
 	}
 }
@@ -207,7 +221,7 @@ func TestRouteHandleUpdateFiltersNonDefault(t *testing.T) {
 	_, dst, _ := net.ParseCIDR("192.0.2.0/24")
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, dst)
 
-	if _, ok := s.handleUpdate(upd); ok {
+	if _, ok := handleRoute(t, s, upd); ok {
 		t.Error("specific-prefix route emitted; want filtered")
 	}
 }
@@ -217,7 +231,7 @@ func TestRouteHandleUpdateFiltersByInterfaceSet(t *testing.T) {
 	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0", 4: "wwan0"})
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("100.64.0.1"), 4, nil)
 
-	if _, ok := s.handleUpdate(upd); ok {
+	if _, ok := handleRoute(t, s, upd); ok {
 		t.Error("wwan0 emitted despite not being in watched set")
 	}
 }
@@ -227,7 +241,7 @@ func TestRouteHandleUpdateNilInterfaceSetMatchesAll(t *testing.T) {
 	s := mkSub(nil, map[int]string{3: "eth0"})
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil)
 
-	if _, ok := s.handleUpdate(upd); !ok {
+	if _, ok := handleRoute(t, s, upd); !ok {
 		t.Error("nil Interfaces set did not match every interface")
 	}
 }
@@ -240,7 +254,7 @@ func TestRouteHandleUpdateDropsUnknownIfindex(t *testing.T) {
 	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{})
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 99, nil)
 
-	if _, ok := s.handleUpdate(upd); ok {
+	if _, ok := handleRoute(t, s, upd); ok {
 		t.Error("update with unresolvable ifindex emitted; want dropped")
 	}
 }
@@ -250,7 +264,7 @@ func TestRouteHandleUpdateIgnoresUnknownMsgType(t *testing.T) {
 	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0"})
 	upd := mkRouteUpdate(unix.RTM_GETROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil)
 
-	if _, ok := s.handleUpdate(upd); ok {
+	if _, ok := handleRoute(t, s, upd); ok {
 		t.Error("RTM_GETROUTE emitted; want ignored")
 	}
 }
@@ -269,10 +283,10 @@ func TestRouteHandleUpdateCachesIfaceLookup(t *testing.T) {
 	}
 	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil)
 
-	if _, ok := s.handleUpdate(upd); !ok {
+	if _, ok := handleRoute(t, s, upd); !ok {
 		t.Fatal("first update did not emit")
 	}
-	if _, ok := s.handleUpdate(upd); !ok {
+	if _, ok := handleRoute(t, s, upd); !ok {
 		t.Fatal("second update did not emit")
 	}
 	if calls != 1 {
@@ -990,6 +1004,205 @@ func TestRouteSubscriberReconcileFailureUnblocksReceiver(t *testing.T) {
 			}
 			if len(out) != 0 {
 				t.Error("failed route read emitted a Gateway observation")
+			}
+		})
+	}
+}
+
+// defaultVia builds a main-table default route via gw out of ifindex
+// with the given metric, as RouteList returns it.
+func defaultVia(gw string, ifindex, metric int) netlink.Route {
+	family := unix.AF_INET
+	if ip := net.ParseIP(gw); ip.To4() == nil {
+		family = unix.AF_INET6
+	}
+	return netlink.Route{
+		Family:    family,
+		Table:     unix.RT_TABLE_MAIN,
+		Gw:        net.ParseIP(gw),
+		LinkIndex: ifindex,
+		Priority:  metric,
+	}
+}
+
+// multipathDefault builds a main-table IPv4 default route with the
+// given metric and one nexthop per ifindex/gateway pair, as RouteList
+// returns it: no top-level gateway or link index.
+func multipathDefault(metric int, nexthops ...any) netlink.Route {
+	r := netlink.Route{Family: unix.AF_INET, Table: unix.RT_TABLE_MAIN, Priority: metric}
+	for i := 0; i < len(nexthops); i += 2 {
+		r.MultiPath = append(r.MultiPath, &netlink.NexthopInfo{
+			LinkIndex: nexthops[i].(int),
+			Gw:        net.ParseIP(nexthops[i+1].(string)),
+		})
+	}
+	return r
+}
+
+// discoverDefaults returns the Gateways that readSnapshot selects
+// from routes, and the events runLoop emits when upd arrives while
+// routes are the kernel's current list. Each event reads
+// "<iface> <family> <op> <gateway>".
+func discoverDefaults(t *testing.T, s *RouteSubscriber, routes []netlink.Route, upd netlink.RouteUpdate) (snapshot, live []string) {
+	t.Helper()
+	listFn := func(_ netlink.Link, family int) ([]netlink.Route, error) {
+		var matching []netlink.Route
+		for _, r := range routes {
+			if r.Family == family {
+				matching = append(matching, r)
+			}
+		}
+		return matching, nil
+	}
+	format := func(evs []RouteEvent) []string {
+		var got []string
+		for _, ev := range evs {
+			got = append(got, fmt.Sprintf("%s %v %v %v", ev.Iface, ev.Family, ev.Op, ev.Gateway))
+		}
+		return got
+	}
+	started, err := s.readSnapshot(t.Context(), listFn)
+	if err != nil {
+		t.Fatalf("readSnapshot = %v", err)
+	}
+	updates := make(chan netlink.RouteUpdate, 1)
+	updates <- upd
+	close(updates)
+	out := make(chan RouteEvent, 8)
+	if err := s.runLoop(t.Context(), updates, listFn, out); !errors.Is(err, errSubscriptionClosed) {
+		t.Fatalf("runLoop = %v, want errSubscriptionClosed", err)
+	}
+	close(out)
+	var emitted []RouteEvent
+	for ev := range out {
+		emitted = append(emitted, ev)
+	}
+	return format(started), format(emitted)
+}
+
+// TestRouteSubscriberSelectsPreferredDefault: the snapshot and the
+// reconcile path both report, per interface and Family, the default
+// the kernel uses: the lowest metric, ties to the first listed.
+func TestRouteSubscriberSelectsPreferredDefault(t *testing.T) {
+	t.Parallel()
+	newRoute := func(r netlink.Route) netlink.RouteUpdate {
+		return netlink.RouteUpdate{Type: unix.RTM_NEWROUTE, Route: r}
+	}
+	delRoute := func(r netlink.Route) netlink.RouteUpdate {
+		return netlink.RouteUpdate{Type: unix.RTM_DELROUTE, Route: r}
+	}
+	low, high := defaultVia("192.0.2.1", 3, 100), defaultVia("192.0.2.2", 3, 200)
+	for _, tc := range []struct {
+		name     string
+		routes   []netlink.Route
+		upd      netlink.RouteUpdate
+		snapshot []string
+		live     []string
+	}{
+		{
+			name:     "lower metric listed first",
+			routes:   []netlink.Route{low, high},
+			upd:      newRoute(high),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.1"},
+		},
+		{
+			name:     "lower metric listed second",
+			routes:   []netlink.Route{high, low},
+			upd:      newRoute(high),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.1"},
+		},
+		{
+			name:     "equal metrics",
+			routes:   []netlink.Route{defaultVia("192.0.2.2", 3, 100), low},
+			upd:      newRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.2"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
+			// Router Advertisements from two routers on one link.
+			name:     "equal IPv6 metrics",
+			routes:   []netlink.Route{defaultVia("fe80::2", 3, 1024), defaultVia("fe80::1", 3, 1024)},
+			upd:      newRoute(defaultVia("fe80::1", 3, 1024)),
+			snapshot: []string{"eth0 v6 add fe80::2"},
+			live:     []string{"eth0 v6 add fe80::2"},
+		},
+		{
+			name:     "preferred default deleted",
+			routes:   []netlink.Route{high},
+			upd:      delRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.2"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
+			name: "last default deleted",
+			upd:  delRoute(low),
+			live: []string{"eth0 v4 del 192.0.2.1"},
+		},
+		{
+			name:     "multipath with one nexthop on the interface",
+			routes:   []netlink.Route{multipathDefault(100, 5, "10.0.0.2", 3, "192.0.2.1")},
+			upd:      newRoute(multipathDefault(100, 5, "10.0.0.2", 3, "192.0.2.1")),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.1"},
+		},
+		{
+			name:     "multipath with two nexthops on the interface",
+			routes:   []netlink.Route{multipathDefault(100, 3, "192.0.2.2", 3, "192.0.2.1")},
+			upd:      newRoute(multipathDefault(100, 3, "192.0.2.2", 3, "192.0.2.1")),
+			snapshot: []string{"eth0 v4 add 192.0.2.2"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
+			name:     "multipath spanning two watched interfaces",
+			routes:   []netlink.Route{multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.1")},
+			upd:      newRoute(multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.1")),
+			snapshot: []string{"eth0 v4 add 192.0.2.1", "eth1 v4 add 198.51.100.1"},
+			live:     []string{"eth0 v4 add 192.0.2.1", "eth1 v4 add 198.51.100.1"},
+		},
+		{
+			name: "multipath spanning two watched interfaces deleted",
+			upd:  delRoute(multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.1")),
+			live: []string{"eth0 v4 del 192.0.2.1", "eth1 v4 del 198.51.100.1"},
+		},
+		{
+			name:   "multipath with no nexthop on a watched interface",
+			routes: []netlink.Route{multipathDefault(100, 5, "10.0.0.2", 99, "10.0.1.2")},
+			upd:    newRoute(multipathDefault(100, 5, "10.0.0.2", 99, "10.0.1.2")),
+		},
+		{
+			name:     "multipath with a lower metric than a single-path default",
+			routes:   []netlink.Route{high, multipathDefault(100, 5, "10.0.0.2", 3, "192.0.2.1")},
+			upd:      newRoute(high),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.1"},
+		},
+		{
+			name: "other tables and non-default routes ignored",
+			routes: []netlink.Route{
+				func() netlink.Route { r := defaultVia("192.0.2.7", 3, 0); r.Table = 100; return r }(),
+				func() netlink.Route {
+					r := defaultVia("192.0.2.8", 3, 0)
+					_, r.Dst, _ = net.ParseCIDR("198.51.100.0/24")
+					return r
+				}(),
+				high,
+			},
+			upd:      newRoute(high),
+			snapshot: []string{"eth0 v4 add 192.0.2.2"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := mkSub(map[string]struct{}{"eth0": {}, "eth1": {}}, map[int]string{3: "eth0", 4: "eth1", 5: "lan0"})
+			snapshot, live := discoverDefaults(t, s, tc.routes, tc.upd)
+			if !slices.Equal(snapshot, tc.snapshot) {
+				t.Errorf("snapshot = %q, want %q", snapshot, tc.snapshot)
+			}
+			if !slices.Equal(live, tc.live) {
+				t.Errorf("live = %q, want %q", live, tc.live)
 			}
 		})
 	}
