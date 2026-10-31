@@ -162,7 +162,9 @@ func (d *daemon) publishHealthChange(ctx context.Context, c health.Change, reaso
 	for _, wan := range c.Flipped {
 		d.recomputeAffectedGroups(ctx, wan, reason)
 	}
-	if c.Republish {
+	// Once cancelled, the Groups above applied nothing, so a republish
+	// would only report shutdown's partial view.
+	if c.Republish && ctx.Err() == nil {
 		d.writeStateSnapshot(time.Time{})
 	}
 }
@@ -171,6 +173,11 @@ func (d *daemon) publishHealthChange(ctx context.Context, c health.Change, reaso
 // containing wan. The Group owns Selection, retries and commit readiness.
 func (d *daemon) recomputeAffectedGroups(ctx context.Context, wan string, reason decisionReason) {
 	for name, g := range d.cfg.Groups {
+		// Once cancelled, no Group decides: a down would commit without
+		// any Apply and publish State and Hooks during shutdown.
+		if ctx.Err() != nil {
+			return
+		}
 		if !groupContainsWAN(g, wan) {
 			continue
 		}
@@ -244,6 +251,9 @@ func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, o
 // inspect intent.
 func (d *daemon) retryGroupDecisions(ctx context.Context, wan string) {
 	for name, g := range d.groups {
+		if ctx.Err() != nil {
+			return
+		}
 		d.publishDecision(ctx, d.cfg.Groups[name], g.Probe(ctx, wan))
 	}
 }
@@ -324,6 +334,11 @@ func (d *daemon) applyRoutes(ctx context.Context, g selector.Group, selection st
 		if !slices.Contains(probed, fam) {
 			continue
 		}
+		// A handler still running at shutdown stops here: a write on
+		// the cancelled context would fail and count as a route error.
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("apply routes: %w", err)
+		}
 		if writeOne(fam) {
 			failed++
 		}
@@ -356,6 +371,9 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 			continue
 		}
 		for name, g := range d.groups {
+			if ctx.Err() != nil {
+				return
+			}
 			committed := g.RouteObserved(ctx, wanName, probe.Family(e.Family))
 			d.publishDecision(ctx, d.cfg.Groups[name], committed)
 		}
@@ -367,7 +385,7 @@ func (d *daemon) handleRouteEvent(ctx context.Context, e rtnl.RouteEvent) {
 	// wouldn't otherwise update state.json, leaving the
 	// wans[<name>].gateways[v4|v6] fields stale.
 	changed := !hadPrev || e.Op == rtnl.RouteEventDel || !prev.Equal(e.Gateway)
-	if changed {
+	if changed && ctx.Err() == nil {
 		d.writeStateSnapshot(time.Time{})
 	}
 }

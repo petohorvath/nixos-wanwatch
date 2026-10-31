@@ -15,6 +15,7 @@ let
     check
     checkUnknownFields
     isPositiveInt
+    requireAttrset
     tryErr
     tryOk
     ;
@@ -67,17 +68,19 @@ let
 
     Returns a `tryResult` whose value is the global value. Error kinds:
 
+      globalNotAnAttrset           — input is not an attribute set
       globalUnknownField           — a field outside the global fields
       globalInvalidLogLevel        — logLevel not in `validLogLevels`
       globalNonPositiveHookTimeout — hookTimeoutMs ≤ 0
   */
-  tryMake =
+  tryMake = requireAttrset "globalNotAnAttrset" formatErrors (
     input:
     let
       fields = mergeWithDefaults input;
       errors = collectErrors input fields;
     in
-    if errors == [ ] then tryOk fields else tryErr (formatErrors errors);
+    if errors == [ ] then tryOk fields else tryErr (formatErrors errors)
+  );
 
   /*
     Construct a global value, failing evaluation on invalid input.

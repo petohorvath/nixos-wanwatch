@@ -58,6 +58,24 @@ in
   evalNixosOptions = modules: (evalSystemWith { } modules).options;
 
   /*
+    List the messages of a system's failed wanwatch assertions, which
+    NixOS would report when building it.
+
+    `config`: a system's `config`, as `evalNixos` returns it.
+
+    Returns the messages of the failed assertions whose message starts
+    with `services.wanwatch`, so other modules' assertions don't leak
+    into a wanwatch test.
+  */
+  failedWanwatchAssertions =
+    config:
+    nixpkgs.lib.pipe config.assertions [
+      (builtins.filter (assertion: !assertion.assertion))
+      (map (assertion: assertion.message))
+      (builtins.filter (nixpkgs.lib.hasPrefix "services.wanwatch"))
+    ];
+
+  /*
     Parse the daemon config that a system renders. Rendering forces
     `wan.make` and `group.make` on every declaration.
 

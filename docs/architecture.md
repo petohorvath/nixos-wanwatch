@@ -64,7 +64,7 @@ lib/internal/
 
 ## `nixos/`
 
-`module.nix` declares `services.wanwatch.*`, passes user input through `wanwatch.<type>.make`, runs `config.assertUniqueMarksAndTables` so no two Groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json` with `config.render`, which rejects Members that reference an undeclared WAN.
+`module.nix` declares `services.wanwatch.*`, passes user input through `wanwatch.<type>.make`, runs `config.assertUniqueMarksAndTables` so no two Groups share a `mark` or `table`, and renders `/etc/wanwatch/config.json` with `config.render`, which rejects WANs and Groups keyed by another name and Members that reference an undeclared WAN.
 
 It also publishes two read-only outputs that downstream consumers such as nftzones reference by name:
 

@@ -27,6 +27,7 @@ let
     checkUnknownFields
     isPositiveInt
     partitionTry
+    requireAttrset
     tryErr
     tryOk
     ;
@@ -276,6 +277,7 @@ let
     Returns a `tryResult` whose value is the probe value, with each
     target parsed into a libnet IP value. Error kinds:
 
+      probeNotAnAttrset              — input is not an attribute set
       probeUnknownField              — a field outside the Probe fields,
                                        or in `targets`, `thresholds`,
                                        or `hysteresis`
@@ -306,7 +308,7 @@ let
     Each recovery threshold must sit strictly below its failure
     threshold; otherwise a marginal WAN flaps on every Sample.
   */
-  tryMake =
+  tryMake = requireAttrset "probeNotAnAttrset" formatErrors (
     input:
     let
       fields = mergeWithDefaults input;
@@ -323,7 +325,8 @@ let
         }
       )
     else
-      tryErr (formatErrors errors);
+      tryErr (formatErrors errors)
+  );
 
   /*
     Construct a probe value, failing evaluation on invalid input.

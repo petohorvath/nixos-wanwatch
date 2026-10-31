@@ -188,6 +188,14 @@ in
       };
     };
 
+    testRejectsNonAttrsetGlobal = {
+      expr = config.render { global = null; };
+      expectedError = {
+        type = "ThrownError";
+        msg = "global.make: \\[globalNotAnAttrset]";
+      };
+    };
+
     testMatchesGolden = {
       expr = config.render renderInput;
       expected = golden;
@@ -230,6 +238,40 @@ in
       expectedError = {
         type = "ThrownError";
         msg = "group 'home-uplink' references wan 'backup'";
+      };
+    };
+
+    # The daemon requires each key to match its value's name, and
+    # refuses the file otherwise.
+    testRejectsWanKeyedByAnotherName = {
+      expr = config.render { wans.uplink = wans.primary; };
+      expectedError = {
+        type = "ThrownError";
+        msg = "wans.uplink has name 'primary'";
+      };
+    };
+
+    testRejectsGroupKeyedByAnotherName = {
+      expr = config.render {
+        inherit wans;
+        groups.home = group.make fixtures.inputs.group.minimal;
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = "groups.home has name 'home-uplink'";
+      };
+    };
+
+    testNamesEveryValueKeyedByAnotherName = {
+      expr = config.render {
+        wans = {
+          uplink = wans.primary;
+          tunnel = wans.vpn;
+        };
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = "wans keyed by another name: wans.tunnel has name 'vpn'; wans.uplink has name 'primary'";
       };
     };
 

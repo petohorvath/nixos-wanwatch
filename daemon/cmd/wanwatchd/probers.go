@@ -20,10 +20,10 @@ import (
 // (WAN, family) keys is surfaced at startup rather than as a silent
 // reply-misroute at runtime (docs/specs/probe-algorithm.md).
 //
-// A pinger that exits with anything other than context cancellation
-// calls `cancel` with the cause, taking the whole daemon down so
+// A pinger that exits while ctx is live, with an error or without
+// one, calls `cancel` with the cause, taking the whole daemon down so
 // systemd restarts it — a probe layer that silently stopped would
-// leave failover blind.
+// leave failover blind (superviseSubsystem).
 func startProbers(ctx context.Context, cancel context.CancelCauseFunc, cfg *config.Config, logger *slog.Logger) (<-chan probe.ProbeResult, error) {
 	keys := identKeysFor(cfg)
 	idents, err := probe.AllocateIdents(keys)
@@ -45,10 +45,9 @@ func startProbers(ctx context.Context, cancel context.CancelCauseFunc, cfg *conf
 			WindowSize: wan.Probe.WindowSize,
 			Logger:     logger,
 		}
-		go func(p *probe.Pinger) {
-			err := p.Run(ctx, results)
-			onSubsystemExit(cancel, logger, fmt.Sprintf("prober %s/%s", p.Wan, p.Family), err)
-		}(p)
+		superviseSubsystem(ctx, cancel, logger, fmt.Sprintf("prober %s/%s", p.Wan, p.Family), func() error {
+			return p.Run(ctx, results)
+		})
 	}
 	logger.Info("probers started", "count", len(keys))
 	return results, nil

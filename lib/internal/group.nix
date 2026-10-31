@@ -22,6 +22,7 @@ let
     check
     checkIdentifier
     checkUnknownFields
+    requireAttrset
     tryErr
     tryOk
     ;
@@ -143,6 +144,7 @@ let
 
     Returns a `tryResult` whose value is the group value. Error kinds:
 
+      groupNotAnAttrset    — input is not an attribute set
       groupUnknownField    — a field outside the Group fields
       groupInvalidName     — name is not a valid identifier
       groupNoMembers       — members is empty
@@ -153,7 +155,7 @@ let
       groupInvalidTable    — table missing or outside [1000, 32767]
       groupInvalidMark     — mark missing or outside [1000, 32767]
   */
-  tryMake =
+  tryMake = requireAttrset "groupNotAnAttrset" formatErrors (
     input:
     let
       fields = mergeWithDefaults input;
@@ -163,7 +165,8 @@ let
     if errors == [ ] then
       tryOk (fields // { members = parsedMembers.parsed; })
     else
-      tryErr (formatErrors errors);
+      tryErr (formatErrors errors)
+  );
 
   /*
     Construct a group value, failing evaluation on invalid input.

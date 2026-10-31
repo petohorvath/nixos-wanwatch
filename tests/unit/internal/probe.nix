@@ -137,6 +137,20 @@ in
         lossPctDown = 100;
         lossPctUp = 0;
       })
+      # The tightest pairs: each recovery threshold one below its
+      # failure threshold.
+      (withThresholds {
+        lossPctDown = 1;
+        lossPctUp = 0;
+      })
+      (withThresholds {
+        lossPctDown = 100;
+        lossPctUp = 99;
+      })
+      (withThresholds {
+        rttMsDown = 2;
+        rttMsUp = 1;
+      })
       # One bucket may hold several distinct Targets.
       {
         targets = {
@@ -168,6 +182,25 @@ in
     familyHealthPolicy =
       probeFieldTests "familyHealthPolicy" "probeInvalidFamilyHealthPolicy"
         cases.familyHealthPolicies;
+
+    /*
+      Thresholds reject the values their option types reject. Only the
+      invalid side is shared: a threshold's valid range depends on the
+      other threshold of its pair, so `valid` above lists the boundary
+      pairs instead.
+    */
+    lossPctDown = probeFieldTests "thresholds.lossPctDown" "probeLossPctOutOfRange" {
+      inherit (cases.percentages) invalid;
+    };
+    lossPctUp = probeFieldTests "thresholds.lossPctUp" "probeLossPctOutOfRange" {
+      inherit (cases.percentages) invalid;
+    };
+    rttMsDown = probeFieldTests "thresholds.rttMsDown" "probeNonPositiveRtt" {
+      inherit (cases.positiveInts) invalid;
+    };
+    rttMsUp = probeFieldTests "thresholds.rttMsUp" "probeNonPositiveRtt" {
+      inherit (cases.positiveInts) invalid;
+    };
   };
 
   rejections = helpers.rejectionTests probe.tryMake {
@@ -189,11 +222,17 @@ in
       # failures.
       targetsNotAnAttrset.targets = "1.1.1.1";
       bucketNotAList.targets.v4 = "1.1.1.1";
+      v6BucketNotAList.targets.v6 = "2606:4700:4700::1111";
+      # Targets are addresses: the daemon rejects a zone and a prefix.
+      zonedV6.targets.v6 = [ "fe80::1%eth0" ];
+      prefixV4.targets.v4 = [ "1.1.1.0/24" ];
+      prefixV6.targets.v6 = [ "2606:4700::/32" ];
     };
 
     probeTargetFamilyMismatch = {
       v6InV4Bucket.targets.v4 = [ "2001:db8::1" ];
       v4InV6Bucket.targets.v6 = [ "192.0.2.1" ];
+      ipv4MappedInV4Bucket.targets.v4 = [ "::ffff:1.1.1.1" ];
     };
 
     probeInvalidThresholds = {

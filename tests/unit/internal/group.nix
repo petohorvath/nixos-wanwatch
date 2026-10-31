@@ -113,6 +113,20 @@ in
     ];
   };
 
+  # Before the Member rejected a non-attrset input itself, `5`
+  # reported `memberInvalidWan`.
+  testForwardsNonAttrsetMember = {
+    expr = getErrorKinds (
+      group.tryMake (withMembers {
+        primary = 5;
+      })
+    );
+    expected = [
+      "groupInvalidMember"
+      "memberNotAnAttrset"
+    ];
+  };
+
   testReportsEachInvalidMember = {
     expr =
       let
