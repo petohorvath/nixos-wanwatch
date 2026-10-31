@@ -113,25 +113,6 @@ and down flush no conntrack" pins the current behavior.
 `daemon/cmd/wanwatchd/daemon.go` (`publishDecision`,
 `flushSwitchedConntrack`).
 
-### Threshold band used to seed Health at cold start
-
-Before its first full Window, a Family votes healthy, so a WAN with
-carrier can be Selected at startup. The first full Window then seeds
-Hysteresis through `evaluateThresholds` with the Family's initial
-verdict, unhealthy, so the seed uses the stricter recovery band
-(`lossPctUp`, `rttMsUp`) rather than the failure band. Under the
-default thresholds, a WAN at a steady 20% loss is Selected on carrier
-and then goes down when its Window fills, causing a switch at boot,
-although once it is up the same loss would keep it up. Seeding with the
-failure band would match the healthy vote the Family already cast.
-`TestThresholdBand` pins the current behavior, and
-[`docs/specs/failover.md`](./docs/specs/failover.md#cold-start-invariant)
-doesn't say which band applies to the seed. Decide, then record the
-answer in the spec.
-`daemon/internal/health/health.go` (`fold`, `evaluateThresholds`).
-
-**Decided** ([#93](https://github.com/petohorvath/nixos-wanwatch/issues/93)): seed with the failure band.
-
 ### Kernel-side conntrack flush for IPv6
 
 `apply.FlushBySource` asks the kernel to delete the matching IPv4

@@ -6,6 +6,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ### Changed
 
+- The first full Window after startup seeds Health against the failure thresholds (`lossPctDown`, `rttMsDown`) instead of the recovery thresholds. A WAN Selected on carrier at startup no longer goes down, and switches away, when its first Window falls between the two bands, such as a steady 20% loss under the defaults; it goes down only when it would also go down while up.
 - Update `nix-libnet` to v0.2.0 and `nixos-nftzones` to v0.1.0, whose `nix-nftypes` input now follows a new root `nix-nftypes` input at v0.2.0. Like `nixos-nftzones`, it serves only the flake's checks; a host drops it with `inputs.wanwatch.inputs.nix-nftypes.follows = "";`, as the README shows.
 
 ### Fixed
