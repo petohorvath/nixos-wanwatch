@@ -97,6 +97,37 @@ only once a deployment runs several Groups on one WAN.
 `daemon/internal/apply/conntrack.go`,
 [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
 
+### Conntrack flush when a Group recovers onto another WAN
+
+Only a switch flushes conntrack (`publishDecision`). When every
+Member goes down, the Decision is a `down` with no successor and
+flushes nothing, because no healthy WAN could carry the flows. If the
+Group then comes `up` on a different WAN than the one it vacated, that
+`up` isn't a switch either, so the old WAN's SNATted flows keep their
+conntrack entries and are black-holed until the entries time out.
+Remembering the last WAN that carried traffic and flushing it on an
+`up` onto another WAN would close the gap. The publication test "up
+and down flush no conntrack" pins the current behaviour.
+`daemon/cmd/wanwatchd/daemon.go` (`publishDecision`,
+`flushSwitchedConntrack`).
+
+### Threshold band used to seed Health at cold start
+
+Before its first full Window, a Family votes healthy, so a WAN with
+carrier can be Selected at startup. The first full Window then seeds
+Hysteresis through `evaluateThresholds` with the Family's initial
+verdict, unhealthy, so the seed uses the stricter recovery band
+(`lossPctUp`, `rttMsUp`) rather than the failure band. Under the
+default thresholds, a WAN at a steady 20% loss is Selected on carrier
+and then goes down when its Window fills, causing a switch at boot,
+although once it is up the same loss would keep it up. Seeding with the
+failure band would match the healthy vote the Family already cast.
+`TestThresholdBand` pins the current behaviour, and
+[`docs/specs/failover.md`](./docs/specs/failover.md#cold-start-invariant)
+doesn't say which band applies to the seed. Decide, then record the
+answer in the spec.
+`daemon/internal/health/health.go` (`fold`, `evaluateThresholds`).
+
 ### Kernel-side conntrack flush for IPv6
 
 `apply.FlushBySource` asks the kernel to delete the matching IPv4

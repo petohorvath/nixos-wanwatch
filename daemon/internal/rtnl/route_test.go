@@ -88,6 +88,15 @@ func TestIsDefaultRouteRejectsSpecific(t *testing.T) {
 	}
 }
 
+func TestIsDefaultRouteAcceptsNilDstIP(t *testing.T) {
+	t.Parallel()
+	// A Dst present but carrying no address names no prefix, so it
+	// reads as the default route, like Dst==nil.
+	if !isDefaultRoute(netlink.Route{Dst: &net.IPNet{}}) {
+		t.Error("Dst with nil IP not recognized as default")
+	}
+}
+
 func TestRouteFamilyFromAFV4(t *testing.T) {
 	t.Parallel()
 	if routeFamilyFromAF(unix.AF_INET) != RouteFamilyV4 {
@@ -347,6 +356,113 @@ func TestRouteRunLoopCancelsBetweenUpdates(t *testing.T) {
 	err := (&RouteSubscriber{}).runLoop(ctx, updates, emptyRouteList, out)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// TestRouteRunLoopSkipsNonMatchingUpdate: a live update that
+// handleUpdate filters out triggers no route read and no RouteEvent.
+// The daemon's own Group-table writes arrive as such updates; reading
+// routes for them would feed each Apply back into reconcile, refresh,
+// and another rewrite.
+func TestRouteRunLoopSkipsNonMatchingUpdate(t *testing.T) {
+	t.Parallel()
+	const groupTable = 100
+	gw4, gw6 := net.ParseIP("192.0.2.1"), net.ParseIP("2001:db8::1")
+	_, specific, _ := net.ParseCIDR("198.51.100.0/24")
+	for _, tc := range []struct {
+		name string
+		upd  netlink.RouteUpdate
+	}{
+		{"default route added to a Group table", mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, groupTable, gw4, 3, nil)},
+		{"default route deleted from a Group table", mkRouteUpdate(unix.RTM_DELROUTE, unix.AF_INET, groupTable, gw4, 3, nil)},
+		{"IPv6 default route added to a Group table", mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET6, groupTable, gw6, 3, nil)},
+		{"non-default route in the main table", mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, gw4, 3, specific)},
+		{"default route on an unwatched interface", mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, gw4, 4, nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0", 4: "lan0"})
+			updates := make(chan netlink.RouteUpdate, 1)
+			updates <- tc.upd
+			close(updates)
+			listCalls := 0
+			listFn := func(netlink.Link, int) ([]netlink.Route, error) {
+				listCalls++
+				return []netlink.Route{tc.upd.Route}, nil
+			}
+			out := make(chan RouteEvent, 1)
+
+			err := s.runLoop(t.Context(), updates, listFn, out)
+			if !errors.Is(err, errSubscriptionClosed) {
+				t.Fatalf("runLoop = %v, want errSubscriptionClosed", err)
+			}
+			if listCalls != 0 {
+				t.Errorf("RouteList calls = %d, want 0", listCalls)
+			}
+			if len(out) != 0 {
+				t.Errorf("runLoop emitted %+v, want no RouteEvent", <-out)
+			}
+		})
+	}
+}
+
+// TestRouteRunLoopCancelsBlockedSend: cancellation while runLoop waits
+// to queue a RouteEvent on an out nobody reads returns ctx's error.
+func TestRouteRunLoopCancelsBlockedSend(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0"})
+	upd := mkRouteUpdate(unix.RTM_NEWROUTE, unix.AF_INET, unix.RT_TABLE_MAIN, net.ParseIP("192.0.2.1"), 3, nil)
+	updates := make(chan netlink.RouteUpdate, 1)
+	updates <- upd
+	listed := make(chan struct{})
+	listFn := func(netlink.Link, int) ([]netlink.Route, error) {
+		close(listed)
+		return []netlink.Route{upd.Route}, nil
+	}
+	out := make(chan RouteEvent) // No consumer: the send blocks.
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.runLoop(ctx, updates, listFn, out) }()
+
+	// After the read, runLoop's only exit is the send's cancellation.
+	select {
+	case <-listed:
+	case <-time.After(time.Second):
+		t.Fatal("runLoop did not read routes for the update")
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("runLoop = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runLoop stayed blocked sending on out after cancellation")
+	}
+}
+
+// TestRouteReconcileViaCancelledAtEntry: a cancelled ctx stops the
+// reconcile before it reads any routes.
+func TestRouteReconcileViaCancelledAtEntry(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	listCalls := 0
+	listFn := func(netlink.Link, int) ([]netlink.Route, error) {
+		listCalls++
+		return nil, nil
+	}
+	s := mkSub(map[string]struct{}{"eth0": {}}, map[int]string{3: "eth0"})
+	ev, err := s.reconcileVia(ctx, listFn, RouteEvent{Op: RouteEventAdd, Iface: "eth0", Family: RouteFamilyV4})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("reconcileVia = %v, want context.Canceled", err)
+	}
+	if listCalls != 0 {
+		t.Errorf("RouteList calls = %d, want 0", listCalls)
+	}
+	if ev.Iface != "" || !ev.Time.IsZero() {
+		t.Errorf("event = %+v, want zero RouteEvent", ev)
 	}
 }
 

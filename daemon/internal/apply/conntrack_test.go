@@ -200,6 +200,68 @@ func TestFlushBySourceVia(t *testing.T) {
 	}
 }
 
+// TestFlushBySourceViaRetriesCombinedDumpError: the library's
+// dump-and-delete joins an interrupted dump with its per-entry delete
+// failures into one error. The interruption still marks the attempt
+// for a retry, which dumps the table again and so retries the failed
+// deletes too. Per-entry failures without an interruption are final.
+func TestFlushBySourceViaRetriesCombinedDumpError(t *testing.T) {
+	t.Parallel()
+	// The library's message for failed per-entry deletes.
+	deleteFailed := errors.New("failed to delete 1 conntrack flows with 1 filters")
+	combined := errors.Join(netlink.ErrDumpInterrupted, deleteFailed)
+	cases := []struct {
+		name       string
+		dumps      []dumpOutcome
+		want       FlushResult
+		wantErrs   []error
+		wantErrSub string
+	}{
+		{
+			name:  "combined error then a clean dump",
+			dumps: []dumpOutcome{{n: 3, err: combined}, {n: 1}},
+			want:  FlushResult{Dumped: true, Entries: 4},
+		},
+		{
+			name:       "combined error on every attempt",
+			dumps:      []dumpOutcome{{n: 3, err: combined}, {n: 1, err: combined}},
+			want:       FlushResult{Dumped: true, Entries: 4},
+			wantErrs:   []error{netlink.ErrDumpInterrupted, deleteFailed},
+			wantErrSub: "dump interrupted on all 2 attempts",
+		},
+		{
+			name:     "delete failures alone are not retried",
+			dumps:    []dumpOutcome{{n: 3, err: deleteFailed}},
+			want:     FlushResult{Dumped: true, Entries: 3},
+			wantErrs: []error{deleteFailed},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeOps{filteredErr: unix.EINVAL, dumps: tc.dumps}
+			got, err := flushBySourceVia(t.Context(), f.ops(t), probe.FamilyV4, net.ParseIP("192.0.2.1"))
+			if len(tc.wantErrs) == 0 && err != nil {
+				t.Fatalf("flushBySourceVia = %v, want nil", err)
+			}
+			for _, want := range tc.wantErrs {
+				if !errors.Is(err, want) {
+					t.Errorf("flushBySourceVia = %v, want %v in its chain", err, want)
+				}
+			}
+			if len(tc.wantErrs) > 0 && !strings.Contains(err.Error(), "apply: conntrack flush family=v4 ip=192.0.2.1: "+tc.wantErrSub) {
+				t.Errorf("err = %q, want apply context prefix and %q", err, tc.wantErrSub)
+			}
+			if got != tc.want {
+				t.Errorf("result = %+v, want %+v", got, tc.want)
+			}
+			if len(f.filters) != len(tc.dumps) {
+				t.Errorf("dump attempts = %d, want %d", len(f.filters), len(tc.dumps))
+			}
+		})
+	}
+}
+
 func TestFlushBySourceViaContextCancelled(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

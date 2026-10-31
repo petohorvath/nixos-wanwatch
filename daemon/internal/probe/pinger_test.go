@@ -27,20 +27,25 @@ type fakeConn struct {
 	replies  [][]byte
 	echo     bool  // if set, WriteTo queues the echo reply for each request
 	writeErr error // if set, WriteTo returns it
-	readErr  error // if set, ReadFrom returns it instead of draining replies
-	deadline time.Time
-	moved    chan struct{} // closed and replaced by each SetReadDeadline
+	// writeErrTo, if set, fails WriteTo to the listed addresses only.
+	writeErrTo map[string]error
+	readErr    error // if set, ReadFrom returns it instead of draining replies
+	deadline   time.Time
+	moved      chan struct{} // closed and replaced by each SetReadDeadline
 	// onSetReadDeadline, if set, runs once, at the start of the
 	// first SetReadDeadline call and before its deadline is stored.
 	onSetReadDeadline func()
 	closed            bool
 }
 
-func (f *fakeConn) WriteTo(b []byte, _ net.Addr) (int, error) {
+func (f *fakeConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.writeErr != nil {
 		return 0, f.writeErr
+	}
+	if err := f.writeErrTo[addr.String()]; err != nil {
+		return 0, err
 	}
 	cp := make([]byte, len(b))
 	copy(cp, b)
@@ -287,6 +292,98 @@ func TestCycleRecordsLossOnNoReply(t *testing.T) {
 
 	if lost, total := windows["1.1.1.1"].LossCounts(); lost != 1 || total != 1 {
 		t.Errorf("loss = %d of %d, want 1 of 1 (no reply ⇒ lost)", lost, total)
+	}
+}
+
+// TestCycleCreditsEachTarget pins how one cycle with several Targets
+// credits replies: by sequence number, to the Target that was sent
+// that sequence, whatever order replies arrive in, across the uint16
+// wrap, at most once per sequence, and with a failed send recorded as
+// that Target's loss alone.
+func TestCycleCreditsEachTarget(t *testing.T) {
+	t.Parallel()
+	type counts struct{ lost, total int }
+	for _, tc := range []struct {
+		name string
+		// startSeq is the first sequence the cycle sends; 1.1.1.1
+		// gets startSeq and 8.8.8.8 startSeq+1.
+		startSeq   uint16
+		replies    []uint16
+		writeErrTo map[string]error
+		want       map[string]counts
+		wantSeq    uint16
+		wantFailed bool
+	}{
+		{
+			name:    "both reply, in send order",
+			replies: []uint16{0, 1},
+			want:    map[string]counts{"1.1.1.1": {0, 1}, "8.8.8.8": {0, 1}},
+			wantSeq: 2,
+		},
+		{
+			name:    "both reply, out of order",
+			replies: []uint16{1, 0},
+			want:    map[string]counts{"1.1.1.1": {0, 1}, "8.8.8.8": {0, 1}},
+			wantSeq: 2,
+		},
+		{
+			name:    "only the second Target replies",
+			replies: []uint16{1},
+			want:    map[string]counts{"1.1.1.1": {1, 1}, "8.8.8.8": {0, 1}},
+			wantSeq: 2,
+		},
+		{
+			name:     "sequence wraps inside the cycle",
+			startSeq: 65535,
+			replies:  []uint16{0},
+			want:     map[string]counts{"1.1.1.1": {1, 1}, "8.8.8.8": {0, 1}},
+			wantSeq:  1,
+		},
+		{
+			name:    "duplicate reply counts once",
+			replies: []uint16{0, 0},
+			want:    map[string]counts{"1.1.1.1": {0, 1}, "8.8.8.8": {1, 1}},
+			wantSeq: 2,
+		},
+		{
+			name:       "one send fails",
+			replies:    []uint16{1},
+			writeErrTo: map[string]error{"1.1.1.1": unix.ENETUNREACH},
+			want:       map[string]counts{"1.1.1.1": {1, 1}, "8.8.8.8": {0, 1}},
+			wantSeq:    2,
+			wantFailed: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := newPinger([]string{"1.1.1.1", "8.8.8.8"})
+			addrs, err := p.resolveTargets()
+			if err != nil {
+				t.Fatalf("resolveTargets: %v", err)
+			}
+			windows := map[string]*WindowStats{}
+			for _, target := range p.Targets {
+				windows[target] = mustNewWindow(t, p.WindowSize)
+			}
+			conn := &fakeConn{writeErrTo: tc.writeErrTo}
+			for _, seq := range tc.replies {
+				conn.replies = append(conn.replies, echoReplyFor(p.Family, p.Ident, seq))
+			}
+
+			nextSeq, sendFailed := p.cycle(context.Background(), conn, addrs, windows, make([]byte, 1500), tc.startSeq)
+
+			if nextSeq != tc.wantSeq {
+				t.Errorf("nextSeq = %d, want %d", nextSeq, tc.wantSeq)
+			}
+			if sendFailed != tc.wantFailed {
+				t.Errorf("sendFailed = %v, want %v", sendFailed, tc.wantFailed)
+			}
+			for target, want := range tc.want {
+				if lost, total := windows[target].LossCounts(); lost != want.lost || total != want.total {
+					t.Errorf("%s loss = %d of %d, want %d of %d", target, lost, total, want.lost, want.total)
+				}
+			}
+		})
 	}
 }
 

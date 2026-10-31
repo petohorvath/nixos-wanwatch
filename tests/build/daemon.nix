@@ -27,13 +27,13 @@ pkgs.linkFarm "wanwatch-daemon" {
     script = ''
       cat > coverage.thresholds <<'EOF'
       cmd/wanwatchd:72
-      internal/apply:90
+      internal/apply:97
       internal/config:100
       internal/decision:100
       internal/health:100
       internal/metrics:88
       internal/probe:91
-      internal/rtnl:91
+      internal/rtnl:98
       internal/selector:100
       internal/state:94
       EOF
