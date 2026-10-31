@@ -21,10 +21,13 @@ type FwmarkRule struct {
 	Table  int
 }
 
-// EnsureRule makes `r` the only rule of its Family that routes
+// EnsureRule makes `r` the only rule of its Family that routes all of
 // r.Mark (mask 0xffffffff) to r.Table, and returns how many copies it
 // removed. It lists the Family's rules and adds `r` only when none
-// matches; preference and protocol are ignored, so a rule the user or
+// matches. A rule matches only when it has no selector besides the
+// fwmark — see matchesRule — so a narrower rule, such as one that also
+// matches an iif, is never kept in place of `r` and never deleted.
+// Preference and protocol are ignored, so a full rule the user or
 // systemd-networkd installed counts as a match. The kernel assigns the
 // preference of a rule EnsureRule adds, so RuleAdd's EEXIST check never
 // sees an existing copy: listing first is what keeps a daemon restart
@@ -92,13 +95,28 @@ func ensureRuleVia(ctx context.Context, ops ruleOps, r FwmarkRule) (int, error) 
 	return removed, nil
 }
 
-// matchesRule reports whether the listed rule k routes r.Mark under
-// the full mask to r.Table in r.Family, whatever its preference and
-// protocol.
+// matchesRule reports whether the listed rule k routes all of r.Mark
+// to r.Table in r.Family: it matches the mark under the full mask, it
+// looks up r.Table, and it has no other selector that narrows the
+// traffic or the lookup — no source or destination prefix, iif or oif,
+// `not`, TOS, tunnel ID, IP protocol, port range, or UID range, no
+// goto, and no suppress_prefixlength or suppress_ifgroup. Its
+// preference and protocol are ignored. k must come from
+// netlink.RuleList, which marks an absent goto or suppressor as -1.
 func matchesRule(k netlink.Rule, r FwmarkRule) bool {
 	//nolint:gosec // r.Mark is validated positive by validateRule + bounded by the Nix allocator
 	return k.Family == int(r.Family) && k.Mark == uint32(r.Mark) &&
-		k.Mask != nil && *k.Mask == fullMask && k.Table == r.Table
+		k.Mask != nil && *k.Mask == fullMask && k.Table == r.Table &&
+		!hasOtherSelector(k)
+}
+
+// hasOtherSelector reports whether the listed rule k carries a selector
+// or lookup modifier besides its fwmark and table.
+func hasOtherSelector(k netlink.Rule) bool {
+	return k.Src != nil || k.Dst != nil || k.IifName != "" || k.OifName != "" ||
+		k.Invert || k.Tos != 0 || k.TunID != 0 || k.IPProto != 0 ||
+		k.Sport != nil || k.Dport != nil || k.UIDRange != nil ||
+		k.Goto != -1 || k.SuppressPrefixlen != -1 || k.SuppressIfgroup != -1
 }
 
 func buildRule(r FwmarkRule) *netlink.Rule {
