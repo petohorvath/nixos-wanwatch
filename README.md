@@ -225,6 +225,7 @@ The daemon runs as the `wanwatch` user and group, which the module creates. Its 
 - When the Selection moves to a WAN that serves fewer Families, the dropped Family keeps its previous route.
 - The conntrack flush on a switch blocks the daemon's other work while it runs. On Linux 6.12 and later the kernel deletes the vacated WAN's IPv4 entries in one request, which took about 0.2 s for a full table on a fast x86 server. On older kernels, and for IPv6 on every kernel, the daemon reads the table and deletes each matching entry, which can take seconds on a large table.
 - On a switch, the daemon flushes conntrack entries by the vacated WAN's addresses. When several Groups share that WAN, the flush also resets the flows of the Groups that still route through it; those flows reconnect through the same WAN.
+- Gateway discovery reads a default route that uses a nexthop object (`nhid`) only through the kernel's compatibility expansion. With `net.ipv4.nexthop_compat_mode = 0`, such a route gives its WAN no Gateway, and removing a member from a nexthop group does not update the Gateway until the next route change on the interface.
 - On hosts that run systemd-networkd, the module defaults `ManageForeignRoutingPolicyRules` and `ManageForeignRoutes` to `false`, so networkd stops removing routes and rules it did not create.
 
 ## Stability
