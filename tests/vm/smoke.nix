@@ -1,7 +1,8 @@
 /*
   smoke — boot a single-node router and verify the daemon lifecycle:
   the unit reaches active, State and the metrics socket appear under
-  /run/wanwatch/, the fwmark rules land in both family RIBs, and the
+  /run/wanwatch/, the fwmark rules land in both family RIBs exactly
+  once, across restarts and over copies left behind, and the
   startup Decision's Group-table route is in place at READY. No probe
   target is reachable; the failover-* scenarios cover failover.
 */
@@ -115,7 +116,36 @@ pkgs.testers.runNixOSTest {
         f"ip -6 rule show fwmark 0x{int(mark):x} | grep -q .", timeout=10
     )
 
-    # 6. The daemon primes before sd_notify READY
+    # 6. EnsureRule lists before it adds, so each Family holds exactly
+    #    one rule for the Group's mark: a restart adds no copy, and
+    #    bootstrap removes the copies earlier builds added on every
+    #    start. Bootstrap runs before READY, and for a Type=notify unit
+    #    `systemctl start` and `restart` return at READY, so assert
+    #    without polling.
+    table = router.succeed(
+        "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
+    ).strip()
+
+    def assert_one_rule_per_family(when):
+        for family in ("-4", "-6"):
+            rules = router.succeed(
+                f"ip {family} rule show fwmark 0x{int(mark):x}"
+            ).splitlines()
+            assert len(rules) == 1, (
+                f"{when}: ip {family} rule show fwmark {mark} = {rules!r}, "
+                "want exactly one rule"
+            )
+
+    assert_one_rule_per_family("after the first start")
+    router.succeed("systemctl stop wanwatch.service")
+    for family in ("-4", "-6"):
+        router.succeed(f"ip {family} rule add fwmark {mark} table {table}")
+    router.succeed("systemctl start wanwatch.service")
+    assert_one_rule_per_family("after a start over an extra copy")
+    router.succeed("systemctl restart wanwatch.service")
+    assert_one_rule_per_family("after a restart")
+
+    # 7. The daemon primes before sd_notify READY
     #    (docs/specs/failover.md), so the startup Decision's
     #    Group-table route and State are in place once the unit is
     #    active. The unit starts on network-pre.target, possibly
@@ -127,9 +157,6 @@ pkgs.testers.runNixOSTest {
     router.wait_until_succeeds(
         "ip link show wan0 | grep -q LOWER_UP", timeout=30
     )
-    table = router.succeed(
-        "jq -r '.groups.\"home-uplink\".table' /etc/wanwatch/config.json"
-    ).strip()
     router.succeed("systemctl stop wanwatch.service")
     router.succeed(f"ip route flush table {table}")
     router.succeed("systemctl start wanwatch.service")

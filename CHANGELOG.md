@@ -11,6 +11,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 ### Fixed
 
 - The daemon's link and route subscriptions now get their full 1 MiB netlink receive buffer regardless of `net.core.rmem_max`, so a burst of link or route changes is less likely to overflow it and restart the daemon. The daemon forces the size with `SO_RCVBUFFORCE`, which needs the `CAP_NET_ADMIN` capability the unit already grants.
+- The daemon no longer adds another copy of each Group's fwmark rule, per Family, on every start. It installs a rule only when no rule with the same mark, mask, and table exists, and removes the copies earlier builds left behind.
 
 ## [0.1.0] - 2026-10-30
 

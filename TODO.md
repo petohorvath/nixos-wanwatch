@@ -67,6 +67,16 @@ retains the old v6 route untouched. Decide: clear vs retain.
 docs/nftzones-integration.md; add a `services.wanwatch.global.staleRoutes`
 enum once policy lands.
 
+### Remove stale fwmark rules
+
+`EnsureRule` removes copies of a Group's current fwmark rule, but a
+rule for a removed Group, or for a Group's old mark or table, stays
+until reboot. The daemon cannot tell its own rules from the user's or
+another daemon's: it stamps them `protocol static`, which isn't unique
+to wanwatch. Removing them safely needs an ownership marker, such as
+a dedicated rule `protocol` value, and that marker is a
+firewall-composition contract decision (docs/nftzones-integration.md).
+
 ### Conntrack flush across Groups that share a WAN
 
 Conntrack flushing runs per Group, but source addresses belong to

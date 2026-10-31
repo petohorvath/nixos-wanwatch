@@ -68,20 +68,28 @@ func newDaemon(cfg *config.Config, k kernel, hooks hookSink, mreg *metrics.Regis
 	return d
 }
 
-// bootstrap installs the fwmark policy-routing rules for every
-// group + family combo. Runs once at startup before any Decision —
-// the rules survive across daemon restarts (EnsureRule swallows
-// EEXIST), so re-running is a no-op.
+// bootstrap ensures the fwmark policy-routing rule of every Group and
+// Family. Runs once at startup before any Decision. The rules survive
+// daemon restarts, so EnsureRule lists the Family's rules first and
+// adds a rule only when none routes the mark to the table; re-running
+// adds nothing. It also deletes the copies that earlier builds added on
+// every start, and bootstrap logs how many it removed. A failed list,
+// add, or delete is a rule_install error and fails startup.
 func (d *daemon) bootstrap(ctx context.Context) error {
 	for _, g := range d.cfg.Groups {
 		for _, fam := range probe.AllFamilies {
-			if err := d.kernel.EnsureRule(ctx, apply.FwmarkRule{
+			removed, err := d.kernel.EnsureRule(ctx, apply.FwmarkRule{
 				Family: fam,
 				Mark:   g.Mark,
 				Table:  g.Table,
-			}); err != nil {
+			})
+			if err != nil {
 				d.metrics.ApplyOpErrors.WithLabelValues(g.Name, "rule_install").Inc()
 				return err
+			}
+			if removed > 0 {
+				d.logger.Info("fwmark rule copies removed",
+					"group", g.Name, "family", fam, "mark", g.Mark, "table", g.Table, "removed", removed)
 			}
 		}
 	}
