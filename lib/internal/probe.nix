@@ -86,10 +86,11 @@ let
   # Checks one family's target list for parseability, family match, and
   # duplicates. Targets compare in canonical form, so differently
   # written forms of one address are duplicates; each duplicated address
-  # is reported once. An empty list passes; `validateTargets` requires a
+  # is reported once. `checkParsed` adds the family's own checks on the
+  # parsed targets. An empty list passes; `validateTargets` requires a
   # non-empty family.
   validateTargetFamily =
-    family: isFamily: targets:
+    family: isFamily: checkParsed: targets:
     if !(builtins.isList targets) then
       check "probeInvalidTarget" false "targets.${family} must be a list"
     else
@@ -113,21 +114,20 @@ let
           ))
         ];
       in
-      parseErrors ++ familyMismatches ++ duplicates;
+      parseErrors ++ familyMismatches ++ duplicates ++ checkParsed parsedTargets.parsed;
 
   # The daemon reads an IPv4-mapped address (::ffff:0:0/96) as IPv4, so
-  # one in `targets.v6` would fail its Family check at runtime.
+  # one in `targets.v6` would fail its Family check at runtime. Takes
+  # the parsed `targets.v6`.
   validateNoIpv4Mapped =
-    targets:
-    lib.optionals (builtins.isList targets) (
-      lib.pipe (parseTargets targets).parsed [
-        (builtins.filter (ip: libnet.ip.isIpv6 ip && libnet.ipv6.isIpv4Mapped ip))
-        (map (
-          ip:
-          lib.nameValuePair "probeTargetIpv4Mapped" "${libnet.ip.toString ip} in targets.v6 is an IPv4-mapped address; list the IPv4 address in targets.v4"
-        ))
-      ]
-    );
+    parsed:
+    lib.pipe parsed [
+      (builtins.filter (ip: libnet.ip.isIpv6 ip && libnet.ipv6.isIpv4Mapped ip))
+      (map (
+        ip:
+        lib.nameValuePair "probeTargetIpv4Mapped" "${libnet.ip.toString ip} in targets.v6 is an IPv4-mapped address; list the IPv4 address in targets.v4"
+      ))
+    ];
 
   validateTargets =
     targets:
@@ -141,9 +141,8 @@ let
       in
       checkUnknownProbeFields "targets" [ "v4" "v6" ] targets
       ++ check "probeNoTargets" hasTargets "at least one of targets.v4 or targets.v6 must be non-empty"
-      ++ validateTargetFamily "v4" libnet.ip.isIpv4 v4
-      ++ validateTargetFamily "v6" libnet.ip.isIpv6 v6
-      ++ validateNoIpv4Mapped v6;
+      ++ validateTargetFamily "v4" libnet.ip.isIpv4 (_: [ ]) v4
+      ++ validateTargetFamily "v6" libnet.ip.isIpv6 validateNoIpv4Mapped v6;
 
   validateInterval =
     interval:
