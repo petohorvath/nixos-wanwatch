@@ -80,6 +80,7 @@ type fakeKernel struct {
 	addrs    map[string][]net.IP
 	failures []kernelFailure
 	holds    []kernelHold
+	copies   map[probe.Family]int // rule copies EnsureRule reports removed
 }
 
 // kernelHold pauses one lookup until release is closed.
@@ -96,6 +97,7 @@ func newFakeKernel(tr *trace, cfg *config.Config) *fakeKernel {
 		ifindex: make(map[string]int),
 		ifname:  make(map[int]string),
 		addrs:   make(map[string][]net.IP),
+		copies:  make(map[probe.Family]int),
 	}
 	for name, g := range cfg.Groups {
 		k.groups[g.Table] = name
@@ -136,6 +138,14 @@ func failuresFor(op kernelOp, iface string, fams []probe.Family) []kernelFailure
 		out = append(out, kernelFailure{op: op, iface: iface, fam: fam})
 	}
 	return out
+}
+
+// setRuleCopies makes EnsureRule for fam report n removed copies, as
+// after a daemon build that added a rule on every start.
+func (k *fakeKernel) setRuleCopies(fam probe.Family, n int) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.copies[fam] = n
 }
 
 // setAddrs sets the global-unicast addresses InterfaceAddrs reports
@@ -209,10 +219,13 @@ func (k *fakeKernel) lookup(op kernelOp, iface string) error {
 	return nil
 }
 
-func (k *fakeKernel) EnsureRule(ctx context.Context, r apply.FwmarkRule) error {
+func (k *fakeKernel) EnsureRule(ctx context.Context, r apply.FwmarkRule) (int, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	return k.mutate(ctx, opRule, "", r.Family, fmt.Sprintf("rule %s mark=%#x table=%d", r.Family, r.Mark, r.Table))
+	if err := k.mutate(ctx, opRule, "", r.Family, fmt.Sprintf("rule %s mark=%#x table=%d", r.Family, r.Mark, r.Table)); err != nil {
+		return 0, err
+	}
+	return k.copies[r.Family], nil
 }
 
 func (k *fakeKernel) IfIndex(name string) (int, error) {
