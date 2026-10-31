@@ -190,7 +190,7 @@ func TestRouteSubscriberReconcileRetriesInterruptedDump(t *testing.T) {
 	routes := interruptedThen(1, nil, []netlink.Route{current}, &calls)
 	listFn := func(netlink.Link, int) ([]netlink.Route, error) { return routes() }
 	s := mkSub(nil, map[int]string{7: "eth0"})
-	ev, err := s.reconcileVia(t.Context(), listFn, RouteEvent{Op: RouteEventDel, Iface: "eth0", Family: RouteFamilyV4})
+	ev, err := s.reconcileVia(t.Context(), listFn, RouteEvent{Op: RouteEventDel, Iface: "eth0", Family: RouteFamilyV4}, nil)
 	if err != nil {
 		t.Fatalf("reconcileVia = %v, want nil", err)
 	}

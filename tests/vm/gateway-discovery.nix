@@ -102,8 +102,16 @@ pkgs.testers.runNixOSTest {
     )
 
     # Deleting the preferred default moves the Gateway to the next-best
-    # default rather than clearing it.
-    router.succeed("ip route del default via 192.168.1.3 dev eth1 metric 100")
+    # default rather than clearing it. The kernel notifies an IPv4
+    # delete before it unlinks the route, so repeat the delete to give
+    # a read racing that window more chances to show (#97).
+    preferred = "default via 192.168.1.3 dev eth1 metric 100"
+    for _ in range(5):
+        router.succeed(f"ip route del {preferred}")
+        observe.wait_gateway("uplink", "v4", "192.168.1.4")
+        router.succeed(f"ip route add {preferred}")
+        observe.wait_gateway("uplink", "v4", "192.168.1.3")
+    router.succeed(f"ip route del {preferred}")
     observe.wait_gateway("uplink", "v4", "192.168.1.4")
     observe.wait_default_route(
         "v4", "eth1", group="home", gateway="192.168.1.4", timeout=15
