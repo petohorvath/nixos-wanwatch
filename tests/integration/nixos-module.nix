@@ -2,7 +2,12 @@
 # the values it publishes, and the service it defines.
 { fixtures, helpers, ... }:
 let
-  inherit (helpers) evalNixos evalNixosOptions renderConfig;
+  inherit (helpers)
+    evalNixos
+    evalNixosOptions
+    failedWanwatchAssertions
+    renderConfig
+    ;
 
   baseConfig = evalNixos [ fixtures.nixos.primaryAndBackup ];
   debugConfig = evalNixos [
@@ -18,6 +23,37 @@ let
   unitText = config: config.systemd.units."wanwatch.service".text;
 in
 {
+  # A WAN with no Group never carries traffic.
+  assertions = {
+    testWansWithoutGroupsFail = {
+      expr = failedWanwatchAssertions (evalNixos [
+        {
+          services.wanwatch = {
+            enable = true;
+            inherit (fixtures.nixos.primaryAndBackup.services.wanwatch) wans;
+          };
+        }
+      ]);
+      expected = [
+        ''
+          services.wanwatch: declared `wans` but no `groups`. A WAN
+          with no Group never carries traffic — declare at least one
+          group, or remove the WAN.
+        ''
+      ];
+    };
+
+    testWansWithGroupsPass = {
+      expr = failedWanwatchAssertions baseConfig;
+      expected = [ ];
+    };
+
+    testNoWansPass = {
+      expr = failedWanwatchAssertions (evalNixos [ { services.wanwatch.enable = true; } ]);
+      expected = [ ];
+    };
+  };
+
   testSchema = {
     expr = rendered.schema;
     expected = 1;

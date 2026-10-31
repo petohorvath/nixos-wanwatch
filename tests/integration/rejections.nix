@@ -112,6 +112,43 @@ in
     };
   };
 
+  # Groups that share a mark or a table fail both the rendered config
+  # and the values published to firewall modules.
+  sharedMarksAndTables =
+    let
+      withGuest = guest: [
+        fixtures.nixos.primaryAndBackup
+        {
+          services.wanwatch.groups.guest-uplink = guest // {
+            members.backup = { };
+          };
+        }
+      ];
+      sharedMark = evalNixos (withGuest {
+        mark = 1000;
+        table = 1001;
+      });
+      sharedTable = evalNixos (withGuest {
+        mark = 1001;
+        table = 1000;
+      });
+      rejects = msg: expr: {
+        inherit expr;
+        expectedError = {
+          type = "ThrownError";
+          inherit msg;
+        };
+      };
+      markMessage = "mark 1000 is shared by groups \\['guest-uplink', 'home-uplink']";
+      tableMessage = "table 1000 is shared by groups \\['guest-uplink', 'home-uplink']";
+    in
+    {
+      testMarkInConfig = rejects markMessage (renderConfig sharedMark);
+      testMarkInMarks = rejects markMessage sharedMark.services.wanwatch.marks;
+      testTableInConfig = rejects tableMessage (renderConfig sharedTable);
+      testTableInTables = rejects tableMessage sharedTable.services.wanwatch.tables;
+    };
+
   # A typo in a Member's WAN fails here rather than as a daemon
   # restart loop.
   testMemberUndeclaredWan = {
