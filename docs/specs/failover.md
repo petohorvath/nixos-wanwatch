@@ -4,11 +4,11 @@ The v1 contract is **single-active per Group, deterministic Strategy, atomic App
 
 ## Definitions
 
-| Term          | Meaning                                                                       |
-| ------------- | ----------------------------------------------------------------------------- |
-| **Selection** | The current chosen Member per Group. `null` means no Selection.               |
-| **Decision**  | A Selection change, old → new. Starts the Apply pipeline.                     |
-| **Apply**     | Route write, State snapshot, Hook dispatch, and metric update, in that order. |
+| Term          | Meaning                                                                                                                                                                                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Selection** | The current chosen Member per Group. `null` means no Selection.                                                                                                                                                                                      |
+| **Decision**  | A Selection change, old → new. It counts in `wanwatch_group_decisions_total` and State's `decisionsTotal` when the Strategy chooses it, before its Apply converges, so a Decision whose Apply fails or is superseded still counts. Starts the Apply. |
+| **Apply**     | Mutating kernel routes and conntrack to carry out a Decision. Once the route write converges, the daemon sets `wanwatch_group_selected`, flushes the vacated WAN's conntrack entries, writes State, and runs the Hooks, in that order.               |
 
 A Group always has exactly one Selection, which may be `null`. The selector emits at most one Decision per recompute.
 
@@ -50,12 +50,12 @@ t=1      carrier drops on wan0
          health.Wans.Link flips primary's carrierUp() = false
          Wans.MemberHealth: primary unhealthy, backup healthy
          selector.Select: Selection = backup
+         wanwatch_group_decisions_total{reason=carrier}++
 
          apply.WriteDefault(family=v4, table=1000, gw=backup.v4, ifindex=wan1)
          apply.WriteDefault(family=v6, table=1000, gw=backup.v6, ifindex=wan1)
          state.Writer.Write: selection=backup, selectionSince=t1
          state.HookNotifier.Notify queues the switch notification
-         wanwatch_group_decisions_total{reason=carrier}++
 
 t=2      table 1000 reflects backup; marked traffic routes via wan1
 ```
