@@ -20,51 +20,63 @@
         "type": "github"
       }
     },
-    "nftypes": {
-      "inputs": {
-        "flake-parts": [
-          "flake-parts"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1791910068,
-        "narHash": "sha256-+dTnuYJR/vB2b0TgLV3L0Ne1wIz2wdF42WRl+tCFoAE=",
-        "owner": "petohorvath",
-        "repo": "nix-nftypes",
-        "rev": "f65b79b86e9be45e30faa34ca26d2dfbda571ffe",
-        "type": "github"
-      },
-      "original": {
-        "owner": "petohorvath",
-        "ref": "v0.1.0",
-        "repo": "nix-nftypes",
-        "type": "github"
-      }
-    },
     "nix-libnet": {
       "inputs": {
         "flake-parts": [
           "flake-parts"
         ],
+        "nix-unit": [
+          "nix-unit"
+        ],
         "nixpkgs": [
           "nixpkgs"
+        ],
+        "treefmt-nix": [
+          "treefmt-nix"
         ]
       },
       "locked": {
-        "lastModified": 1791888534,
-        "narHash": "sha256-+7Rb5n4rA45WlQtrrVLBwAZfwA8ibIu/057sfCMRtmI=",
+        "lastModified": 1793374482,
+        "narHash": "sha256-8ArpPnWApdkWU+zYjUuXxJK8euL62naxdoqIZ8wXouE=",
         "owner": "petohorvath",
         "repo": "nix-libnet",
-        "rev": "287c94b03feccaed6c8d99837730833893f57ae0",
+        "rev": "97594f42eb13b7e1faf93817b0d23f16e2751869",
         "type": "github"
       },
       "original": {
         "owner": "petohorvath",
-        "ref": "v0.1.0",
+        "ref": "v0.2.0",
         "repo": "nix-libnet",
+        "type": "github"
+      }
+    },
+    "nix-nftypes": {
+      "inputs": {
+        "flake-parts": [
+          "flake-parts"
+        ],
+        "nix-unit": [
+          "nix-unit"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "treefmt-nix": [
+          "treefmt-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793377018,
+        "narHash": "sha256-187Qo/Aias9OS+O/x5BgJitjxu+z3KxwR+Oxkk05jj4=",
+        "owner": "petohorvath",
+        "repo": "nix-nftypes",
+        "rev": "4f26599b2b2a565d14b3a845311aa8c642f6dd8e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "petohorvath",
+        "ref": "v0.2.0",
+        "repo": "nix-nftypes",
         "type": "github"
       }
     },
@@ -92,26 +104,37 @@
     },
     "nixos-nftzones": {
       "inputs": {
-        "libnet": [
+        "flake-parts": [
+          "flake-parts"
+        ],
+        "nix-libnet": [
           "nix-libnet"
         ],
-        "nftypes": "nftypes",
+        "nix-nftypes": [
+          "nix-nftypes"
+        ],
+        "nix-unit": [
+          "nix-unit"
+        ],
         "nixpkgs": [
           "nixpkgs"
+        ],
+        "treefmt-nix": [
+          "treefmt-nix"
         ]
       },
       "locked": {
-        "lastModified": 1778586525,
-        "narHash": "sha256-Ggp+O3LPoY6/qf2gI3AKcxAC6ja5z+gDNU+S54YldVA=",
+        "lastModified": 1793437536,
+        "narHash": "sha256-ekBetbzW7SPvpeRoEspULS0HQPEzwgnBPZQRu1PNdLg=",
         "owner": "petohorvath",
         "repo": "nixos-nftzones",
-        "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
+        "rev": "8be9a6033e44556aeb2927b1e9e9ae1176e90604",
         "type": "github"
       },
       "original": {
         "owner": "petohorvath",
+        "ref": "v0.1.0",
         "repo": "nixos-nftzones",
-        "rev": "dc5d2eff8877865de79c7577c2255191636090b6",
         "type": "github"
       }
     },
@@ -135,6 +158,7 @@
       "inputs": {
         "flake-parts": "flake-parts",
         "nix-libnet": "nix-libnet",
+        "nix-nftypes": "nix-nftypes",
         "nix-unit": "nix-unit",
         "nixos-nftzones": "nixos-nftzones",
         "nixpkgs": "nixpkgs",

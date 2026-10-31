@@ -22,26 +22,39 @@
       relative paths resolve inside the store copy of this flake.
     */
     nix-libnet = {
-      url = "github:petohorvath/nix-libnet/v0.1.0";
+      url = "github:petohorvath/nix-libnet/v0.2.0";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         flake-parts.follows = "flake-parts";
+        nix-unit.follows = "nix-unit";
+        treefmt-nix.follows = "treefmt-nix";
       };
     };
 
-    # Used only by the nftzones-integration VM scenario. Pinned by
-    # commit until nixos-nftzones publishes a release tag. The pinned
-    # commit still names its inputs `libnet` and `nftypes`.
-    nixos-nftzones = {
-      url = "github:petohorvath/nixos-nftzones?rev=dc5d2eff8877865de79c7577c2255191636090b6";
+    # Used only by the nftzones-integration VM scenario, which builds
+    # its nftables match with the nftypes DSL. nixos-nftzones follows
+    # this input, so every locked input follows a root input and the
+    # `nix-unit` check can pass each one as an override.
+    nix-nftypes = {
+      url = "github:petohorvath/nix-nftypes/v0.2.0";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        libnet.follows = "nix-libnet";
-        nftypes.url = "github:petohorvath/nix-nftypes/v0.1.0";
-        nftypes.inputs = {
-          nixpkgs.follows = "nixpkgs";
-          flake-parts.follows = "flake-parts";
-        };
+        flake-parts.follows = "flake-parts";
+        nix-unit.follows = "nix-unit";
+        treefmt-nix.follows = "treefmt-nix";
+      };
+    };
+
+    # Used only by the nftzones-integration VM scenario.
+    nixos-nftzones = {
+      url = "github:petohorvath/nixos-nftzones/v0.1.0";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-parts.follows = "flake-parts";
+        nix-unit.follows = "nix-unit";
+        treefmt-nix.follows = "treefmt-nix";
+        nix-libnet.follows = "nix-libnet";
+        nix-nftypes.follows = "nix-nftypes";
       };
     };
 

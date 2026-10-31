@@ -45,6 +45,7 @@ Add the flake as an input and import its module into the host's configuration:
         nixpkgs.follows = "nixpkgs";
         treefmt-nix.follows = "";
         nix-unit.follows = "";
+        nix-nftypes.follows = "";
         nixos-nftzones.follows = "";
       };
     };
@@ -66,7 +67,7 @@ Add the flake as an input and import its module into the host's configuration:
 
 The `url` pins the `v0.1.0` release. To upgrade, change the tag after reading the release's entry in [`CHANGELOG.md`](./CHANGELOG.md).
 
-The `treefmt-nix`, `nix-unit`, and `nixos-nftzones` inputs serve only the flake's own checks. Setting their `follows` to `""` drops them, so they stay out of the host's `flake.lock`.
+The `treefmt-nix`, `nix-unit`, `nix-nftypes`, and `nixos-nftzones` inputs serve only the flake's own checks. Setting their `follows` to `""` drops them, so they stay out of the host's `flake.lock`.
 
 ## Usage
 
