@@ -93,6 +93,16 @@ in
     ];
   };
 
+  # Before the Probe rejected a non-attrset input itself, `null`
+  # reported `probeNoTargets`.
+  testForwardsNonAttrsetProbe = {
+    expr = getErrorKinds (wan.tryMake (minimal // { probe = null; }));
+    expected = [
+      "wanInvalidProbe"
+      "probeNotAnAttrset"
+    ];
+  };
+
   testReportsEveryViolation = {
     expr = getErrorKinds (
       wan.tryMake {

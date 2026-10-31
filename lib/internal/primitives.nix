@@ -33,9 +33,50 @@ let
     `[a-zA-Z][a-zA-Z0-9-]*`.
   */
   isValidName = value: builtins.isString value && builtins.match identifierPattern value != null;
+
+  /*
+    Build a failed `tryResult`, the shape every `tryMake` returns.
+
+    `error`: the error message string.
+
+    Returns `{ success = false; value = null; error; }`.
+  */
+  tryErr = error: {
+    success = false;
+    value = null;
+    inherit error;
+  };
+
+  /*
+    Reject a `tryMake` input that isn't an attrset before any field is
+    read, so it fails with its own kind instead of falling back to the
+    defaults or reporting a misleading field error.
+
+    `kind`: the error kind, such as `"probeNotAnAttrset"`.
+    `formatErrors`: the type's error formatter, such as
+    `formatErrors "probe.make"`.
+    `tryMakeFields`: the type's `tryMake` for an attrset input.
+    `input`: any value.
+
+    Returns `tryMakeFields input` when `input` is an attrset; otherwise
+    a failed `tryResult` holding the `kind` error.
+  */
+  requireAttrset =
+    kind: formatErrors: tryMakeFields: input:
+    if builtins.isAttrs input then
+      tryMakeFields input
+    else
+      tryErr (
+        formatErrors (check kind false "input must be an attribute set; got ${builtins.typeOf input}")
+      );
 in
 {
-  inherit check isValidName;
+  inherit
+    check
+    isValidName
+    requireAttrset
+    tryErr
+    ;
 
   /*
     Build a successful `tryResult`, the shape every `tryMake` returns.
@@ -49,19 +90,6 @@ in
     success = true;
     inherit value;
     error = null;
-  };
-
-  /*
-    Build a failed `tryResult`, the shape every `tryMake` returns.
-
-    `error`: the error message string.
-
-    Returns `{ success = false; value = null; error; }`.
-  */
-  tryErr = error: {
-    success = false;
-    value = null;
-    inherit error;
   };
 
   /*

@@ -188,6 +188,14 @@ in
       };
     };
 
+    testRejectsNonAttrsetGlobal = {
+      expr = config.render { global = null; };
+      expectedError = {
+        type = "ThrownError";
+        msg = "global.make: \\[globalNotAnAttrset]";
+      };
+    };
+
     testMatchesGolden = {
       expr = config.render renderInput;
       expected = golden;

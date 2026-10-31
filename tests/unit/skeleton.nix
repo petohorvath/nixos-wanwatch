@@ -99,6 +99,18 @@ let
         expected = [ "${typeName}UnknownField" ];
       };
 
+      # An input that isn't an attrset must not fall back to defaults
+      # or report a field error as if it were one.
+      testTryMakeRejectsNonAttrset = {
+        expr = map (input: getErrorKinds (valueType.tryMake input)) [
+          5
+          "debug"
+          null
+          [ ]
+        ];
+        expected = lib.replicate 4 [ "${typeName}NotAnAttrset" ];
+      };
+
       testMakeReturnsTryMakeValue = {
         expr = valueType.make full;
         expected = (valueType.tryMake full).value;

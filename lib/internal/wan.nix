@@ -25,6 +25,7 @@ let
     check
     checkIdentifier
     checkUnknownFields
+    requireAttrset
     tryErr
     tryOk
     ;
@@ -85,13 +86,14 @@ let
 
     Returns a `tryResult` whose value is the WAN value. Error kinds:
 
+      wanNotAnAttrset        — input is not an attribute set
       wanUnknownField        — a field outside the WAN fields
       wanInvalidName         — name missing or not a valid identifier
       wanInvalidInterface    — interface fails the kernel name check
       wanInvalidPointToPoint — pointToPoint is not a bool
       wanInvalidProbe        — `probe.tryMake` rejected the probe input
   */
-  tryMake =
+  tryMake = requireAttrset "wanNotAnAttrset" formatErrors (
     input:
     let
       fields = mergeWithDefaults input;
@@ -104,7 +106,8 @@ let
         probe = probeResult.value;
       }
     else
-      tryErr (formatErrors errors);
+      tryErr (formatErrors errors)
+  );
 
   /*
     Construct a WAN value, failing evaluation on invalid input.

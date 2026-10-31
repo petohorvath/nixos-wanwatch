@@ -17,6 +17,7 @@ let
     checkIdentifier
     checkUnknownFields
     isPositiveInt
+    requireAttrset
     tryErr
     tryOk
     ;
@@ -57,17 +58,19 @@ let
 
     Returns a `tryResult` whose value is the member value. Error kinds:
 
+      memberNotAnAttrset    — input is not an attribute set
       memberUnknownField    — a field outside the Member fields
       memberInvalidWan      — wan is not a valid identifier
       memberInvalidPriority — priority is not a positive integer
   */
-  tryMake =
+  tryMake = requireAttrset "memberNotAnAttrset" formatErrors (
     input:
     let
       fields = mergeWithDefaults input;
       errors = collectErrors input fields;
     in
-    if errors == [ ] then tryOk fields else tryErr (formatErrors errors);
+    if errors == [ ] then tryOk fields else tryErr (formatErrors errors)
+  );
 
   /*
     Construct a member value, failing evaluation on invalid input.
