@@ -270,19 +270,32 @@ func validateProbe(wanKey string, p Probe) error {
 // cancels the daemon, and keys its Windows by Target, so a duplicate
 // would put two Samples per cycle into one Window.
 func validateTargets(wanKey string, t Targets) error {
-	if err := validateTargetBucket(wanKey, "v4", "IPv4", netip.Addr.Is4, t.V4); err != nil {
+	if err := validateTargetBucket(wanKey, targetFamilyV4, t.V4); err != nil {
 		return err
 	}
-	return validateTargetBucket(wanKey, "v6", "IPv6", netip.Addr.Is6, t.V6)
+	return validateTargetBucket(wanKey, targetFamilyV6, t.V6)
 }
+
+// targetFamily describes the Family of one Targets bucket: its key in
+// config.json, its name in error messages, and its address test.
+type targetFamily struct {
+	bucket string
+	name   string
+	holds  func(netip.Addr) bool
+}
+
+var (
+	targetFamilyV4 = targetFamily{bucket: "v4", name: "IPv4", holds: netip.Addr.Is4}
+	targetFamilyV6 = targetFamily{bucket: "v6", name: "IPv6", holds: netip.Addr.Is6}
+)
 
 // validateTargetBucket checks one Family's Targets. An IPv4-mapped
 // address is IPv6 to netip but IPv4 to the Pinger, so it is rejected
-// in v6; in v4 it already fails isFamily.
-func validateTargetBucket(wanKey, bucket, familyName string, isFamily func(netip.Addr) bool, targets []string) error {
+// in v6; in v4 it already fails the Family test.
+func validateTargetBucket(wanKey string, family targetFamily, targets []string) error {
 	seen := make(map[netip.Addr]int, len(targets))
 	for i, target := range targets {
-		field := fmt.Sprintf("wans[%q].probe.targets.%s[%d] = %q", wanKey, bucket, i, target)
+		field := fmt.Sprintf("wans[%q].probe.targets.%s[%d] = %q", wanKey, family.bucket, i, target)
 		addr, err := netip.ParseAddr(target)
 		if err != nil {
 			return invalidf("%s is not an IP address: %v", field, err)
@@ -290,14 +303,14 @@ func validateTargetBucket(wanKey, bucket, familyName string, isFamily func(netip
 		if addr.Zone() != "" {
 			return invalidf("%s has a zone", field)
 		}
-		if !isFamily(addr) {
-			return invalidf("%s is not an %s address", field, familyName)
+		if !family.holds(addr) {
+			return invalidf("%s is not an %s address", field, family.name)
 		}
 		if addr.Is4In6() {
 			return invalidf("%s is an IPv4-mapped address", field)
 		}
 		if first, ok := seen[addr]; ok {
-			return invalidf("%s duplicates %s[%d]", field, bucket, first)
+			return invalidf("%s duplicates %s[%d]", field, family.bucket, first)
 		}
 		seen[addr] = i
 	}
