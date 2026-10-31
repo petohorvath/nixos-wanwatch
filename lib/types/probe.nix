@@ -34,8 +34,8 @@ let
         type = primitives.pctInt;
         default = defaults.thresholds.lossPctDown;
         description = ''
-          Loss percentage above which a WAN becomes unhealthy, compared
-          with the loss ratio over the sliding window.
+          Loss percentage at or above which a WAN becomes unhealthy,
+          compared with the loss ratio over the sliding Window.
         '';
       };
       lossPctUp = mkOption {
@@ -51,7 +51,8 @@ let
         type = primitives.positiveInt;
         default = defaults.thresholds.rttMsDown;
         description = ''
-          Mean RTT in milliseconds above which a WAN becomes unhealthy.
+          Mean RTT in milliseconds at or above which a WAN becomes
+          unhealthy.
         '';
       };
       rttMsUp = mkOption {
@@ -132,16 +133,19 @@ let
         type = primitives.positiveInt;
         default = defaults.intervalMs;
         description = ''
-          Milliseconds between probe cycles. Samples may overlap, so
-          `timeoutMs` is independent of `intervalMs`.
+          Milliseconds between the starts of probe cycles. Cycles run
+          one after another: each waits up to `timeoutMs` for its
+          replies, so while a Target loses Samples, a `timeoutMs` above
+          `intervalMs` stretches the interval to about `timeoutMs`.
         '';
       };
       timeoutMs = mkOption {
         type = primitives.positiveInt;
         default = defaults.timeoutMs;
         description = ''
-          Timeout for each Sample in milliseconds. May exceed
-          `intervalMs`.
+          Milliseconds a cycle waits for each Target's reply before it
+          records the Sample as lost. May exceed `intervalMs`, which
+          delays the next cycle when a reply is missing.
         '';
       };
       windowSize = mkOption {

@@ -33,10 +33,10 @@ Both gauges are set for every WAN at daemon start and report unknown until the k
 
 ## Group
 
-| Metric                           | Type    | Labels            | Meaning                                                                                                |
-| -------------------------------- | ------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
-| `wanwatch_group_selected`        | gauge   | `group`, `wan`    | `1` for the Group's Selection, `0` for its other Members. Every Member is exposed at `0` from startup. |
-| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions. `reason` is `health` or `carrier`.                                                          |
+| Metric                           | Type    | Labels            | Meaning                                                                                                                                                                                                                            |
+| -------------------------------- | ------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wanwatch_group_selected`        | gauge   | `group`, `wan`    | `1` for the Group's Selection, `0` for its other Members. Every Member is exposed at `0` from startup.                                                                                                                             |
+| `wanwatch_group_decisions_total` | counter | `group`, `reason` | Decisions, counted when the Strategy chooses a new target, before its Apply converges, so a Decision whose Apply fails or is superseded still counts. `reason` is `health` or `carrier`; the startup Decision counts as `carrier`. |
 
 ## Apply
 
