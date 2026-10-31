@@ -121,6 +121,9 @@ func TestStopDropsQueuedEvents(t *testing.T) {
 // applies nothing more, to its own Group or the next, counts no route
 // error, and publishes no State. primary's carrier moves both Groups
 // onto it; the first Group's ifindex lookup holds until cancellation.
+// The hold is on the lookup, not the route write: a write still blocked
+// at cancellation fails on the cancelled context and counts its error
+// before any guard can run.
 func TestStopEndsInFlightHandler(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -149,6 +152,68 @@ func TestStopEndsInFlightHandler(t *testing.T) {
 			t.Errorf("apply_route_errors_total = %v across Stop, want %v", got, errorsBefore)
 		}
 	})
+}
+
+// TestHandlersStopOnceCancelled: a handler that finds the daemon
+// context cancelled, as one still running at shutdown does for the
+// Groups after the first, makes no Decision and publishes nothing.
+// Group guest has only primary, so losing primary would commit its
+// down without any Apply, the path a route-write guard alone misses;
+// a changed Gateway would republish State.
+func TestHandlersStopOnceCancelled(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		handle func(*daemon, context.Context)
+	}{
+		{"link event", func(d *daemon, ctx context.Context) { d.handleLinkEvent(ctx, carrier("eth0", false)) }},
+		{"probe result", func(d *daemon, ctx context.Context) { d.handleProbeResult(ctx, lossy("primary", probe.FamilyV4)) }},
+		{"route event", func(d *daemon, ctx context.Context) {
+			d.handleRouteEvent(ctx, gateway("eth0", probe.FamilyV4, "192.0.2.99"))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := baseConfig()
+			cfg.Groups["guest"] = selector.Group{
+				Name: "guest", Strategy: "primary-backup", Table: 200, Mark: 0x200,
+				Members: map[string]selector.Member{"primary": {Wan: "primary", Priority: 1}},
+			}
+			h := newHarness(t, cfg)
+			if err := h.d.bootstrap(h.ctx); err != nil {
+				t.Fatal(err)
+			}
+			h.kernel.setAddrs("eth0", "192.0.2.10", "2001:db8::10")
+			h.d.prime(h.ctx, startupSnapshot{
+				links: []rtnl.LinkEvent{carrier("eth0", true), carrier("wwan0", true)},
+				routes: []rtnl.RouteEvent{
+					gateway("eth0", probe.FamilyV4, "192.0.2.1"),
+					gateway("eth0", probe.FamilyV6, "2001:db8::1"),
+					gateway("wwan0", probe.FamilyV4, "198.51.100.1"),
+					gateway("wwan0", probe.FamilyV6, "2001:db8:1::1"),
+				},
+			})
+			h.Trace()
+			stateBefore := readStateFile(t, h)
+			decisionsBefore := map[string]int{}
+			for name, g := range h.d.groups {
+				decisionsBefore[name] = g.Snapshot().DecisionsTotal
+			}
+
+			h.cancel()
+			tc.handle(h.d, h.ctx)
+
+			assertTrace(t, tc.name, h.Trace(), nil)
+			if got := readStateFile(t, h); !bytes.Equal(got, stateBefore) {
+				t.Errorf("State rewritten once cancelled:\nbefore: %s\nafter:  %s", stateBefore, got)
+			}
+			for name, g := range h.d.groups {
+				if got := g.Snapshot().DecisionsTotal; got != decisionsBefore[name] {
+					t.Errorf("Group %s decisionsTotal = %d once cancelled, want %d", name, got, decisionsBefore[name])
+				}
+			}
+		})
+	}
 }
 
 // applyRouteErrorsIn sums apply_route_errors_total over groups.
