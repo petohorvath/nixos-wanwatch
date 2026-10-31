@@ -107,7 +107,9 @@ Group then comes `up` on a different WAN than the one it vacated, that
 conntrack entries and are black-holed until the entries time out.
 Remembering the last WAN that carried traffic and flushing it on an
 `up` onto another WAN would close the gap. The publication test "up
-and down flush no conntrack" pins the current behaviour.
+and down flush no conntrack" pins the current behavior.
+
+**Decided** ([#94](https://github.com/petohorvath/nixos-wanwatch/issues/94)): remember the WAN a `down` vacated and flush it on the next `up` onto another WAN.
 `daemon/cmd/wanwatchd/daemon.go` (`publishDecision`,
 `flushSwitchedConntrack`).
 
@@ -122,11 +124,13 @@ default thresholds, a WAN at a steady 20% loss is Selected on carrier
 and then goes down when its Window fills, causing a switch at boot,
 although once it is up the same loss would keep it up. Seeding with the
 failure band would match the healthy vote the Family already cast.
-`TestThresholdBand` pins the current behaviour, and
+`TestThresholdBand` pins the current behavior, and
 [`docs/specs/failover.md`](./docs/specs/failover.md#cold-start-invariant)
 doesn't say which band applies to the seed. Decide, then record the
 answer in the spec.
 `daemon/internal/health/health.go` (`fold`, `evaluateThresholds`).
+
+**Decided** ([#93](https://github.com/petohorvath/nixos-wanwatch/issues/93)): seed with the failure band.
 
 ### Kernel-side conntrack flush for IPv6
 
@@ -205,6 +209,8 @@ could instead keep running and report the failure in the log and in
 `state.json`. The trade-off is that a dead metrics endpoint hides the
 daemon from monitoring until someone reads the log.
 `daemon/cmd/wanwatchd/main.go`, `daemon/internal/metrics/server.go`.
+
+**Decided** ([#92](https://github.com/petohorvath/nixos-wanwatch/issues/92)): keep failover running and retry the metrics server with backoff.
 
 ### Cheaper Gateway reconcile on a route notification
 
