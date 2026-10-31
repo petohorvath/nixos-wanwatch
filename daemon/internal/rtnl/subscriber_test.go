@@ -300,12 +300,18 @@ func TestLinkSubscriberStartWrapsSubscribeError(t *testing.T) {
 // TestLinkSubscriberStartWiresSubscribeToRunLoop: a successful
 // subscribe hands the `updates` channel through to runLoop — a
 // LinkUpdate written by the stub must surface as a LinkEvent on
-// `out`, proving the wire-up isn't dropped on the floor.
+// `out`, proving the wire-up isn't dropped on the floor. The
+// subscription also forces its receive buffer size past
+// net.core.rmem_max.
 func TestLinkSubscriberStartWiresSubscribeToRunLoop(t *testing.T) {
 	t.Parallel()
 	subscribe := func(ch chan<- netlink.LinkUpdate, done <-chan struct{}, opts netlink.LinkSubscribeOptions) error {
 		if opts.ListExisting {
 			t.Error("ListExisting enabled; the snapshot comes from LinkList")
+		}
+		if opts.ReceiveBufferSize != netlinkRcvBufBytes || !opts.ReceiveBufferForceSize {
+			t.Errorf("receive buffer = %d (force %t), want %d forced past net.core.rmem_max",
+				opts.ReceiveBufferSize, opts.ReceiveBufferForceSize, netlinkRcvBufBytes)
 		}
 		ch <- mkUpdate("eth0", unix.IFF_LOWER_UP, netlink.OperUp)
 		closeLinkUpdatesOnStop(ch, done)

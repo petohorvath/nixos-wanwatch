@@ -72,8 +72,9 @@ func (s *RouteSubscriber) StartWith(ctx context.Context, subscribe routeSubscrib
 		// ListExisting is deliberately omitted: the library sends
 		// RTM_GETROUTE with an IfInfomsg instead of an RtMsg, which
 		// recent kernels reject. Use RouteList after subscribing.
-		ReceiveBufferSize: netlinkRcvBufBytes,
-		ErrorCallback:     func(err error) { subErr.Store(&err) },
+		ReceiveBufferSize:      netlinkRcvBufBytes,
+		ReceiveBufferForceSize: true,
+		ErrorCallback:          func(err error) { subErr.Store(&err) },
 	}
 	if err := subscribe(updates, done, opts); err != nil {
 		close(done)

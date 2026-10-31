@@ -141,6 +141,27 @@ a category error. Resolve before re-adding — drop `state_write` from
 the op set, or split state-write timing into a separate group-less
 metric.
 
+### Resync from a fresh dump on netlink `ENOBUFS`
+
+A link or route subscription whose receive buffer overflows reports
+`ENOBUFS`, which is fatal: the daemon exits and systemd restarts it.
+The unit's start limit (5 starts in 300 s) means a sustained flap
+storm can leave it `failed`, with no failover at all. The forced
+1 MiB buffer makes overflow rarer but not impossible. Instead of
+exiting, the subscriber could reopen its subscription and reconcile
+from a fresh dump, as it already does at startup.
+`daemon/internal/rtnl/subscriber.go`, `daemon/internal/rtnl/route.go`.
+
+### Cheaper Gateway reconcile on a route notification
+
+The route subscriber re-reads the whole main table for the Family on
+every default-route notification (`reconcileVia`). That is cheap on a
+typical router but costly on a host that carries a full BGP table,
+where each notification dumps hundreds of thousands of routes. A
+filtered dump of default routes only, or a narrower reconcile, would
+bound the cost.
+`daemon/internal/rtnl/route.go`.
+
 ---
 
 ## v2 — major

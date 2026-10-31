@@ -8,6 +8,10 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 - Update `nix-libnet` to v0.2.0 and `nixos-nftzones` to v0.1.0, whose `nix-nftypes` input now follows a new root `nix-nftypes` input at v0.2.0. Like `nixos-nftzones`, it serves only the flake's checks; a host drops it with `inputs.wanwatch.inputs.nix-nftypes.follows = "";`, as the README shows.
 
+### Fixed
+
+- The daemon's link and route subscriptions now get their full 1 MiB netlink receive buffer regardless of `net.core.rmem_max`, so a burst of link or route changes is less likely to overflow it and restart the daemon. The daemon forces the size with `SO_RCVBUFFORCE`, which needs the `CAP_NET_ADMIN` capability the unit already grants.
+
 ## [0.1.0] - 2026-10-30
 
 The first release: multi-WAN monitoring and single-active failover for NixOS.
