@@ -341,6 +341,16 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		})},
 		{"non-positive consecutiveUp", setWan(func(w *Wan) { w.Probe.Hysteresis.ConsecutiveUp = 0 })},
 		{"non-positive consecutiveDown", setWan(func(w *Wan) { w.Probe.Hysteresis.ConsecutiveDown = 0 })},
+		{"target not an IP", setWan(func(w *Wan) { w.Probe.Targets.V4 = []string{"not-an-ip"} })},
+		{"zoned target", setWan(func(w *Wan) { w.Probe.Targets.V6 = []string{"fe80::1%eth0"} })},
+		{"v6 target in v4", setWan(func(w *Wan) { w.Probe.Targets.V4 = []string{"2001:db8::1"} })},
+		{"IPv4-mapped target in v4", setWan(func(w *Wan) { w.Probe.Targets.V4 = []string{"::ffff:1.1.1.1"} })},
+		{"v4 target in v6", setWan(func(w *Wan) { w.Probe.Targets.V6 = []string{"192.0.2.1"} })},
+		{"IPv4-mapped target in v6", setWan(func(w *Wan) { w.Probe.Targets.V6 = []string{"::ffff:1.1.1.1"} })},
+		{"duplicate target", setWan(func(w *Wan) { w.Probe.Targets.V4 = []string{"1.1.1.1", "1.1.1.1"} })},
+		{"non-canonical duplicate target", setWan(func(w *Wan) {
+			w.Probe.Targets.V6 = []string{"2606:4700:4700::1111", "2606:4700:4700:0:0:0:0:1111"}
+		})},
 		{"unknown strategy", setGroup(func(g *selector.Group) { g.Strategy = "bogus-strategy" })},
 		{"non-positive table", setGroup(func(g *selector.Group) { g.Table = 0 })},
 		{"non-positive mark", setGroup(func(g *selector.Group) { g.Mark = 0 })},
@@ -354,6 +364,55 @@ func TestValidateRejectsBadValues(t *testing.T) {
 				t.Errorf("Validate() = %v, want wrap of ErrInvalidConfig", err)
 			}
 		})
+	}
+}
+
+// TestValidateAcceptsTargets pins the Targets that Validate accepts
+// beyond the golden's: the Nix lib renders canonical text, but a
+// hand-written non-canonical literal is still a valid address.
+func TestValidateAcceptsTargets(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		targets Targets
+	}{
+		{"non-canonical literal", Targets{V6: []string{"2606:4700:4700:0:0:0:0:1111"}}},
+		{"several distinct Targets", Targets{
+			V4: []string{"1.1.1.1", "8.8.8.8"},
+			V6: []string{"2606:4700:4700::1111", "2001:4860:4860::8888"},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := mustParse(t, goldenConfig)
+			w := cfg.Wans["primary"]
+			w.Probe.Targets = tt.targets
+			cfg.Wans["primary"] = w
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestLoadRejectsInvalidTarget pins that a Target the Pinger would
+// reject fails when the daemon loads its config, before bootstrap
+// writes any route or rule, with a message naming the field.
+func TestLoadRejectsInvalidTarget(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "config.json")
+	raw := goldenWith(t, []any{"::ffff:1.1.1.1"}, "wans", "primary", "probe", "targets", "v6")
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	_, err := Load(tmp)
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Load() = %v, want wrap of ErrInvalidConfig", err)
+	}
+	want := `wans["primary"].probe.targets.v6[0] = "::ffff:1.1.1.1" is an IPv4-mapped address`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("Load() = %q, want it to contain %q", err, want)
 	}
 }
 

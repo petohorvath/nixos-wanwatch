@@ -10,6 +10,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 ### Fixed
 
+- The daemon rejects an invalid, zoned, wrong-Family, IPv4-mapped, or duplicate Target when it loads `config.json`, with a `config: invalid` error that names the field. Before, a Pinger failed on such a Target, possibly after routes and rules were written, and its exit stopped failover for every Group; a duplicate halved the Hysteresis timing instead. A non-canonical literal is still accepted.
 - `services.wanwatch` and `wanwatch.probe.make` reject an IPv4-mapped address (`::ffff:0:0/96`) in `targets.v6`, as `probeTargetIpv4Mapped`, and an address listed more than once in one Target bucket, as `probeDuplicateTarget`. Addresses compare in canonical form. The daemon read a mapped address as IPv4 and exited, and a duplicate put two Samples per cycle into one Window, halving the Hysteresis timing. NixOS concatenates list definitions, so two modules that list the same Target now fail evaluation; remove one copy or set the list with `lib.mkForce`.
 
 ## [0.1.0] - 2026-10-30
