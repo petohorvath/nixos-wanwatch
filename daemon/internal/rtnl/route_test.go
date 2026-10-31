@@ -1323,6 +1323,17 @@ func TestRouteSubscriberSelectsPreferredDefault(t *testing.T) {
 			live:     []string{"eth0 v4 add 192.0.2.2"},
 		},
 		{
+			name: "deleted default listed after one in another table",
+			routes: []netlink.Route{
+				func() netlink.Route { r := low; r.Table = 100; return r }(),
+				low,
+				high,
+			},
+			upd:      delRoute(low),
+			snapshot: []string{"eth0 v4 add 192.0.2.1"},
+			live:     []string{"eth0 v4 add 192.0.2.2"},
+		},
+		{
 			name: "deleted multipath default listed after one with another next-hop",
 			routes: []netlink.Route{
 				multipathDefault(100, 3, "192.0.2.1", 4, "198.51.100.2"),
