@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"testing"
@@ -88,18 +89,20 @@ func (f *fakeRuleOps) calls() int {
 	return len(f.listed) + len(f.added) + len(f.deleted)
 }
 
-// listedRule is validFwmarkRule as the kernel lists it after
-// `ip rule add fwmark 0x100 table 100` gave it preference pref.
+// listedRule is validFwmarkRule as netlink.RuleList returns it after
+// `ip rule add fwmark 0x100 table 100` gave it preference pref. It
+// starts from netlink.NewRule, as RuleList does, so the attributes the
+// kernel did not send keep RuleList's "unset" values.
 func listedRule(pref int) netlink.Rule {
 	mask := uint32(0xffffffff)
-	return netlink.Rule{
-		Priority: pref,
-		Family:   unix.AF_INET,
-		Mark:     0x100,
-		Mask:     &mask,
-		Table:    100,
-		Protocol: unix.RTPROT_STATIC,
-	}
+	r := *netlink.NewRule()
+	r.Priority = pref
+	r.Family = unix.AF_INET
+	r.Mark = 0x100
+	r.Mask = &mask
+	r.Table = 100
+	r.Protocol = unix.RTPROT_STATIC
+	return r
 }
 
 func withRule(pref int, mutate func(*netlink.Rule)) netlink.Rule {
@@ -123,6 +126,9 @@ func preferences(rules []netlink.Rule) []int {
 func TestEnsureRuleInstallsOnlyWhenMissing(t *testing.T) {
 	t.Parallel()
 	narrow := uint32(0xff)
+	subnet := &net.IPNet{IP: net.IPv4(192, 0, 2, 0).To4(), Mask: net.CIDRMask(24, 32)}
+	ports := netlink.NewRulePortRange(443, 443)
+	uids := netlink.NewRuleUIDRange(1000, 1000)
 	for _, tc := range []struct {
 		name        string
 		rules       []netlink.Rule
@@ -160,6 +166,42 @@ func TestEnsureRuleInstallsOnlyWhenMissing(t *testing.T) {
 			name:    "another Family",
 			rules:   []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Family = unix.AF_INET6 })},
 			wantAdd: true,
+		},
+		// A rule with any other selector routes only part of the
+		// mark's traffic to the table, so it is not a copy.
+		{name: "partial: source", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Src = subnet })}, wantAdd: true},
+		{name: "partial: destination", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Dst = subnet })}, wantAdd: true},
+		{name: "partial: iif", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.IifName = "eth0" })}, wantAdd: true},
+		{name: "partial: oif", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.OifName = "eth0" })}, wantAdd: true},
+		{name: "partial: not", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Invert = true })}, wantAdd: true},
+		{name: "partial: tos", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Tos = 0x10 })}, wantAdd: true},
+		{name: "partial: tun_id", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.TunID = 7 })}, wantAdd: true},
+		{name: "partial: ipproto", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.IPProto = unix.IPPROTO_TCP })}, wantAdd: true},
+		{name: "partial: sport", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Sport = ports })}, wantAdd: true},
+		{name: "partial: dport", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Dport = ports })}, wantAdd: true},
+		{name: "partial: uidrange", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.UIDRange = uids })}, wantAdd: true},
+		// suppress_prefixlength 0 is the common setting, so the
+		// unset value is RuleList's -1, not 0.
+		{name: "partial: suppress_prefixlength", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.SuppressPrefixlen = 0 })}, wantAdd: true},
+		{name: "partial: suppress_ifgroup", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.SuppressIfgroup = 0 })}, wantAdd: true},
+		{name: "goto", rules: []netlink.Rule{withRule(32765, func(r *netlink.Rule) { r.Goto = 32766 })}, wantAdd: true},
+		{
+			// The user's partial rule has the lower preference, but
+			// it is neither the kept copy nor a duplicate to delete.
+			name: "partial user rule beside the full rule",
+			rules: []netlink.Rule{
+				withRule(100, func(r *netlink.Rule) { r.IifName = "eth0" }),
+				listedRule(32765),
+			},
+		},
+		{
+			name: "partial user rule beside two full rules",
+			rules: []netlink.Rule{
+				listedRule(32765),
+				withRule(100, func(r *netlink.Rule) { r.Src = subnet }),
+				listedRule(32764),
+			},
+			wantDeleted: []int{32765},
 		},
 		{
 			name: "three matching rules",

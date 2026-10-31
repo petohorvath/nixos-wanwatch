@@ -25,6 +25,8 @@ let
 
   withThresholds = thresholds: minimal // { inherit thresholds; };
 
+  inherit (fixtures.invalidTargets.probeTargetIpv4Mapped) mappedInV6;
+
   # `fixtures.invalidTargets` as `rejectionTests` cases.
   invalidTargetInputs = lib.mapAttrs (
     _: lib.mapAttrs (_: targets: { inherit targets; })
@@ -259,7 +261,7 @@ in
   targetRejections = helpers.rejectionTests probe.tryMake invalidTargetInputs;
 
   testMakeThrowsOnIpv4MappedTarget = {
-    expr = probe.make { targets.v6 = [ "::ffff:1.1.1.1" ]; };
+    expr = probe.make { targets = mappedInV6; };
     expectedError = {
       type = "ThrownError";
       msg = "\\[probeTargetIpv4Mapped]";
@@ -302,8 +304,8 @@ in
   };
 
   testIpv4MappedTargetMessage = {
-    expr = (probe.tryMake { targets.v6 = [ "::ffff:1.1.1.1" ]; }).error;
-    expected = "probe.make: [probeTargetIpv4Mapped] ::ffff:1.1.1.1 in targets.v6 is an IPv4-mapped address; list the IPv4 address in targets.v4";
+    expr = (probe.tryMake { targets = mappedInV6; }).error;
+    expected = "probe.make: [probeTargetIpv4Mapped] ${builtins.head mappedInV6.v6} in targets.v6 is an IPv4-mapped address; list the IPv4 address in targets.v4";
   };
 
   testUnknownFieldMessage = {

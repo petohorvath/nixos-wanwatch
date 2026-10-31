@@ -64,6 +64,17 @@ in
     };
   };
 
+  # Targets compare as canonical addresses through the module too.
+  testProbeNonCanonicalDuplicateTarget = {
+    expr = renderConfig (evalOneWan {
+      targets = fixtures.invalidTargets.probeDuplicateTarget.nonCanonicalDuplicateInV6;
+    });
+    expectedError = {
+      type = "ThrownError";
+      msg = "\\[probeDuplicateTarget]";
+    };
+  };
+
   # NixOS concatenates list definitions, so two modules that each list
   # a Target produce a duplicate.
   testProbeDuplicateTargetFromMerge = {

@@ -1026,7 +1026,7 @@ func defaultVia(gw string, ifindex, metric int) netlink.Route {
 }
 
 // multipathDefault builds a main-table IPv4 default route with the
-// given metric and one nexthop per ifindex/gateway pair, as RouteList
+// given metric and one next-hop per ifindex/gateway pair, as RouteList
 // returns it: no top-level gateway or link index.
 func multipathDefault(metric int, nexthops ...any) netlink.Route {
 	r := netlink.Route{Family: unix.AF_INET, Table: unix.RT_TABLE_MAIN, Priority: metric}
@@ -1081,8 +1081,8 @@ func discoverDefaults(t *testing.T, s *RouteSubscriber, routes []netlink.Route, 
 }
 
 // TestRouteSubscriberSelectsPreferredDefault: the snapshot and the
-// reconcile path both report, per interface and Family, the default
-// the kernel uses: the lowest metric, ties to the first listed.
+// reconcile path both report, per interface and Family, the preferred
+// default: the lowest metric, ties to the first listed.
 func TestRouteSubscriberSelectsPreferredDefault(t *testing.T) {
 	t.Parallel()
 	newRoute := func(r netlink.Route) netlink.RouteUpdate {
@@ -1141,14 +1141,14 @@ func TestRouteSubscriberSelectsPreferredDefault(t *testing.T) {
 			live: []string{"eth0 v4 del 192.0.2.1"},
 		},
 		{
-			name:     "multipath with one nexthop on the interface",
+			name:     "multipath with one next-hop on the interface",
 			routes:   []netlink.Route{multipathDefault(100, 5, "10.0.0.2", 3, "192.0.2.1")},
 			upd:      newRoute(multipathDefault(100, 5, "10.0.0.2", 3, "192.0.2.1")),
 			snapshot: []string{"eth0 v4 add 192.0.2.1"},
 			live:     []string{"eth0 v4 add 192.0.2.1"},
 		},
 		{
-			name:     "multipath with two nexthops on the interface",
+			name:     "multipath with two next-hops on the interface",
 			routes:   []netlink.Route{multipathDefault(100, 3, "192.0.2.2", 3, "192.0.2.1")},
 			upd:      newRoute(multipathDefault(100, 3, "192.0.2.2", 3, "192.0.2.1")),
 			snapshot: []string{"eth0 v4 add 192.0.2.2"},
@@ -1167,7 +1167,7 @@ func TestRouteSubscriberSelectsPreferredDefault(t *testing.T) {
 			live: []string{"eth0 v4 del 192.0.2.1", "eth1 v4 del 198.51.100.1"},
 		},
 		{
-			name:   "multipath with no nexthop on a watched interface",
+			name:   "multipath with no next-hop on a watched interface",
 			routes: []netlink.Route{multipathDefault(100, 5, "10.0.0.2", 99, "10.0.1.2")},
 			upd:    newRoute(multipathDefault(100, 5, "10.0.0.2", 99, "10.0.1.2")),
 		},

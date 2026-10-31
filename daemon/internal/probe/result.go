@@ -89,8 +89,8 @@ func Aggregate(targets map[string]*WindowStats) FamilyStats {
 		return FamilyStats{}
 	}
 	per := make([]TargetStats, 0, len(targets))
-	var rtt, jitter meanOf
-	var loss lossMean
+	var rtt, jitter intMean
+	var loss ratMean
 	allFilled := true
 	for name, w := range targets {
 		ts := TargetStats{Target: name}
@@ -124,19 +124,19 @@ func Aggregate(targets map[string]*WindowStats) FamilyStats {
 	}
 }
 
-// meanOf accumulates the unweighted mean of the Targets that have data
+// intMean accumulates the unweighted mean of the Targets that have data
 // for one integer statistic.
-type meanOf struct {
+type intMean struct {
 	sum, n uint64
 }
 
-func (m *meanOf) add(v uint64) {
+func (m *intMean) add(v uint64) {
 	m.sum += v
 	m.n++
 }
 
 // mean returns the mean, or nil when no Target had data.
-func (m *meanOf) mean() *uint64 {
+func (m *intMean) mean() *uint64 {
 	if m.n == 0 {
 		return nil
 	}
@@ -144,20 +144,20 @@ func (m *meanOf) mean() *uint64 {
 	return &v
 }
 
-// lossMean accumulates the exact unweighted mean of the per-Target
-// loss ratios.
-type lossMean struct {
+// ratMean accumulates the exact unweighted mean of the Targets that
+// have data for one rational statistic, the loss.
+type ratMean struct {
 	sum big.Rat
 	n   int64
 }
 
-func (m *lossMean) add(r *big.Rat) {
+func (m *ratMean) add(r *big.Rat) {
 	m.sum.Add(&m.sum, r)
 	m.n++
 }
 
 // mean returns the exact mean, or nil when no Target had data.
-func (m *lossMean) mean() *big.Rat {
+func (m *ratMean) mean() *big.Rat {
 	if m.n == 0 {
 		return nil
 	}
