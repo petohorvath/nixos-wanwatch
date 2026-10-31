@@ -93,25 +93,9 @@ record its Group. A fix needs the firewall to copy the mark into the
 connection (`ct mark set meta mark`) so the flush can match address
 and mark, which changes the firewall composition contract. Worth it
 only once a deployment runs several Groups on one WAN.
-`daemon/cmd/wanwatchd/daemon.go` (`flushSwitchedConntrack`),
+`daemon/cmd/wanwatchd/daemon.go` (`flushVacatedConntrack`),
 `daemon/internal/apply/conntrack.go`,
 [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
-
-### Conntrack flush when a Group recovers onto another WAN
-
-Only a switch flushes conntrack (`publishDecision`). When every
-Member goes down, the Decision is a `down` with no successor and
-flushes nothing, because no healthy WAN could carry the flows. If the
-Group then comes `up` on a different WAN than the one it vacated, that
-`up` isn't a switch either, so the old WAN's SNATted flows keep their
-conntrack entries and are black-holed until the entries time out.
-Remembering the last WAN that carried traffic and flushing it on an
-`up` onto another WAN would close the gap. The publication test "up
-and down flush no conntrack" pins the current behavior.
-
-**Decided** ([#94](https://github.com/petohorvath/nixos-wanwatch/issues/94)): remember the WAN a `down` vacated and flush it on the next `up` onto another WAN.
-`daemon/cmd/wanwatchd/daemon.go` (`publishDecision`,
-`flushSwitchedConntrack`).
 
 ### Kernel-side conntrack flush for IPv6
 

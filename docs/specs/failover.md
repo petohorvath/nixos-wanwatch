@@ -107,7 +107,7 @@ Replaying the same event sequence (config, ProbeResults, LinkEvents) always prod
 | LinkEvent arrives during a Decision                | Same: one goroutine drains every channel, each in order. Events on different channels have no order between them.                                                                                                                                                                            |
 | All Members unhealthy                              | A transition to `selection = null` commits without route writes and emits a `down` Hook if the Group had a Selection. Routes stay in place; repeated all-down observations emit no Decision.                                                                                                 |
 
-Keeping stale routes when every Member is unhealthy is intentional: removing the last default route would leave no egress at all. Operators who want a different policy can add a `down` Hook that runs `ip route flush table <T>`.
+Keeping stale routes when every Member is unhealthy is intentional: removing the last default route would leave no egress at all. Because those routes stay, a `down` flushes no conntrack; the next `up` flushes the vacated WAN's entries when it lands on another WAN ([What happens on a Decision](../wan-monitoring.md#what-happens-on-a-decision)). Operators who want a different policy can add a `down` Hook that runs `ip route flush table <T>`.
 
 ## Out of scope for v1
 

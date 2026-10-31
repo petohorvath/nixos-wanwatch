@@ -40,6 +40,10 @@ type daemon struct {
 	health   *health.Wans
 	groups   map[string]*decision.Group
 	gateways *gatewayCache
+	// vacated holds, per Group, the WAN a `down` left with no
+	// successor. Its route stays in place, so its flows move only at
+	// the next `up`, which flushes them if it moves to another WAN.
+	vacated map[string]selector.Active
 	// startedAt is State's startedAt, fixed when the daemon is built.
 	startedAt time.Time
 }
@@ -58,6 +62,7 @@ func newDaemon(cfg *config.Config, k kernel, hooks hookSink, mreg *metrics.Regis
 		health:    health.New(cfg.Wans, mreg),
 		groups:    make(map[string]*decision.Group, len(cfg.Groups)),
 		gateways:  newGatewayCache(),
+		vacated:   make(map[string]selector.Active, len(cfg.Groups)),
 		startedAt: time.Now().UTC(),
 	}
 	for name, g := range cfg.Groups {
@@ -190,15 +195,26 @@ func (d *daemon) recomputeAffectedGroups(ctx context.Context, wan string, reason
 // module. Failed Apply and route refreshes return no commit. The module
 // has already updated its snapshot and gauges before publication begins.
 // Every commit publishes State, because its Decision was counted when it
-// became pending; only a commit that changes the Selection runs Hooks,
-// and only a switch flushes conntrack.
+// became pending; only a commit that changes the Selection runs Hooks.
+// Conntrack is flushed when traffic moves to another WAN: on a switch,
+// and on an `up` onto a WAN other than the one a `down` vacated.
 func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committed *decision.Commit) {
 	if committed == nil {
 		return
 	}
 	event := committed.Event()
-	if event == state.EventSwitch {
-		d.flushSwitchedConntrack(ctx, g, committed.Old)
+	switch event {
+	case state.EventSwitch:
+		d.flushVacatedConntrack(ctx, g, committed.Old)
+	case state.EventDown:
+		d.vacated[g.Name] = committed.Old
+	case state.EventUp:
+		if old, ok := d.vacated[g.Name]; ok {
+			delete(d.vacated, g.Name)
+			if old.Wan != committed.New.Wan {
+				d.flushVacatedConntrack(ctx, g, old)
+			}
+		}
 	}
 	d.writeStateSnapshot(committed.At)
 	if event != "" {
@@ -206,19 +222,19 @@ func (d *daemon) publishDecision(ctx context.Context, g selector.Group, committe
 	}
 }
 
-// flushSwitchedConntrack clears the conntrack entries pinned to the
+// flushVacatedConntrack clears the conntrack entries pinned to the
 // vacated WAN's source addresses, so flows that were SNATted out the
 // old WAN re-establish via the new one instead of being black-holed
 // until their conntrack entries time out.
 //
-// Switch-only: publishDecision calls it only for a switch. On a
-// `down` there is no healthy successor and the old default route is
-// left in place, and a commit that keeps its WAN vacates nothing, so a
-// flush would only churn or reset live flows. Best-effort per
-// docs/wan-monitoring.md — a resolve or flush failure is logged and
-// metered but never fails the Decision; the routes have already
-// converged.
-func (d *daemon) flushSwitchedConntrack(ctx context.Context, g selector.Group, old selector.Active) {
+// publishDecision calls it only when traffic moves to another WAN. A
+// `down` has no healthy successor and leaves the old default route in
+// place, so it flushes nothing; the next `up` flushes the WAN it
+// vacated if it moves elsewhere. A commit that keeps its WAN vacates
+// nothing. Best-effort per docs/wan-monitoring.md — a resolve or flush
+// failure is logged and metered but never fails the Decision; the
+// routes have already converged.
+func (d *daemon) flushVacatedConntrack(ctx context.Context, g selector.Group, old selector.Active) {
 	wan, ok := d.cfg.Wans[old.Wan]
 	if !ok {
 		return
