@@ -7,6 +7,7 @@ package health
 import (
 	"cmp"
 	"math"
+	"math/big"
 	"slices"
 
 	"github.com/petohorvath/nixos-wanwatch/daemon/internal/config"
@@ -332,15 +333,35 @@ func (ws *wan) combineFamilies() bool {
 // unhealthy; at or below Up, healthy; in between, hold prev. The Nix
 // option type guarantees Up < Down, so the band is never empty.
 //
+// Both comparisons are exact: the loss is the exact rational mean
+// from probe.Aggregate against pct/100, and the RTT is in integer
+// microseconds against ms*1000, so a statistic exactly at a threshold
+// gets the documented verdict whatever the Target order.
+//
 // A statistic without data passes its thresholds: a Window in which no
 // Sample succeeded has no RTT, and its loss decides the verdict.
 func evaluateThresholds(prev bool, stats probe.FamilyStats, t config.Thresholds) bool {
-	lossPct := orZero(stats.LossRatio) * 100
-	rttMs := float64(orZero(stats.RTTMicros)) / 1000
-	if prev {
-		return lossPct < float64(t.LossPctDown) && rttMs < float64(t.RttMsDown)
+	loss := stats.ExactLoss
+	if loss == nil {
+		loss = new(big.Rat)
 	}
-	return lossPct <= float64(t.LossPctUp) && rttMs <= float64(t.RttMsUp)
+	rttMicros := orZero(stats.RTTMicros)
+	if prev {
+		return comparePct(loss, t.LossPctDown) < 0 && rttMicros < msToMicros(t.RttMsDown)
+	}
+	return comparePct(loss, t.LossPctUp) <= 0 && rttMicros <= msToMicros(t.RttMsUp)
+}
+
+// comparePct compares the loss ratio r with pct percent, exactly.
+func comparePct(r *big.Rat, pct int) int {
+	return r.Cmp(big.NewRat(int64(pct), 100))
+}
+
+// msToMicros converts a millisecond threshold to microseconds. The Nix
+// option type keeps RTT thresholds positive; a negative one counts as
+// 0, which no RTT is below.
+func msToMicros(ms int) uint64 {
+	return uint64(max(ms, 0)) * 1000
 }
 
 // carrierUp reports whether the WAN's interface is operationally up
@@ -366,7 +387,7 @@ func (ws *wan) carrierUp() bool {
 }
 
 // orZero reads an optional statistic, no data as 0.
-func orZero[T uint64 | float64](v *T) T {
+func orZero(v *uint64) uint64 {
 	if v == nil {
 		return 0
 	}

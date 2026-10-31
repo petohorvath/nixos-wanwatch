@@ -1,25 +1,42 @@
 package probe
 
-import "time"
+import (
+	"cmp"
+	"math/big"
+	"slices"
+	"time"
+)
 
 // TargetStats is the per-Target slice of a probe-cycle result. A nil
 // statistic has no data: RTTMicros and JitterMicros are nil until a
-// Sample in the Target's Window succeeds, and LossRatio is nil while
-// the Window holds no Sample.
+// Sample in the Target's Window succeeds, and ExactLoss and LossRatio
+// are nil while the Window holds no Sample.
+//
+// ExactLoss is the Window's loss as an exact rational, lost / total
+// Samples, and LossRatio is the float64 nearest it. Callers treat
+// ExactLoss as immutable.
 type TargetStats struct {
 	Target       string
 	RTTMicros    *uint64
 	JitterMicros *uint64
+	ExactLoss    *big.Rat
 	LossRatio    *float64
 }
 
 // FamilyStats is the per-(WAN, family) aggregate of all Targets'
 // stats. PerTarget retains the breakdown for the per-target
-// Prometheus gauges (docs/metrics.md). Each statistic is the
-// unweighted mean over the Targets that have data for it, and nil,
-// no data, when none has: RTTMicros and JitterMicros until a Sample
-// in the Family's Window succeeds, LossRatio while the Window holds
-// no Sample.
+// Prometheus gauges (docs/metrics.md), sorted by Target. Each
+// statistic is the unweighted mean over the Targets that have data
+// for it, and nil, no data, when none has: RTTMicros and JitterMicros
+// until a Sample in the Family's Window succeeds, ExactLoss and
+// LossRatio while the Window holds no Sample.
+//
+// ExactLoss is the loss mean as an exact rational, so the thresholds
+// compare it without rounding and independently of Target order.
+// LossRatio is the float64 nearest it, the value State and the
+// metrics report. A FamilyStats without ExactLoss has no loss data
+// for the thresholds, whatever LossRatio holds. Callers treat
+// ExactLoss as immutable.
 //
 // WindowFilled reports whether every per-target sliding window has
 // reached its configured capacity. The daemon uses it to honour the
@@ -31,6 +48,7 @@ type TargetStats struct {
 type FamilyStats struct {
 	RTTMicros    *uint64
 	JitterMicros *uint64
+	ExactLoss    *big.Rat
 	LossRatio    *float64
 	WindowFilled bool
 	PerTarget    []TargetStats
@@ -57,16 +75,22 @@ type ProbeResult struct {
 // statistic's mean, so neither an empty Window nor a fully lost one
 // drags the Family's RTT toward 0.
 //
+// The loss mean is exact: the per-Target ratios lost / total are
+// summed as rationals, and LossRatio comes from that sum by one
+// conversion. The RTT and jitter means are integer means, so the whole
+// result is independent of the map's iteration order.
+//
 // Targets without data still appear in PerTarget so the metrics
 // surface remains stable across the daemon's startup ramp-up —
-// Prometheus dislikes labels that appear and disappear.
+// Prometheus dislikes labels that appear and disappear. PerTarget is
+// sorted by Target.
 func Aggregate(targets map[string]*WindowStats) FamilyStats {
 	if len(targets) == 0 {
 		return FamilyStats{}
 	}
 	per := make([]TargetStats, 0, len(targets))
-	var rtt, jitter meanOf[uint64]
-	var loss meanOf[float64]
+	var rtt, jitter meanOf
+	var loss lossMean
 	allFilled := true
 	for name, w := range targets {
 		ts := TargetStats{Target: name}
@@ -78,41 +102,73 @@ func Aggregate(targets map[string]*WindowStats) FamilyStats {
 			ts.JitterMicros = &v
 			jitter.add(v)
 		}
-		if v, ok := w.LossRatio(); ok {
-			ts.LossRatio = &v
-			loss.add(v)
+		if lost, total := w.LossCounts(); total > 0 {
+			ts.ExactLoss = big.NewRat(int64(lost), int64(total))
+			ts.LossRatio = nearest(ts.ExactLoss)
+			loss.add(ts.ExactLoss)
 		}
 		per = append(per, ts)
 		if !w.Filled() {
 			allFilled = false
 		}
 	}
+	slices.SortFunc(per, func(a, b TargetStats) int { return cmp.Compare(a.Target, b.Target) })
+	exact := loss.mean()
 	return FamilyStats{
 		RTTMicros:    rtt.mean(),
 		JitterMicros: jitter.mean(),
-		LossRatio:    loss.mean(),
+		ExactLoss:    exact,
+		LossRatio:    nearest(exact),
 		WindowFilled: allFilled,
 		PerTarget:    per,
 	}
 }
 
 // meanOf accumulates the unweighted mean of the Targets that have data
-// for one statistic.
-type meanOf[T uint64 | float64] struct {
-	sum T
-	n   int
+// for one integer statistic.
+type meanOf struct {
+	sum, n uint64
 }
 
-func (m *meanOf[T]) add(v T) {
+func (m *meanOf) add(v uint64) {
 	m.sum += v
 	m.n++
 }
 
 // mean returns the mean, or nil when no Target had data.
-func (m *meanOf[T]) mean() *T {
+func (m *meanOf) mean() *uint64 {
 	if m.n == 0 {
 		return nil
 	}
-	v := m.sum / T(m.n)
+	v := m.sum / m.n
 	return &v
+}
+
+// lossMean accumulates the exact unweighted mean of the per-Target
+// loss ratios.
+type lossMean struct {
+	sum big.Rat
+	n   int64
+}
+
+func (m *lossMean) add(r *big.Rat) {
+	m.sum.Add(&m.sum, r)
+	m.n++
+}
+
+// mean returns the exact mean, or nil when no Target had data.
+func (m *lossMean) mean() *big.Rat {
+	if m.n == 0 {
+		return nil
+	}
+	return new(big.Rat).Quo(&m.sum, big.NewRat(m.n, 1))
+}
+
+// nearest returns the float64 nearest r; nil, no data, stays nil.
+func nearest(r *big.Rat) *float64 {
+	if r == nil {
+		return nil
+	}
+	f, _ := r.Float64()
+	return &f
 }

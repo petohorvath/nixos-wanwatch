@@ -12,6 +12,7 @@ All notable changes to `nixos-wanwatch` are recorded here. Format follows [Keep 
 
 - The daemon's link and route subscriptions now get their full 1 MiB netlink receive buffer regardless of `net.core.rmem_max`, so a burst of link or route changes is less likely to overflow it and restart the daemon. The daemon forces the size with `SO_RCVBUFFORCE`, which needs the `CAP_NET_ADMIN` capability the unit already grants.
 - The daemon no longer adds another copy of each Group's fwmark rule, per Family, on every start. It installs a rule only when no rule with the same mark, mask, and table exists, and removes the copies earlier builds left behind.
+- Loss thresholds compare exactly and independently of Target order. A Family's loss stays the unweighted mean of its Targets' loss ratios, now computed as an exact rational, so a WAN at exactly `lossPctUp` or `lossPctDown` gets the documented verdict, and replaying the same Samples gives the same Decisions. RTT thresholds compare in integer microseconds. `lossRatio` in `state.json` and `wanwatch_probe_loss_ratio` report the float nearest the exact loss, so three Targets that each lost 1 of 10 Samples report `0.1` rather than `0.10000000000000002`.
 
 ## [0.1.0] - 2026-10-30
 

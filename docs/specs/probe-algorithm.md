@@ -107,7 +107,7 @@ A dial that fails with `ENODEV` means the interface is absent and is retried. An
 
 | Stat           | Computation                             | Boundary case                                            |
 | -------------- | --------------------------------------- | -------------------------------------------------------- |
-| `LossRatio`    | `lost / total`                          | No data when the Window is empty.                        |
+| `LossRatio`    | `lost / total`, kept as exact counts    | No data when the Window is empty.                        |
 | `MeanRTT`      | Mean over non-Lost Samples              | No data without a non-Lost Sample.                       |
 | `JitterMicros` | Population stddev over non-Lost Samples | No data without a non-Lost Sample; `0` with exactly one. |
 
@@ -119,13 +119,18 @@ Each statistic reports whether the Window has data for it, so a Window in which 
 FamilyStats{
     RTTMicros:    mean(t.RTTMicros    for t in targets with an RTT),
     JitterMicros: mean(t.JitterMicros for t in targets with a jitter),
-    LossRatio:    mean(t.LossRatio    for t in targets with a loss),
+    ExactLoss:    mean(lost / total   for t in targets with a loss), // exact rational
+    LossRatio:    float64 nearest ExactLoss,
     WindowFilled: every target's window has wrapped at least once,
-    PerTarget:    all targets (including those without data),
+    PerTarget:    all targets (including those without data), sorted by Target,
 }
 ```
 
+The loss mean is computed as an exact rational, so it does not depend on floating-point rounding or on the order in which `Aggregate` meets the Targets. `LossRatio`, which `state.json` and the probe gauges report, comes from it by one conversion: three Targets that each lost 1 of 10 Samples report exactly `0.1`. Each `PerTarget` entry carries its Target's exact loss and nearest `LossRatio` the same way. The RTT and jitter means are integer means, and `PerTarget` is sorted by Target, so the whole `FamilyStats` is deterministic.
+
 A statistic is nil, no data, when no Target has data for it, and in `PerTarget` when its Target has none. `state.json` reports nil as `null` and the probe gauges report it as NaN ([daemon-state](./daemon-state.md#wansnamefamiliesv4v6), [metrics catalog](../metrics.md#probe)). Targets without data still appear in `PerTarget`, so the Prometheus label set stays stable through startup.
+
+The thresholds compare without rounding: the exact loss against `pct / 100`, and the mean RTT in integer microseconds against `ms × 1000`. A loss or RTT exactly at a threshold therefore gets the documented verdict: at `lossPctUp` or `rttMsUp` it passes the Up thresholds, and at `lossPctDown` or `rttMsDown` it fails the Down thresholds.
 
 The thresholds treat a statistic without data as passing: a full Window in which no Sample succeeded has no RTT, and its loss of `1` decides the verdict.
 

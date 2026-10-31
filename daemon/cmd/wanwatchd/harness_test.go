@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -269,7 +270,8 @@ func ptr[T any](v T) *T { return &v }
 // healthy is a full Window that passes baseConfig's thresholds.
 func healthy(wan string, fam probe.Family) probe.ProbeResult {
 	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
-		RTTMicros: ptr[uint64](10_000), JitterMicros: ptr[uint64](0), LossRatio: ptr(0.0), WindowFilled: true,
+		RTTMicros: ptr[uint64](10_000), JitterMicros: ptr[uint64](0),
+		ExactLoss: new(big.Rat), LossRatio: ptr(0.0), WindowFilled: true,
 	}}
 }
 
@@ -277,7 +279,7 @@ func healthy(wan string, fam probe.Family) probe.ProbeResult {
 // RTT or jitter.
 func lossy(wan string, fam probe.Family) probe.ProbeResult {
 	return probe.ProbeResult{Wan: wan, Family: fam, Stats: probe.FamilyStats{
-		LossRatio: ptr(1.0), WindowFilled: true,
+		ExactLoss: big.NewRat(1, 1), LossRatio: ptr(1.0), WindowFilled: true,
 	}}
 }
 
