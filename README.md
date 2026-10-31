@@ -231,7 +231,7 @@ The daemon runs as the `wanwatch` user and group, which the module creates. Its 
 
 From v0.1.0, every 0.x release keeps these contracts compatible: `config.json` and `state.json` schema 1, the Hook variables, and the metric catalog. A release may add State fields, Hook variables, and metrics, so readers of `state.json` ignore the fields they do not know.
 
-The `services.wanwatch` options and `lib` may still break in a 0.x minor release, with a migration note in [`CHANGELOG.md`](./CHANGELOG.md). In `lib`, only `lib.types`, `lib.config.paths`, and `lib.version` are stable; every other name is an unstable internal of the module.
+The `services.wanwatch` options and `lib` may still break in a 0.x minor release, with a migration note in [`CHANGELOG.md`](./CHANGELOG.md). In `lib`, only `lib.types.fwmark`, `lib.types.routingTableId`, `lib.config.paths`, and `lib.version` are stable; every other name is an unstable internal of the module.
 
 [ADR-0018](./docs/adr/0018-0x-stability-promise.md) records the promise and its reasoning.
 
