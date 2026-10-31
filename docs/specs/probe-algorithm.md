@@ -105,11 +105,11 @@ A dial that fails with `ENODEV` means the interface is absent and is retried. An
 
 `WindowStats` is a fixed-capacity ring buffer of `Sample` values, one per Target.
 
-| Stat           | Computation                             | Boundary case                                            |
-| -------------- | --------------------------------------- | -------------------------------------------------------- |
-| `LossRatio`    | `lost / total`, kept as exact counts    | No data when the Window is empty.                        |
-| `MeanRTT`      | Mean over non-Lost Samples              | No data without a non-Lost Sample.                       |
-| `JitterMicros` | Population stddev over non-Lost Samples | No data without a non-Lost Sample; `0` with exactly one. |
+| Stat           | Computation                              | Boundary case                                            |
+| -------------- | ---------------------------------------- | -------------------------------------------------------- |
+| `LossCounts`   | `lost` and `total` Samples, exact counts | No data, a `total` of `0`, when the Window is empty.     |
+| `MeanRTT`      | Mean over non-Lost Samples               | No data without a non-Lost Sample.                       |
+| `JitterMicros` | Population stddev over non-Lost Samples  | No data without a non-Lost Sample; `0` with exactly one. |
 
 Each statistic reports whether the Window has data for it, so a Window in which every Sample was lost never reads as a perfect RTT of `0`.
 

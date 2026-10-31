@@ -110,17 +110,6 @@ func (w *WindowStats) LossCounts() (lost, total int) {
 	return lost, w.Len()
 }
 
-// LossRatio returns the fraction of Samples in the window that were
-// Lost, as the float64 in [0.0, 1.0] nearest LossCounts' exact ratio.
-// It reports false, no data, when the window is empty.
-func (w *WindowStats) LossRatio() (float64, bool) {
-	lost, total := w.LossCounts()
-	if total == 0 {
-		return 0, false
-	}
-	return float64(lost) / float64(total), true
-}
-
 // MeanRTT returns the arithmetic mean of RTTs across non-Lost Samples,
 // in microseconds. It reports false, no data, when no non-Lost Sample
 // is in the window, so a dead link never reads as a perfect RTT of 0.
