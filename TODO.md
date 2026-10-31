@@ -172,6 +172,17 @@ filtered dump of default routes only, or a narrower reconcile, would
 bound the cost.
 `daemon/internal/rtnl/route.go`.
 
+### Reject non-unicast and special-purpose Targets
+
+Both layers accept any unzoned IP literal of the bucket's Family,
+apart from an IPv4-mapped address in `v6` and duplicates. An
+unspecified (`0.0.0.0`, `::`), multicast, loopback, broadcast, or
+link-local Target doesn't crash the daemon, but it gives constant
+loss or a reply that says nothing about the WAN. Reject these classes
+in `probe.tryMake` and in `config.Validate`, with a new error kind.
+This tightens the `targets` options, so it needs a `CHANGELOG.md`
+migration note and a minor bump (ADR-0018).
+
 ---
 
 ## v2 — major

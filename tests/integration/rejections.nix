@@ -44,6 +44,39 @@ in
     };
   };
 
+  testProbeIpv4MappedTarget = {
+    expr = renderConfig (evalOneWan {
+      targets = fixtures.invalidTargets.probeTargetIpv4Mapped.mappedInV6;
+    });
+    expectedError = {
+      type = "ThrownError";
+      msg = "\\[probeTargetIpv4Mapped]";
+    };
+  };
+
+  testProbeDuplicateTarget = {
+    expr = renderConfig (evalOneWan {
+      targets = fixtures.invalidTargets.probeDuplicateTarget.duplicateInV4;
+    });
+    expectedError = {
+      type = "ThrownError";
+      msg = "\\[probeDuplicateTarget]";
+    };
+  };
+
+  # NixOS concatenates list definitions, so two modules that each list
+  # a Target produce a duplicate.
+  testProbeDuplicateTargetFromMerge = {
+    expr = renderConfig (evalNixos [
+      (fixtures.nixos.oneWan { })
+      { services.wanwatch.wans.broken.probe.targets.v4 = [ "1.1.1.1" ]; }
+    ]);
+    expectedError = {
+      type = "ThrownError";
+      msg = "\\[probeDuplicateTarget]";
+    };
+  };
+
   testGroupNoMembers = {
     expr = renderConfig (evalOneWan {
       members = { };

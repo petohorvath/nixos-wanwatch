@@ -1,6 +1,7 @@
 package health
 
 import (
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -41,37 +42,82 @@ func down(iface string) event { return link(iface, rtnl.CarrierDown, rtnl.Operst
 
 func ptr[T any](v T) *T { return &v }
 
-// window is a probe result whose Window is full.
-func window(wan string, family probe.Family, lossRatio float64, rttMs uint64) event {
-	return event{probe: &probe.ProbeResult{Wan: wan, Family: family, Stats: probe.FamilyStats{
-		LossRatio: ptr(lossRatio), RTTMicros: ptr(rttMs * 1000), WindowFilled: true,
-	}}}
+// targetOf returns the Target wanCfg probes in family.
+func targetOf(family probe.Family) string {
+	if family == probe.FamilyV4 {
+		return "192.0.2.1"
+	}
+	return "2001:db8::1"
 }
 
-// partial is a probe result whose Window has not filled yet.
-func partial(wan string, family probe.Family, lossRatio float64, rttMs uint64) event {
-	e := window(wan, family, lossRatio, rttMs)
-	e.probe.Stats.WindowFilled = false
-	return e
+// samples returns lost Lost Samples followed by n-lost successful
+// Samples with an RTT of rttMs.
+func samples(n, lost int, rttMs uint64) []probe.Sample {
+	out := make([]probe.Sample, n)
+	for i := range out {
+		if i < lost {
+			out[i] = probe.Sample{Lost: true}
+		} else {
+			out[i] = probe.Sample{RTTMicros: rttMs * 1000}
+		}
+	}
+	return out
+}
+
+// aggregated is the probe result that probe.Aggregate builds from one
+// real Window of the given capacity per Target, each holding that
+// Target's Samples.
+func aggregated(tb testing.TB, wan string, family probe.Family, capacity int, targets map[string][]probe.Sample) event {
+	tb.Helper()
+	windows := make(map[string]*probe.WindowStats, len(targets))
+	for name, ss := range targets {
+		w, err := probe.NewWindow(capacity)
+		if err != nil {
+			tb.Fatalf("NewWindow(%d): %v", capacity, err)
+		}
+		for _, s := range ss {
+			w.Push(s)
+		}
+		windows[name] = w
+	}
+	return event{probe: &probe.ProbeResult{Wan: wan, Family: family, Stats: probe.Aggregate(windows)}}
+}
+
+// window is a full Window of 100 Samples on family's Target, lossPct
+// of them lost and the rest with an RTT of rttMs.
+func window(tb testing.TB, wan string, family probe.Family, lossPct int, rttMs uint64) event {
+	tb.Helper()
+	return aggregated(tb, wan, family, 100, map[string][]probe.Sample{targetOf(family): samples(100, lossPct, rttMs)})
+}
+
+// partial is window before the Window has filled.
+func partial(tb testing.TB, wan string, family probe.Family, lossPct int, rttMs uint64) event {
+	tb.Helper()
+	return aggregated(tb, wan, family, 101, map[string][]probe.Sample{targetOf(family): samples(100, lossPct, rttMs)})
 }
 
 // lost is a full Window in which every Sample was lost, so it has no
 // RTT or jitter.
-func lost(wan string, family probe.Family) event {
-	return event{probe: &probe.ProbeResult{Wan: wan, Family: family, Stats: probe.FamilyStats{
-		LossRatio: ptr(1.0), WindowFilled: true,
-	}}}
+func lost(tb testing.TB, wan string, family probe.Family) event {
+	tb.Helper()
+	return aggregated(tb, wan, family, 10, map[string][]probe.Sample{targetOf(family): samples(10, 10, 0)})
 }
 
 // lostPartial is lost before the Window has filled.
-func lostPartial(wan string, family probe.Family) event {
-	e := lost(wan, family)
-	e.probe.Stats.WindowFilled = false
-	return e
+func lostPartial(tb testing.TB, wan string, family probe.Family) event {
+	tb.Helper()
+	return aggregated(tb, wan, family, 11, map[string][]probe.Sample{targetOf(family): samples(10, 10, 0)})
 }
 
-func good(wan string, family probe.Family) event { return window(wan, family, 0, 10) }
-func bad(wan string, family probe.Family) event  { return lost(wan, family) }
+func good(tb testing.TB, wan string, family probe.Family) event {
+	tb.Helper()
+	return window(tb, wan, family, 0, 10)
+}
+
+func bad(tb testing.TB, wan string, family probe.Family) event {
+	tb.Helper()
+	return lost(tb, wan, family)
+}
 
 var (
 	noChange  = Change{}
@@ -271,26 +317,26 @@ func TestColdStart(t *testing.T) {
 	}{
 		{"partial Windows keep carrier-only Health, then a good Window seeds healthy", []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: healthy},
-			{event: lostPartial("primary", v4), change: noChange, healthy: healthy},
-			{event: partial("primary", v4, 0.5, 10), change: noChange, healthy: healthy},
-			{event: good("primary", v4), change: republish, healthy: healthy},
-			{event: bad("primary", v4), change: noChange, healthy: healthy},
-			{event: bad("primary", v4), change: flipped("primary"), healthy: unhealthy},
+			{event: lostPartial(t, "primary", v4), change: noChange, healthy: healthy},
+			{event: partial(t, "primary", v4, 50, 10), change: noChange, healthy: healthy},
+			{event: good(t, "primary", v4), change: republish, healthy: healthy},
+			{event: bad(t, "primary", v4), change: noChange, healthy: healthy},
+			{event: bad(t, "primary", v4), change: flipped("primary"), healthy: unhealthy},
 		}},
 		{"a bad first full Window flips down without the ramp", []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: healthy},
-			{event: bad("primary", v4), change: flipped("primary"), healthy: unhealthy},
-			{event: good("primary", v4), change: noChange, healthy: unhealthy},
-			{event: good("primary", v4), change: flipped("primary"), healthy: healthy},
+			{event: bad(t, "primary", v4), change: flipped("primary"), healthy: unhealthy},
+			{event: good(t, "primary", v4), change: noChange, healthy: unhealthy},
+			{event: good(t, "primary", v4), change: flipped("primary"), healthy: healthy},
 		}},
 		{"a partial Window after cooking still counts", []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: healthy},
-			{event: good("primary", v4), change: republish, healthy: healthy},
-			{event: lostPartial("primary", v4), change: noChange, healthy: healthy},
-			{event: lostPartial("primary", v4), change: flipped("primary"), healthy: unhealthy},
+			{event: good(t, "primary", v4), change: republish, healthy: healthy},
+			{event: lostPartial(t, "primary", v4), change: noChange, healthy: healthy},
+			{event: lostPartial(t, "primary", v4), change: flipped("primary"), healthy: unhealthy},
 		}},
 		{"cooking before carrier is up publishes without flipping", []step{
-			{event: good("primary", v4), change: republish, healthy: unhealthy},
+			{event: good(t, "primary", v4), change: republish, healthy: unhealthy},
 			{event: up("eth0"), change: flipped("primary"), healthy: healthy},
 		}},
 	}
@@ -314,17 +360,208 @@ func TestThresholdBand(t *testing.T) {
 	w := New(wans(wanCfg("primary", "eth0", 1, 1, v4)), metrics.New())
 	replay(t, w, []step{
 		{event: up("eth0"), change: flipped("primary"), healthy: h(true)},
-		{event: window("primary", v4, 0.15, 10), change: flipped("primary"), healthy: h(false)},
-		{event: window("primary", v4, 0.10, 100), change: flipped("primary"), healthy: h(true)},
-		{event: window("primary", v4, 0.15, 10), change: noChange, healthy: h(true)},
-		{event: window("primary", v4, 0, 199), change: noChange, healthy: h(true)},
-		{event: window("primary", v4, 0.20, 10), change: flipped("primary"), healthy: h(false)},
-		{event: window("primary", v4, 0.15, 10), change: noChange, healthy: h(false)},
-		{event: window("primary", v4, 0.10, 101), change: noChange, healthy: h(false)},
-		{event: window("primary", v4, 0.11, 100), change: noChange, healthy: h(false)},
-		{event: window("primary", v4, 0.10, 100), change: flipped("primary"), healthy: h(true)},
-		{event: window("primary", v4, 0, 200), change: flipped("primary"), healthy: h(false)},
+		{event: window(t, "primary", v4, 15, 10), change: flipped("primary"), healthy: h(false)},
+		{event: window(t, "primary", v4, 10, 100), change: flipped("primary"), healthy: h(true)},
+		{event: window(t, "primary", v4, 15, 10), change: noChange, healthy: h(true)},
+		{event: window(t, "primary", v4, 0, 199), change: noChange, healthy: h(true)},
+		{event: window(t, "primary", v4, 20, 10), change: flipped("primary"), healthy: h(false)},
+		{event: window(t, "primary", v4, 15, 10), change: noChange, healthy: h(false)},
+		{event: window(t, "primary", v4, 10, 101), change: noChange, healthy: h(false)},
+		{event: window(t, "primary", v4, 11, 100), change: noChange, healthy: h(false)},
+		{event: window(t, "primary", v4, 10, 100), change: flipped("primary"), healthy: h(true)},
+		{event: window(t, "primary", v4, 0, 200), change: flipped("primary"), healthy: h(false)},
 	})
+}
+
+// healthAfter returns the Health of a fresh v4 WAN with thresholds th
+// and a Hysteresis of one cycle each way, after carrier comes up and
+// it folds results in order. The first full Window starts from
+// unhealthy, so it meets the Up thresholds; later ones from the last
+// verdict.
+func healthAfter(tb testing.TB, th config.Thresholds, results ...event) bool {
+	tb.Helper()
+	cfg := wanCfg("primary", "eth0", 1, 1, probe.FamilyV4)
+	cfg.Probe.Thresholds = th
+	w := New(wans(cfg), metrics.New())
+	w.Link(*up("eth0").link)
+	for _, r := range results {
+		w.Probe(*r.probe)
+	}
+	return w.Healthy("primary")
+}
+
+// tenSampleTargets is a full Window of 10 Samples per entry of lost,
+// with that many of them lost, on Targets t0, t1, ....
+func tenSampleTargets(tb testing.TB, lost ...int) event {
+	tb.Helper()
+	targets := make(map[string][]probe.Sample, len(lost))
+	for i, l := range lost {
+		targets[fmt.Sprintf("t%d", i)] = samples(10, l, 10)
+	}
+	return aggregated(tb, "primary", probe.FamilyV4, 10, targets)
+}
+
+// TestLossAtThresholdAcrossTargets: a Family loss exactly at lossPctUp
+// passes and exactly at lossPctDown fails, however the per-Target
+// ratios sum in floating point and whatever order Aggregate meets the
+// Targets in, so every run gives the same verdict.
+func TestLossAtThresholdAcrossTargets(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		th      config.Thresholds
+		results func(testing.TB) []event
+		want    bool
+	}{
+		{
+			name:    "3 Targets losing 1 of 10 each are at lossPctUp 10",
+			th:      config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
+			results: func(tb testing.TB) []event { return []event{tenSampleTargets(tb, 1, 1, 1)} },
+			want:    true,
+		},
+		{
+			name:    "3 Targets losing 1, 2, and 3 of 10 are at lossPctUp 20",
+			th:      config.Thresholds{LossPctUp: 20, LossPctDown: 30, RttMsUp: 100, RttMsDown: 200},
+			results: func(tb testing.TB) []event { return []event{tenSampleTargets(tb, 1, 2, 3)} },
+			want:    true,
+		},
+		{
+			name: "3 Targets losing 1, 2, and 3 of 10 are at lossPctDown 20",
+			th:   config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200},
+			results: func(tb testing.TB) []event {
+				return []event{tenSampleTargets(tb, 0, 0, 0), tenSampleTargets(tb, 1, 2, 3)}
+			},
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for run := range 200 {
+				if got := healthAfter(t, tc.th, tc.results(t)...); got != tc.want {
+					t.Fatalf("run %d: Healthy = %v, want %v", run, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestLossAtThresholdSingleTarget: for every single-Target Window of 1
+// to 100 Samples and every loss count whose percentage is an integer,
+// that percentage passes as lossPctUp and fails as lossPctDown.
+func TestLossAtThresholdSingleTarget(t *testing.T) {
+	t.Parallel()
+	single := func(n, lost int) event {
+		return aggregated(t, "primary", probe.FamilyV4, n, map[string][]probe.Sample{"192.0.2.1": samples(n, lost, 10)})
+	}
+	for n := 1; n <= 100; n++ {
+		for l := 0; l <= n; l++ {
+			if l*100%n != 0 {
+				continue
+			}
+			pct := l * 100 / n
+			upTh := config.Thresholds{LossPctUp: pct, LossPctDown: pct + 1, RttMsUp: 100, RttMsDown: 200}
+			if !healthAfter(t, upTh, single(n, l)) {
+				t.Errorf("%d of %d lost at lossPctUp %d: unhealthy, want healthy", l, n, pct)
+			}
+			if pct == 0 {
+				continue
+			}
+			downTh := config.Thresholds{LossPctUp: pct - 1, LossPctDown: pct, RttMsUp: 100, RttMsDown: 200}
+			if healthAfter(t, downTh, single(n, 0), single(n, l)) {
+				t.Errorf("%d of %d lost at lossPctDown %d: healthy, want unhealthy", l, n, pct)
+			}
+		}
+	}
+}
+
+// TestRTTAtThreshold: a mean RTT exactly at rttMsUp passes and exactly
+// at rttMsDown fails, and one microsecond either side of them does the
+// opposite.
+func TestRTTAtThreshold(t *testing.T) {
+	t.Parallel()
+	th := config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200}
+	rtt := func(micros uint64) event {
+		return aggregated(t, "primary", probe.FamilyV4, 1, map[string][]probe.Sample{"192.0.2.1": {{RTTMicros: micros}}})
+	}
+	clean := good(t, "primary", probe.FamilyV4)
+	for _, tc := range []struct {
+		name    string
+		results []event
+		want    bool
+	}{
+		{"exactly rttMsUp passes", []event{rtt(100_000)}, true},
+		{"just above rttMsUp fails", []event{rtt(100_001)}, false},
+		{"exactly rttMsDown fails", []event{clean, rtt(200_000)}, false},
+		{"just below rttMsDown passes", []event{clean, rtt(199_999)}, true},
+	} {
+		if got := healthAfter(t, th, tc.results...); got != tc.want {
+			t.Errorf("%s: Healthy = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestNoLossDataPasses: a full Window without an exact loss has no
+// loss data, which passes the loss thresholds whatever LossRatio
+// holds, so its RTT alone decides the verdict.
+func TestNoLossDataPasses(t *testing.T) {
+	t.Parallel()
+	th := config.Thresholds{LossPctUp: 10, LossPctDown: 20, RttMsUp: 100, RttMsDown: 200}
+	noLoss := func(rttMs uint64) event {
+		return event{probe: &probe.ProbeResult{Wan: "primary", Family: probe.FamilyV4, Stats: probe.FamilyStats{
+			RTTMicros: ptr(rttMs * 1000), LossRatio: ptr(1.0), WindowFilled: true,
+		}}}
+	}
+	if !healthAfter(t, th, noLoss(100)) {
+		t.Error("no loss data, RTT at rttMsUp: unhealthy, want healthy")
+	}
+	if healthAfter(t, th, noLoss(101)) {
+		t.Error("no loss data, RTT above rttMsUp: healthy, want unhealthy")
+	}
+}
+
+// TestFullyLostWindowRecovery pins the worked example in
+// docs/specs/failover.md: with the default Probe settings and 3
+// Targets, a fully lost Window needs 9 successful cycles to reach
+// lossPctUp = 10, and the consecutiveUp ramp completes 4 cycles later,
+// so the WAN turns healthy on the 13th successful cycle.
+func TestFullyLostWindowRecovery(t *testing.T) {
+	t.Parallel()
+	cfg := wanCfg("primary", "eth0", 5, 3, probe.FamilyV4)
+	cfg.Probe.Thresholds = config.Thresholds{LossPctUp: 10, LossPctDown: 30, RttMsUp: 250, RttMsDown: 500}
+	cfg.Probe.Targets.V4 = []string{"192.0.2.1", "192.0.2.2", "192.0.2.3"}
+	w := New(wans(cfg), metrics.New())
+	w.Link(*up("eth0").link)
+
+	windows := make(map[string]*probe.WindowStats, len(cfg.Probe.Targets.V4))
+	for _, target := range cfg.Probe.Targets.V4 {
+		win, err := probe.NewWindow(10)
+		if err != nil {
+			t.Fatalf("NewWindow: %v", err)
+		}
+		windows[target] = win
+	}
+	cycle := func(s probe.Sample) {
+		for _, win := range windows {
+			win.Push(s)
+		}
+		w.Probe(probe.ProbeResult{Wan: "primary", Family: probe.FamilyV4, Stats: probe.Aggregate(windows)})
+	}
+	for range 10 {
+		cycle(probe.Sample{Lost: true})
+	}
+	if w.Healthy("primary") {
+		t.Fatal("Healthy after a fully lost Window, want unhealthy")
+	}
+	for n := 1; n <= 20; n++ {
+		cycle(probe.Sample{RTTMicros: 10_000})
+		if w.Healthy("primary") {
+			if n != 13 {
+				t.Fatalf("healthy after %d successful cycles, want 13", n)
+			}
+			return
+		}
+	}
+	t.Fatal("still unhealthy after 20 successful cycles, want healthy after 13")
 }
 
 // TestFamilyPolicy pins how Family Health combines into WAN Health
@@ -343,23 +580,23 @@ func TestFamilyPolicy(t *testing.T) {
 	}{
 		{"all: one unhealthy Family is enough", "all", []probe.Family{v4, v6}, []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: h(true)},
-			{event: bad("primary", v4), change: flipped("primary"), healthy: h(false)},
-			{event: good("primary", v6), change: republish, healthy: h(false)},
-			{event: good("primary", v4), change: flipped("primary"), healthy: h(true)},
+			{event: bad(t, "primary", v4), change: flipped("primary"), healthy: h(false)},
+			{event: good(t, "primary", v6), change: republish, healthy: h(false)},
+			{event: good(t, "primary", v4), change: flipped("primary"), healthy: h(true)},
 		}},
 		{"any: one healthy Family is enough, including an uncooked one", "any", []probe.Family{v4, v6}, []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: h(true)},
-			{event: bad("primary", v4), change: republish, healthy: h(true)},
-			{event: bad("primary", v6), change: flipped("primary"), healthy: h(false)},
-			{event: good("primary", v6), change: flipped("primary"), healthy: h(true)},
+			{event: bad(t, "primary", v4), change: republish, healthy: h(true)},
+			{event: bad(t, "primary", v6), change: flipped("primary"), healthy: h(false)},
+			{event: good(t, "primary", v6), change: flipped("primary"), healthy: h(true)},
 		}},
 		{"unknown policy falls back to all", "weird", []probe.Family{v4, v6}, []step{
 			{event: up("eth0"), change: flipped("primary"), healthy: h(true)},
-			{event: bad("primary", v4), change: flipped("primary"), healthy: h(false)},
+			{event: bad(t, "primary", v4), change: flipped("primary"), healthy: h(false)},
 		}},
 		{"no probed Family is never healthy", "any", nil, []step{
 			{event: up("eth0"), change: republish, healthy: h(false)},
-			{event: good("primary", v4), change: noChange, healthy: h(false)},
+			{event: good(t, "primary", v4), change: noChange, healthy: h(false)},
 		}},
 	}
 	for _, tc := range cases {
@@ -418,7 +655,7 @@ func TestGauges(t *testing.T) {
 		t.Errorf("partial Window: wanwatch_wan_healthy = %v, want 1 (carrier-only Health)", v)
 	}
 
-	w.Probe(*good("primary", v4).probe)
+	w.Probe(*good(t, "primary", v4).probe)
 	if v := familyHealthy(); v != 1 {
 		t.Errorf("good Window: wanwatch_wan_family_healthy = %v, want 1", v)
 	}
@@ -430,10 +667,7 @@ func TestGauges(t *testing.T) {
 		t.Errorf("carrier down: wanwatch_wan_family_healthy = %v, want 1 (carrier is not a Family verdict)", v)
 	}
 	w.Link(*up("eth0").link)
-	w.Probe(probe.ProbeResult{Wan: "primary", Family: v4, Stats: probe.FamilyStats{
-		LossRatio: ptr(1.0), WindowFilled: true,
-		PerTarget: []probe.TargetStats{{Target: "192.0.2.1", LossRatio: ptr(1.0)}},
-	}})
+	w.Probe(*lost(t, "primary", v4).probe)
 	assertProbeGauges("fully lost Window", nan, nan, 1, nan)
 	if v := familyHealthy(); v != 0 {
 		t.Errorf("bad Window: wanwatch_wan_family_healthy = %v, want 0", v)
@@ -455,7 +689,7 @@ func TestSnapshot(t *testing.T) {
 	cfg.Probe.FamilyHealthPolicy = "any"
 	w := New(wans(cfg, wanCfg("backup", "eth1", 1, 1, v4)), metrics.New())
 	w.Link(*up("eth0").link)
-	w.Probe(*bad("primary", v4).probe)
+	w.Probe(*bad(t, "primary", v4).probe)
 	w.Probe(probe.ProbeResult{Wan: "primary", Family: v6, Stats: probe.FamilyStats{
 		RTTMicros: ptr[uint64](12_500), JitterMicros: ptr[uint64](800), LossRatio: ptr(0.05),
 	}})
@@ -513,8 +747,8 @@ func TestUnknownInputsChangeNothing(t *testing.T) {
 	w := New(wans(wanCfg("primary", "eth0", 1, 1, probe.FamilyV4)), metrics.New())
 	replay(t, w, []step{
 		{event: up("eth0"), change: flipped("primary")},
-		{event: bad("ghost", probe.FamilyV4), change: noChange, healthy: map[string]bool{"ghost": false}},
-		{event: bad("primary", probe.FamilyV6), change: noChange, healthy: map[string]bool{"primary": true}},
+		{event: bad(t, "ghost", probe.FamilyV4), change: noChange, healthy: map[string]bool{"ghost": false}},
+		{event: bad(t, "primary", probe.FamilyV6), change: noChange, healthy: map[string]bool{"primary": true}},
 		{event: down("eth9"), change: noChange, healthy: map[string]bool{"primary": true}},
 	})
 	if _, ok := w.Snapshot()["ghost"]; ok {

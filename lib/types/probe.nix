@@ -85,14 +85,18 @@ let
   };
 
   mkTargetFamilyOption =
-    family: otherFamily:
+    family: otherFamily: familyRules:
     mkOption {
       type = types.listOf probeTarget;
       default = [ ];
       description = ''
         ${family} probe targets. Each must be an ${family} address;
         an ${otherFamily} address fails with
-        `probeTargetFamilyMismatch`.
+        `probeTargetFamilyMismatch`. ${familyRules}An address listed
+        more than once fails with `probeDuplicateTarget`; addresses
+        compare in canonical form. NixOS concatenates list definitions,
+        so remove a copy that another module also lists, or override
+        the list with `lib.mkForce`.
       '';
     };
 
@@ -106,8 +110,11 @@ let
       targets = mkOption {
         type = types.submodule {
           options = {
-            v4 = mkTargetFamilyOption "IPv4" "IPv6";
-            v6 = mkTargetFamilyOption "IPv6" "IPv4";
+            v4 = mkTargetFamilyOption "IPv4" "IPv6" "";
+            v6 = mkTargetFamilyOption "IPv6" "IPv4" (
+              "An IPv4-mapped address (`::ffff:0:0/96`) fails with "
+              + "`probeTargetIpv4Mapped`; list the IPv4 address in `v4`. "
+            );
           };
         };
         default = { };
