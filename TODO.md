@@ -93,44 +93,9 @@ record its Group. A fix needs the firewall to copy the mark into the
 connection (`ct mark set meta mark`) so the flush can match address
 and mark, which changes the firewall composition contract. Worth it
 only once a deployment runs several Groups on one WAN.
-`daemon/cmd/wanwatchd/daemon.go` (`flushSwitchedConntrack`),
+`daemon/cmd/wanwatchd/daemon.go` (`flushVacatedConntrack`),
 `daemon/internal/apply/conntrack.go`,
 [`docs/nftzones-integration.md`](./docs/nftzones-integration.md).
-
-### Conntrack flush when a Group recovers onto another WAN
-
-Only a switch flushes conntrack (`publishDecision`). When every
-Member goes down, the Decision is a `down` with no successor and
-flushes nothing, because no healthy WAN could carry the flows. If the
-Group then comes `up` on a different WAN than the one it vacated, that
-`up` isn't a switch either, so the old WAN's SNATted flows keep their
-conntrack entries and are black-holed until the entries time out.
-Remembering the last WAN that carried traffic and flushing it on an
-`up` onto another WAN would close the gap. The publication test "up
-and down flush no conntrack" pins the current behavior.
-
-**Decided** ([#94](https://github.com/petohorvath/nixos-wanwatch/issues/94)): remember the WAN a `down` vacated and flush it on the next `up` onto another WAN.
-`daemon/cmd/wanwatchd/daemon.go` (`publishDecision`,
-`flushSwitchedConntrack`).
-
-### Threshold band used to seed Health at cold start
-
-Before its first full Window, a Family votes healthy, so a WAN with
-carrier can be Selected at startup. The first full Window then seeds
-Hysteresis through `evaluateThresholds` with the Family's initial
-verdict, unhealthy, so the seed uses the stricter recovery band
-(`lossPctUp`, `rttMsUp`) rather than the failure band. Under the
-default thresholds, a WAN at a steady 20% loss is Selected on carrier
-and then goes down when its Window fills, causing a switch at boot,
-although once it is up the same loss would keep it up. Seeding with the
-failure band would match the healthy vote the Family already cast.
-`TestThresholdBand` pins the current behavior, and
-[`docs/specs/failover.md`](./docs/specs/failover.md#cold-start-invariant)
-doesn't say which band applies to the seed. Decide, then record the
-answer in the spec.
-`daemon/internal/health/health.go` (`fold`, `evaluateThresholds`).
-
-**Decided** ([#93](https://github.com/petohorvath/nixos-wanwatch/issues/93)): seed with the failure band.
 
 ### Kernel-side conntrack flush for IPv6
 
@@ -196,21 +161,6 @@ storm can leave it `failed`, with no failover at all. The forced
 exiting, the subscriber could reopen its subscription and reconcile
 from a fresh dump, as it already does at startup.
 `daemon/internal/rtnl/subscriber.go`, `daemon/internal/rtnl/route.go`.
-
-### Keep failover running when the metrics server fails
-
-The metrics server is supervised like the probers and subscribers: if
-it fails while the daemon runs, the daemon exits and systemd restarts
-it (`superviseSubsystem`, `daemon/cmd/wanwatchd/main.go`). A metrics
-failure therefore interrupts failover, although failover doesn't need
-metrics, and a persistent failure, such as an unwritable socket path,
-can reach the unit's start limit and leave it `failed`. Failover
-could instead keep running and report the failure in the log and in
-`state.json`. The trade-off is that a dead metrics endpoint hides the
-daemon from monitoring until someone reads the log.
-`daemon/cmd/wanwatchd/main.go`, `daemon/internal/metrics/server.go`.
-
-**Decided** ([#92](https://github.com/petohorvath/nixos-wanwatch/issues/92)): keep failover running and retry the metrics server with backoff.
 
 ### Cheaper Gateway reconcile on a route notification
 

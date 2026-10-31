@@ -193,7 +193,7 @@ func TestDecisionPublication(t *testing.T) {
 			},
 		},
 		{
-			name: "up and down flush no conntrack",
+			name: "a first up and a down flush no conntrack",
 			steps: []step{
 				{
 					name: "gateways cached, every address lookup fails",
@@ -225,6 +225,144 @@ func TestDecisionPublication(t *testing.T) {
 				if n := readCounter(tb, h.metrics.ApplyOpErrors.WithLabelValues("home", "conntrack_flush")); n != 0 {
 					tb.Errorf("apply_op_errors_total{home,conntrack_flush} = %v, want 0", n)
 				}
+			},
+		},
+		{
+			// The down left primary's route in place, so its flows
+			// moved only at the up, and were masqueraded to primary's
+			// addresses.
+			name: "an up onto another WAN flushes the WAN the down vacated",
+			steps: []step{
+				{name: "gateways cached", do: cachedGateways},
+				{
+					name: "primary gains carrier",
+					do:   func(h *harness) { h.Link(carrier("eth0", true)) },
+					want: []string{
+						"route home v4 eth0 via 192.0.2.1",
+						"route home v6 eth0 via 2001:db8::1",
+						"hook up home →primary",
+					},
+					active: "primary",
+				},
+				{
+					name:   "primary loses carrier: down flushes nothing",
+					do:     func(h *harness) { h.Link(carrier("eth0", false)) },
+					want:   []string{"hook down home primary→"},
+					active: "",
+				},
+				{
+					name: "backup gains carrier: up flushes primary",
+					do:   func(h *harness) { h.Link(carrier("wwan0", true)) },
+					want: []string{
+						"route home v4 wwan0 via 198.51.100.1",
+						"route home v6 wwan0 via 2001:db8:1::1",
+						"flush v4 192.0.2.10",
+						"flush v6 2001:db8::10",
+						"hook up home →backup",
+					},
+					active: "backup",
+				},
+			},
+		},
+		{
+			name: "an up onto the vacated WAN flushes nothing",
+			steps: []step{
+				{name: "gateways cached", do: cachedGateways},
+				{
+					name: "primary gains carrier",
+					do:   func(h *harness) { h.Link(carrier("eth0", true)) },
+					want: []string{
+						"route home v4 eth0 via 192.0.2.1",
+						"route home v6 eth0 via 2001:db8::1",
+						"hook up home →primary",
+					},
+					active: "primary",
+				},
+				{
+					name:   "primary loses carrier",
+					do:     func(h *harness) { h.Link(carrier("eth0", false)) },
+					want:   []string{"hook down home primary→"},
+					active: "",
+				},
+				{
+					name: "primary regains carrier: its flows never moved",
+					do:   func(h *harness) { h.Link(carrier("eth0", true)) },
+					want: []string{
+						"route home v4 eth0 via 192.0.2.1",
+						"route home v6 eth0 via 2001:db8::1",
+						"hook up home →primary",
+					},
+					active: "primary",
+				},
+				{
+					name:   "primary loses carrier again",
+					do:     func(h *harness) { h.Link(carrier("eth0", false)) },
+					want:   []string{"hook down home primary→"},
+					active: "",
+				},
+				{
+					name: "backup gains carrier: up flushes primary once",
+					do:   func(h *harness) { h.Link(carrier("wwan0", true)) },
+					want: []string{
+						"route home v4 wwan0 via 198.51.100.1",
+						"route home v6 wwan0 via 2001:db8:1::1",
+						"flush v4 192.0.2.10",
+						"flush v6 2001:db8::10",
+						"hook up home →backup",
+					},
+					active: "backup",
+				},
+			},
+		},
+		{
+			// The up back onto primary consumes the vacated WAN, so the
+			// later switch flushes primary once, as any switch does.
+			name: "a switch after recovering onto the vacated WAN flushes once",
+			steps: []step{
+				{name: "gateways cached", do: cachedGateways},
+				{
+					name: "primary gains carrier",
+					do:   func(h *harness) { h.Link(carrier("eth0", true)) },
+					want: []string{
+						"route home v4 eth0 via 192.0.2.1",
+						"route home v6 eth0 via 2001:db8::1",
+						"hook up home →primary",
+					},
+					active: "primary",
+				},
+				{
+					name:   "primary loses carrier",
+					do:     func(h *harness) { h.Link(carrier("eth0", false)) },
+					want:   []string{"hook down home primary→"},
+					active: "",
+				},
+				{
+					name: "primary regains carrier",
+					do:   func(h *harness) { h.Link(carrier("eth0", true)) },
+					want: []string{
+						"route home v4 eth0 via 192.0.2.1",
+						"route home v6 eth0 via 2001:db8::1",
+						"hook up home →primary",
+					},
+					active: "primary",
+				},
+				{
+					name:   "backup gains carrier: primary stays",
+					do:     func(h *harness) { h.Link(carrier("wwan0", true)) },
+					active: "primary",
+				},
+				{
+					name: "primary loses carrier: the switch flushes primary once",
+					do:   func(h *harness) { h.Link(carrier("eth0", false)) },
+					want: []string{
+						"route home v4 wwan0 via 198.51.100.1",
+						"route home v6 wwan0 via 2001:db8:1::1",
+						"flush v4 192.0.2.10",
+						"flush v6 2001:db8::10",
+						"hook switch home primary→backup",
+					},
+					active: "backup",
+				},
 			},
 		},
 		{

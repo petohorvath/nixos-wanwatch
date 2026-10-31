@@ -116,7 +116,7 @@ func (h *hysteresis) observe(observedHealthy bool) bool {
 
 A Family stays uncooked (`family.cooked = false`) until its first full Window. `combineFamilies` counts an uncooked Family as healthy, so carrier-up alone makes the WAN healthy and produces an initial Decision instead of publishing no Selection while Samples accumulate.
 
-When the Window fills (`FamilyStats.WindowFilled`), `hysteresis.seed` adopts the measured Health directly, and later results go through `observe`. Waiting for a full Window prevents one lost first Sample from seeding the WAN unhealthy and producing a spurious down/up Decision pair. The cold-start invariant is specified in [`specs/failover.md`](./specs/failover.md#cold-start-invariant).
+When the Window fills (`FamilyStats.WindowFilled`), `hysteresis.seed` adopts the measured Health directly, and later results go through `observe`. The seed's verdict uses the healthy row of the Stage 1 table, because the uncooked Family already counted as healthy, so a Window between the bands keeps a WAN that carrier made healthy. Waiting for a full Window prevents one lost first Sample from seeding the WAN unhealthy and producing a spurious down/up Decision pair. The cold-start invariant is specified in [`specs/failover.md`](./specs/failover.md#cold-start-invariant).
 
 ### Carrier fast-track
 

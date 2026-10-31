@@ -352,7 +352,8 @@ func TestColdStart(t *testing.T) {
 // TestThresholdBand pins the two-threshold band-pass (loss 10..20 %,
 // RTT 100..200 ms here): Down bounds trip a healthy Family, Up bounds
 // must both clear for an unhealthy one, and in-band values hold. The
-// first full Window starts from unhealthy, so it must clear Up.
+// first full Window seeds with the Down bounds, as the Family voted
+// healthy before it (TestSeedBand).
 func TestThresholdBand(t *testing.T) {
 	t.Parallel()
 	v4 := probe.FamilyV4
@@ -360,7 +361,9 @@ func TestThresholdBand(t *testing.T) {
 	w := New(wans(wanCfg("primary", "eth0", 1, 1, v4)), metrics.New())
 	replay(t, w, []step{
 		{event: up("eth0"), change: flipped("primary"), healthy: h(true)},
-		{event: window(t, "primary", v4, 15, 10), change: flipped("primary"), healthy: h(false)},
+		{event: window(t, "primary", v4, 15, 10), change: republish, healthy: h(true)},
+		{event: window(t, "primary", v4, 20, 10), change: flipped("primary"), healthy: h(false)},
+		{event: window(t, "primary", v4, 15, 10), change: noChange, healthy: h(false)},
 		{event: window(t, "primary", v4, 10, 100), change: flipped("primary"), healthy: h(true)},
 		{event: window(t, "primary", v4, 15, 10), change: noChange, healthy: h(true)},
 		{event: window(t, "primary", v4, 0, 199), change: noChange, healthy: h(true)},
@@ -373,17 +376,55 @@ func TestThresholdBand(t *testing.T) {
 	})
 }
 
+// TestSeedBand pins which band seeds Health: the first full Window
+// meets the failure band (loss below 20 %, RTT below 200 ms here), the
+// band of the healthy vote the Family cast before its Window filled.
+// A WAN with carrier is Selected on that vote, so a seed between the
+// two bands keeps it up instead of switching away at boot.
+func TestSeedBand(t *testing.T) {
+	t.Parallel()
+	v4 := probe.FamilyV4
+	for _, tc := range []struct {
+		name    string
+		lossPct int
+		rttMs   uint64
+		healthy bool
+	}{
+		{"between the bands", 15, 150, true},
+		{"loss just below lossPctDown", 19, 10, true},
+		{"loss at lossPctDown", 20, 10, false},
+		{"RTT just below rttMsDown", 0, 199, true},
+		{"RTT at rttMsDown", 0, 200, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := New(wans(wanCfg("primary", "eth0", 1, 1, v4)), metrics.New())
+			// The seed is the first cooked verdict, so it republishes
+			// even when Health holds.
+			change := republish
+			if !tc.healthy {
+				change = flipped("primary")
+			}
+			replay(t, w, []step{
+				{event: up("eth0"), change: flipped("primary"), healthy: map[string]bool{"primary": true}},
+				{event: window(t, "primary", v4, tc.lossPct, tc.rttMs), change: change, healthy: map[string]bool{"primary": tc.healthy}},
+			})
+		})
+	}
+}
+
 // healthAfter returns the Health of a fresh v4 WAN with thresholds th
 // and a Hysteresis of one cycle each way, after carrier comes up and
-// it folds results in order. The first full Window starts from
-// unhealthy, so it meets the Up thresholds; later ones from the last
-// verdict.
+// it folds results in order. A fully lost Window seeds the Family
+// unhealthy first, so the first result meets the Up thresholds and
+// later ones the band of the last verdict.
 func healthAfter(tb testing.TB, th config.Thresholds, results ...event) bool {
 	tb.Helper()
 	cfg := wanCfg("primary", "eth0", 1, 1, probe.FamilyV4)
 	cfg.Probe.Thresholds = th
 	w := New(wans(cfg), metrics.New())
 	w.Link(*up("eth0").link)
+	w.Probe(*lost(tb, "primary", probe.FamilyV4).probe)
 	for _, r := range results {
 		w.Probe(*r.probe)
 	}

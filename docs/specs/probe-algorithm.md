@@ -134,7 +134,7 @@ The thresholds compare without rounding: the exact loss against `pct / 100`, and
 
 The thresholds treat a statistic without data as passing: a full Window in which no Sample succeeded has no RTT, and its loss of `1` decides the verdict.
 
-The daemon's cold-start gate keys on `WindowFilled`: Hysteresis seeds only once every per-Target Window is full. Otherwise a Lost first Sample, sent before the route to the Target has converged, would seed the verdict unhealthy and cause a spurious down→up Decision pair once Probes catch up. See [Cold-start invariant](./failover.md#cold-start-invariant).
+The daemon's cold-start gate keys on `WindowFilled`: Hysteresis seeds only once every per-Target Window is full, from a verdict against the failure thresholds (`lossPctDown`, `rttMsDown`). Otherwise a Lost first Sample, sent before the route to the Target has converged, would seed the verdict unhealthy and cause a spurious down→up Decision pair once Probes catch up. See [Cold-start invariant](./failover.md#cold-start-invariant).
 
 ## Non-features
 

@@ -8,7 +8,7 @@ A WAN is an egress interface plus a Probe: the Targets it pings, the interval, a
 
 A Group holds WANs as Members, keyed by WAN name, each with a `priority`. The `primary-backup` Strategy selects the healthy Member with the lowest `priority` value, breaking ties by WAN name.
 
-Each Group owns an fwmark and a routing table. At startup, the daemon installs `ip rule` entries that send marked packets to the table. When the Selection moves to a Member, the daemon writes that Member's default route into the table; on a switch between Members, it also flushes conntrack entries for the vacated WAN. It then publishes the new State and runs Hooks.
+Each Group owns an fwmark and a routing table. At startup, the daemon installs `ip rule` entries that send marked packets to the table. When the Selection moves to a Member, the daemon writes that Member's default route into the table; when traffic moves to another WAN, it also flushes conntrack entries for the vacated WAN. It then publishes the new State and runs Hooks.
 
 Only packets that carry a Group's mark follow its routing table. The daemon leaves the main table alone, so a firewall rule must mark the traffic to steer; see [Steer traffic into a Group](#steer-traffic-into-a-group).
 
@@ -223,8 +223,8 @@ The daemon runs as the `wanwatch` user and group, which the module creates. Its 
 - The daemon does not reload its configuration; `nixos-rebuild switch` restarts the service whenever the rendered configuration changes ([ADR-0006](./docs/adr/0006-restart-only-reconfiguration.md)). During the restart, `/run/wanwatch`, with `state.json` and the metrics socket, is briefly absent.
 - When no Member of a Group is healthy, the daemon leaves the Group's last default route in place.
 - When the Selection moves to a WAN that serves fewer Families, the dropped Family keeps its previous route.
-- The conntrack flush on a switch blocks the daemon's other work while it runs. On Linux 6.12 and later the kernel deletes the vacated WAN's IPv4 entries in one request, which took about 0.2 s for a full table on a fast x86 server. On older kernels, and for IPv6 on every kernel, the daemon reads the table and deletes each matching entry, which can take seconds on a large table.
-- On a switch, the daemon flushes conntrack entries by the vacated WAN's addresses. When several Groups share that WAN, the flush also resets the flows of the Groups that still route through it; those flows reconnect through the same WAN.
+- The conntrack flush that runs when traffic moves to another WAN blocks the daemon's other work while it runs. On Linux 6.12 and later the kernel deletes the vacated WAN's IPv4 entries in one request, which took about 0.2 s for a full table on a fast x86 server. On older kernels, and for IPv6 on every kernel, the daemon reads the table and deletes each matching entry, which can take seconds on a large table.
+- When traffic moves to another WAN, the daemon flushes conntrack entries by the vacated WAN's addresses. When several Groups share that WAN, the flush also resets the flows of the Groups that still route through it; those flows reconnect through the same WAN.
 - Gateway discovery reads a default route that uses a next-hop object (`nhid`) only through the kernel's compatibility expansion. With `net.ipv4.nexthop_compat_mode = 0`, such a route gives its WAN no Gateway, and removing a member from a next-hop group does not update the Gateway until the next route change on the interface.
 - On hosts that run systemd-networkd, the module defaults `ManageForeignRoutingPolicyRules` and `ManageForeignRoutes` to `false`, so networkd stops removing routes and rules it did not create.
 

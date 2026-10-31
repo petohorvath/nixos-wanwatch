@@ -113,7 +113,11 @@ func (w *Wans) Probe(r probe.ProbeResult) Change {
 // Hysteresis of fs and reports the resulting Change.
 func (ws *wan) fold(fs *family, stats probe.FamilyStats) Change {
 	prev := ws.healthy()
-	raw := evaluateThresholds(fs.healthy, stats, ws.cfg.Probe.Thresholds)
+	// An uncooked Family votes healthy, so its seed meets the failure
+	// band, as a healthy Family's Window does: a WAN Selected on that
+	// vote goes down at the seed only when it would also go down
+	// while up.
+	raw := evaluateThresholds(fs.healthy || !fs.cooked, stats, ws.cfg.Probe.Thresholds)
 	var stable bool
 	if fs.cooked {
 		stable = fs.hyst.observe(raw)

@@ -72,6 +72,10 @@ _Avoid_: router, next-hop (as a configured value)
 Mutating kernel routing and conntrack state to carry out a Decision, or to keep the committed Selection's routes in place.
 _Avoid_: commit, sync, Decision
 
+**Vacated WAN**:
+The WAN a Group's traffic leaves when its Selection moves off it: the old Selection of a switch, or the WAN a `down` left in place, which traffic leaves at the next `up` onto another WAN. Its conntrack entries are flushed when traffic moves.
+_Avoid_: old WAN, previous WAN
+
 **Repair**:
 An Apply that rewrites every Family of the committed Selection's routes after a refresh of them failed. It is not a Decision.
 _Avoid_: reconcile, resync
